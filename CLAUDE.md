@@ -12,8 +12,10 @@ Every UI change MUST look good and work well on mobile before it is considered d
 - **Verification step (required):** after any UI change, view every changed screen at a
   ~390px viewport (browser devtools device mode, a headless-browser screenshot, or a real
   phone) — and re-check desktop — before claiming the work is complete.
-- Tablets (< 1024px) share the mobile layouts; desktop layouts apply from the `lg`
-  breakpoint up. Do not introduce a third layout tier.
+- Two breakpoints govern the layout: the floor switches from vertical path to the 2D
+  desktop floor at `lg` (1024px); overlays (room panels, coach) switch from full-screen/
+  docked to floating at `sm` (640px). Tablets therefore get the vertical path with
+  floating overlays. Do not add further layout tiers.
 
 ## Responsive architecture (how mobile is implemented here)
 

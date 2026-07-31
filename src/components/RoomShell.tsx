@@ -48,6 +48,7 @@ export function RoomShell({
           <button
             type="button"
             onClick={onClose}
+            aria-label="Back to the floor"
             className="flex shrink-0 items-center gap-2 rounded-xl border-2 border-ink/20 bg-parchment p-3 text-sm font-semibold hover:border-ink/50 sm:px-3 sm:py-2">
 
             <XIcon className="h-5 w-5 sm:h-4 sm:w-4" />
