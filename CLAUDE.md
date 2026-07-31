@@ -30,3 +30,9 @@ Every UI change MUST look good and work well on mobile before it is considered d
 - Styling is Tailwind mobile-first: base classes are the mobile styles; desktop is layered
   on with `sm:`/`lg:` variants. When fixing mobile, don't silently change desktop —
   re-assert desktop values at the appropriate breakpoint.
+
+## Documented Solutions
+
+`docs/solutions/` — documented solutions to past problems (bugs, patterns), organized
+by category with YAML frontmatter (`module`, `tags`, `problem_type`). Relevant when
+implementing or debugging in documented areas.
