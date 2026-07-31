@@ -21,38 +21,42 @@ export function RoomShell({
   const steps = STEPS.filter((s) => s.room === roomId);
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-ink/50 p-3 sm:p-6">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-ink/50 p-0 sm:p-6">
       <motion.div
         initial={{ opacity: 0, scale: 0.97, y: 16 }}
         animate={{ opacity: 1, scale: 1, y: 0 }}
         role="dialog"
         aria-modal="true"
         aria-label={room.name}
-        className="flex h-full w-full max-w-6xl flex-col overflow-hidden rounded-3xl border-2 border-ink/15 bg-paper shadow-pod">
+        className="flex h-full w-full max-w-6xl flex-col overflow-hidden rounded-none border-2 border-ink/15 bg-paper shadow-pod sm:rounded-3xl">
         
         <header
-          className="flex items-center justify-between gap-4 border-b-2 border-ink/10 px-6 py-4"
+          className="flex items-center justify-between gap-3 border-b-2 border-ink/10 px-4 py-3 sm:gap-4 sm:px-6 sm:py-4"
           style={{ backgroundColor: phase.tint }}>
-          
-          <div className="flex items-center gap-3">
-            <span className="text-3xl" aria-hidden>
+
+          <div className="flex min-w-0 items-center gap-3">
+            <span className="text-2xl sm:text-3xl" aria-hidden>
               {room.sign}
             </span>
-            <div>
-              <h2 className="font-display text-2xl font-black leading-tight">{room.name}</h2>
-              <p className="text-xs text-graphite">{room.tagline}</p>
+            <div className="min-w-0">
+              <h2 className="truncate font-display text-xl font-black leading-tight sm:text-2xl">
+                {room.name}
+              </h2>
+              <p className="truncate text-xs text-graphite">{room.tagline}</p>
             </div>
           </div>
           <button
             type="button"
             onClick={onClose}
-            className="flex items-center gap-2 rounded-xl border-2 border-ink/20 bg-parchment px-3 py-2 text-sm font-semibold hover:border-ink/50">
-            
-            <XIcon className="h-4 w-4" /> Back to the floor
+            aria-label="Back to the floor"
+            className="flex shrink-0 items-center gap-2 rounded-xl border-2 border-ink/20 bg-parchment p-3 text-sm font-semibold hover:border-ink/50 sm:px-3 sm:py-2">
+
+            <XIcon className="h-5 w-5 sm:h-4 sm:w-4" />
+            <span className="hidden sm:inline">Back to the floor</span>
           </button>
         </header>
 
-        <div className="fp-scroll grid flex-1 gap-6 overflow-y-auto p-6 lg:grid-cols-[1.15fr_1fr]">
+        <div className="fp-scroll grid flex-1 gap-5 overflow-y-auto p-4 sm:gap-6 sm:p-6 lg:grid-cols-[1.15fr_1fr]">
           <div className="space-y-5">{children}</div>
           <aside className="space-y-4">
             <h3 className="font-mono text-[11px] uppercase tracking-wider text-graphite">

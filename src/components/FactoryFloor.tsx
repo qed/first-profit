@@ -1,18 +1,38 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { motion } from 'framer-motion';
-import { CheckIcon, LockIcon } from 'lucide-react';
 import { ROOMS, doorOf, roomById } from '../data/rooms';
 import { phaseById, type RoomId } from '../data/path';
 import { useGame } from '../state/GameContext';
 import { Avatar } from './Avatar';
+import { MobilePath } from './MobilePath';
+import { PodCardContent } from './PodCardContent';
 
-export function FactoryFloor({
-  walkTo,
-  onArrived
+const DESKTOP_QUERY = '(min-width: 1024px)';
 
+function useIsDesktop() {
+  const [isDesktop, setIsDesktop] = useState(() => window.matchMedia(DESKTOP_QUERY).matches);
+  useEffect(() => {
+    const media = window.matchMedia(DESKTOP_QUERY);
+    const onChange = () => setIsDesktop(media.matches);
+    media.addEventListener('change', onChange);
+    return () => media.removeEventListener('change', onChange);
+  }, []);
+  return isDesktop;
+}
 
+export interface FloorProps {
+  walkTo: RoomId | null;
+  onArrived: (room: RoomId) => void;
+  /** Route pod taps through the parent's walkTo state so an in-flight walk
+   * survives the desktop/mobile variant swapping at the lg breakpoint. */
+  onWalk: (room: RoomId) => void;
+}
 
-}: {walkTo: RoomId | null;onArrived: (room: RoomId) => void;}) {
+export function FactoryFloor(props: FloorProps) {
+  return useIsDesktop() ? <DesktopFloor {...props} /> : <MobilePath {...props} />;
+}
+
+function DesktopFloor({ walkTo, onArrived, onWalk }: FloorProps) {
   const { company, isRoomUnlocked, roomProgress, nextStep } = useGame();
   const [pos, setPos] = useState({ x: 50, y: 52 });
   const timer = useRef<number | null>(null);
@@ -68,7 +88,7 @@ export function FactoryFloor({
             disabled={!unlocked}
             onClick={(e) => {
               e.stopPropagation();
-              walk(room.id, true);
+              onWalk(room.id);
             }}
             whileHover={unlocked ? { y: -4 } : undefined}
             className={[
@@ -84,47 +104,14 @@ export function FactoryFloor({
               width: `${room.w}%`,
               height: `${room.h}%`
             }}>
-            
-            <span
-              className="absolute -top-3 left-3 rounded-full px-2.5 py-1 font-mono text-[10px] font-bold uppercase tracking-wider text-white"
-              style={{ backgroundColor: unlocked ? phase.color : '#9A9384' }}>
-              
-              {unlocked ? `Phase ${phase.index}` : 'Locked'}
-            </span>
 
-            <span className="flex items-start justify-between gap-2">
-              <span className="text-2xl" aria-hidden>
-                {unlocked ? room.sign : '🔒'}
-              </span>
-              {done === total && total > 0 ?
-              <span className="flex h-6 w-6 items-center justify-center rounded-full bg-go text-white">
-                  <CheckIcon className="h-3.5 w-3.5" strokeWidth={3} />
-                </span> :
-              null}
-              {!unlocked ? <LockIcon className="h-4 w-4 text-graphite" /> : null}
-            </span>
+            <PodCardContent
+              room={room}
+              unlocked={unlocked}
+              done={done}
+              total={total}
+              phase={phase} />
 
-            <span className="block">
-              <span className="block font-display text-[15px] font-bold leading-tight">
-                {room.name}
-              </span>
-              <span className="mt-0.5 block text-[11px] leading-snug text-graphite">
-                {room.tagline}
-              </span>
-              {total > 0 ?
-              <span className="mt-2 flex items-center gap-1" aria-hidden>
-                  {Array.from({ length: total }).map((_, i) =>
-                <span
-                  key={i}
-                  className="h-1.5 flex-1 rounded-full"
-                  style={{
-                    backgroundColor: i < done ? phase.color : 'rgba(26,23,18,0.12)'
-                  }} />
-
-                )}
-                </span> :
-              null}
-            </span>
           </motion.button>);
 
       })}
