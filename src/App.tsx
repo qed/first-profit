@@ -42,7 +42,7 @@ function Factory() {
     <main className="flex h-full min-h-screen w-full flex-col gap-4 bg-paper p-4 sm:p-6">
       <Hud />
       <div className="min-h-[34rem] flex-1">
-        <FactoryFloor walkTo={walkTo} onArrived={arrive} />
+        <FactoryFloor walkTo={walkTo} onArrived={arrive} onWalk={(room) => setWalkTo(room)} />
       </div>
 
       <NextStepCoach onGo={(room) => setWalkTo(room as RoomId)} />

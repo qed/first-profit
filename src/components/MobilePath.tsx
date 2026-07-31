@@ -1,20 +1,18 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { motion } from 'framer-motion';
-import { CheckIcon, LockIcon } from 'lucide-react';
 import { ROOMS } from '../data/rooms';
 import { phaseById, type RoomId } from '../data/path';
 import { useGame } from '../state/GameContext';
 import { AvatarSprite } from './Avatar';
+import { PodCardContent } from './PodCardContent';
+import type { FloorProps } from './FactoryFloor';
 
 /**
  * Below the `lg` breakpoint the 2D factory floor becomes this scrollable
  * vertical path: the same pods in phase order as full-width cards, with the
  * founder avatar hopping to whichever card is current.
  */
-export function MobilePath({
-  walkTo,
-  onArrived
-}: {walkTo: RoomId | null;onArrived: (room: RoomId) => void;}) {
+export function MobilePath({ walkTo, onArrived, onWalk }: FloorProps) {
   const { company, isRoomUnlocked, roomProgress, nextStep } = useGame();
   const [current, setCurrent] = useState<RoomId>(() => nextStep?.room ?? 'idea');
   const timer = useRef<number | null>(null);
@@ -76,7 +74,7 @@ export function MobilePath({
               <motion.button
                 type="button"
                 disabled={!unlocked}
-                onClick={() => walk(room.id, true)}
+                onClick={() => onWalk(room.id)}
                 whileTap={unlocked ? { scale: 0.98 } : undefined}
                 className={[
                 'relative flex min-h-[5.5rem] w-full flex-col justify-between gap-2 rounded-2xl border-2 p-4 pt-5 text-left transition-shadow',
@@ -86,46 +84,13 @@ export function MobilePath({
                 isNext ? 'ring-4 ring-go/30' : ''].
                 join(' ')}>
 
-                <span
-                  className="absolute -top-3 left-3 rounded-full px-2.5 py-1 font-mono text-[10px] font-bold uppercase tracking-wider text-white"
-                  style={{ backgroundColor: unlocked ? phase.color : '#9A9384' }}>
+                <PodCardContent
+                  room={room}
+                  unlocked={unlocked}
+                  done={done}
+                  total={total}
+                  phase={phase} />
 
-                  {unlocked ? `Phase ${phase.index}` : 'Locked'}
-                </span>
-
-                <span className="flex items-start justify-between gap-2">
-                  <span className="text-2xl" aria-hidden>
-                    {unlocked ? room.sign : '🔒'}
-                  </span>
-                  {done === total && total > 0 ?
-                  <span className="flex h-6 w-6 items-center justify-center rounded-full bg-go text-white">
-                      <CheckIcon className="h-3.5 w-3.5" strokeWidth={3} />
-                    </span> :
-                  null}
-                  {!unlocked ? <LockIcon className="h-4 w-4 text-graphite" /> : null}
-                </span>
-
-                <span className="block">
-                  <span className="block font-display text-[15px] font-bold leading-tight">
-                    {room.name}
-                  </span>
-                  <span className="mt-0.5 block text-[11px] leading-snug text-graphite">
-                    {room.tagline}
-                  </span>
-                  {total > 0 ?
-                  <span className="mt-2 flex items-center gap-1" aria-hidden>
-                      {Array.from({ length: total }).map((_, j) =>
-                    <span
-                      key={j}
-                      className="h-1.5 flex-1 rounded-full"
-                      style={{
-                        backgroundColor: j < done ? phase.color : 'rgba(26,23,18,0.12)'
-                      }} />
-
-                    )}
-                    </span> :
-                  null}
-                </span>
               </motion.button>
             </li>);
 
