@@ -66,12 +66,12 @@ function Factory() {
             <motion.div
             initial={{ y: 18, scale: 0.97 }}
             animate={{ y: 0, scale: 1 }}
-            className="w-full max-w-lg rounded-3xl border-2 border-ink/15 bg-parchment p-7 shadow-pod">
+            className="max-h-[90dvh] w-full max-w-lg overflow-y-auto rounded-3xl border-2 border-ink/15 bg-parchment p-5 shadow-pod sm:p-7">
             
               <p className="font-mono text-[10px] uppercase tracking-[0.3em] text-ember">
                 First Profit · Home Study
               </p>
-              <h1 className="mt-2 font-display text-3xl font-black leading-tight">
+              <h1 className="mt-2 font-display text-2xl font-black leading-tight sm:text-3xl">
                 Welcome to the factory floor.
               </h1>
               <p className="mt-3 text-sm leading-relaxed text-graphite">

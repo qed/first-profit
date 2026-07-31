@@ -26,7 +26,9 @@ export function Hud() {
         </div>
       </div>
 
-      <nav aria-label="The Path" className="flex items-center gap-1.5">
+      <nav
+        aria-label="The Path"
+        className="order-3 flex w-full items-center justify-between gap-1 lg:order-none lg:w-auto lg:justify-start lg:gap-1.5">
         {PHASES.map((phase) => {
           const { done, total } = phaseProgress(phase.id);
           const isActive = phase.id === currentPhase;
@@ -35,7 +37,7 @@ export function Hud() {
             <div
               key={phase.id}
               className={[
-              'flex items-center gap-2 rounded-xl border-2 px-2.5 py-1.5',
+              'flex items-center gap-1.5 rounded-xl border-2 px-1.5 py-1.5 lg:gap-2 lg:px-2.5',
               isActive ? 'border-ink/25' : 'border-transparent'].
               join(' ')}
               style={{ backgroundColor: isActive || isPassed ? phase.tint : 'transparent' }}

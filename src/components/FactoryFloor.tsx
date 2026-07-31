@@ -5,8 +5,26 @@ import { ROOMS, doorOf, roomById } from '../data/rooms';
 import { phaseById, type RoomId } from '../data/path';
 import { useGame } from '../state/GameContext';
 import { Avatar } from './Avatar';
+import { MobilePath } from './MobilePath';
 
-export function FactoryFloor({
+const DESKTOP_QUERY = '(min-width: 1024px)';
+
+function useIsDesktop() {
+  const [isDesktop, setIsDesktop] = useState(() => window.matchMedia(DESKTOP_QUERY).matches);
+  useEffect(() => {
+    const media = window.matchMedia(DESKTOP_QUERY);
+    const onChange = () => setIsDesktop(media.matches);
+    media.addEventListener('change', onChange);
+    return () => media.removeEventListener('change', onChange);
+  }, []);
+  return isDesktop;
+}
+
+export function FactoryFloor(props: {walkTo: RoomId | null;onArrived: (room: RoomId) => void;}) {
+  return useIsDesktop() ? <DesktopFloor {...props} /> : <MobilePath {...props} />;
+}
+
+function DesktopFloor({
   walkTo,
   onArrived
 

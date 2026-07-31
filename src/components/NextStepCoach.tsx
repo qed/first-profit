@@ -11,7 +11,7 @@ export function NextStepCoach({ onGo }: {onGo: (room: string) => void;}) {
 
   if (!nextStep) {
     return (
-      <div className="fixed bottom-6 right-6 z-40 flex items-center gap-3 rounded-2xl border-2 border-go bg-parchment px-5 py-4 shadow-pod">
+      <div className="fixed bottom-3 left-3 right-3 z-40 flex items-center gap-3 rounded-2xl border-2 border-go bg-parchment px-5 py-4 shadow-pod sm:bottom-6 sm:left-auto sm:right-6">
         <PartyPopperIcon className="h-6 w-6 text-go" />
         <div>
           <p className="font-display text-base font-bold">The Path is complete.</p>
@@ -26,7 +26,7 @@ export function NextStepCoach({ onGo }: {onGo: (room: string) => void;}) {
   const { done, total } = stepProgress(nextStep.id);
 
   return (
-    <div className="fixed bottom-6 right-6 z-40 w-[min(92vw,26rem)]">
+    <div className="fixed bottom-3 left-3 right-3 z-40 sm:bottom-6 sm:left-auto sm:right-6 sm:w-[min(92vw,26rem)]">
       <AnimatePresence initial={false}>
         {open ?
         <motion.div
@@ -75,7 +75,7 @@ export function NextStepCoach({ onGo }: {onGo: (room: string) => void;}) {
           type="button"
           whileTap={{ scale: 0.97 }}
           onClick={() => onGo(nextStep.room)}
-          className="flex flex-1 items-center justify-between gap-3 rounded-2xl bg-go px-6 py-5 text-left text-white shadow-[0_8px_0_#166534] transition-transform hover:-translate-y-0.5 focus:outline-none focus-visible:ring-4 focus-visible:ring-go/40">
+          className="flex flex-1 items-center justify-between gap-3 rounded-2xl bg-go px-5 py-4 text-left text-white shadow-[0_8px_0_#166534] transition-transform hover:-translate-y-0.5 focus:outline-none focus-visible:ring-4 focus-visible:ring-go/40 sm:px-6 sm:py-5">
           
           <span>
             <span className="block font-display text-2xl font-black leading-none">Next Step</span>
