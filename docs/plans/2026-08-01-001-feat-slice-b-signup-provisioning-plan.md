@@ -4,12 +4,15 @@ type: feat
 status: active
 date: 2026-08-01
 origin: docs/brainstorms/2026-07-31-fpv2-the120-accounts-requirements.md
+deepened: 2026-08-01
 ---
 
 # feat: First Profit Slice B — Start Building signup + child provisioning
 
 **Target repos:** `[T120]` = `120-The120` (system of record), `[FP]` =
-`first-profit` (the SPA). Slice A shipped to `main` in both.
+`first-profit` (the SPA). Slice A shipped to `main` in both. **Scope: full**
+(real Workspace provisioning + full consent now), with the document-review gaps
+fixed (see Plan Revisions).
 
 ## Overview
 
@@ -20,302 +23,325 @@ credential OR requests a provisioned Google Workspace address, verifies their ow
 email in-flow, and passes a **verifiable parental-consent** step — after which the
 child can log in and play. Payments stay mock (Phase 2/3 later).
 
-## Brainstorm build decisions (2026-08-01, origin doc)
+## Brainstorm build decisions (2026-08-01)
 
-- **Real Google Workspace provisioning, end to end** — compose The120's EXISTING
-  machinery (`provision-deps.ts` real Admin SDK calls, `funnel_student_provisioning`
-  claim + `provision_lease`, never-reissue ledger), not a stub and not a rebuild.
-  Credential-gated: `GOOGLE_WORKSPACE_SA_KEY` + Google Admin domain-wide-delegation
-  grants must be installed for the real Google call; absent the key, the machinery
-  gracefully lands claims at `pending` (identity provisioned, mailbox deferred).
+- **Real Google Workspace provisioning, end to end** — compose The120's existing
+  machinery, but the composition REQUIRES modifying `provision-deps` (see the
+  consent-adapter decision below); it is not verbatim reuse. Credential-gated on
+  `GOOGLE_WORKSPACE_SA_KEY`; the real `users.insert` stays GATED OFF for the whole
+  build (lands at `pending`) and is flipped on only for one scripted acceptance run.
 - **Full verifiable-parental-consent flow now** — a first-class, versioned consent
-  record (the net-new data model), not a bare checkbox. See Consent decision below.
-- **Guarded test families in production** — no staging DB; exercise Slice B with
-  `families.is_test=true` families on `@test.the120.invalid`, and CLOSE the gap
-  that CRM/GTM queries don't yet honor `is_test`.
+  record (net-new data model), method = email-plus + attestation (card-in-transaction
+  deferred to Phase 2/3). Legal sign-off of the text is a launch gate.
+- **Guarded test families in production** — `families.is_test=true`, determined
+  SERVER-SIDE (out-of-band allowlist, never client input), affecting CRM/GTM
+  visibility ONLY (never gating consent/verification). Close the gap that CRM reads
+  don't honor `is_test`.
+
+## Plan Revisions from document-review (2026-08-01)
+
+The review found structural/security/compliance gaps; all are folded into the
+units below. Load-bearing resolutions:
+
+1. **Cross-origin session model (was unspecified / broken).** Reused `insertChild`
+   runs under a cookie-bound same-origin `supabaseServer()` session that a
+   cross-origin SPA cannot supply. **Resolution:** after email verification the SPA
+   obtains a parent session via `signInWithPassword` (tokens returned in JSON, adopted
+   by `setSession`); the cross-origin child-mint route builds a **per-request RLS
+   client seeded with the parent's access token** (global `Authorization` header /
+   `setSession`), NOT `supabaseServer()`. `insertChild` is ADAPTED to accept a
+   token-scoped client. (Units 2, 4, 9.)
+2. **Provisioning consent gate is dead under mock payments.** `driveProvisioning`'s
+   `readAcceptedPolicyVersion` reads `deposits WHERE status='paid'` + `deposit_attempts`.
+   **Resolution:** Unit 5 MODIFIES `provision-deps` to inject a consent adapter (and
+   drive-entry gate) that reads `fp_parental_consent` instead of the deposit path.
+   Stated as a modification, not composition; sequenced after Unit 3.
+3. **Code-level launch gate (P0).** The public signup route rejects any signup not on
+   the server-side test-family allowlist while in `is_test`-only mode; lifting the
+   gate is a deliberate, separately-reviewed change. (Unit 2.)
+4. **Parent-principal RLS audit moved FIRST** (was last). A new principal's audit
+   gates its introduction. Now Unit 0 (before the migration and any parent session).
+5. **Age/jurisdiction capture** (COPPA under-13 vs 13-16, GDPR-K): capture child DOB/
+   age-band + parent-declared/IP jurisdiction at signup, stored with consent, so the
+   differentiated logic has data. (Units 1, 8.)
+6. **Consent record shape hedged for legal:** fixed columns + an extensible `jsonb`
+   evidence blob, so legal-driven field changes don't force re-collection (additive-
+   only can't cheaply revise a populated regulated table). Consent policy versions live
+   in their OWN namespace, separate from the Stripe refund policy. (Unit 1.)
+7. **Consent<->child binding:** bind consent to `(parent_id, signup_attempt_id)`;
+   child creation verifies the consent's attempt-id matches the child being minted.
+8. **R28 deletion is IMPLEMENTED + tested** (was doc-only): a service-role cleanup
+   that executes the deletion order end-to-end for a test family, incl. suspending/
+   deleting the Google mailbox. (Unit 6 build, Unit 11 run.)
+9. **Bounded mailbox burn:** real `users.insert` gated off during the build; one
+   scripted, logged acceptance run with a fixed count; test provisioning uses a
+   segregated OU where possible; a written live-provisioning acceptance protocol.
+   (Units 5, 11.)
+10. **Unit 6 edits EXISTING production CRM reads** — enumerate every families/leads
+    read, apply the exclusion via ONE shared helper, and assert real-lead counts
+    unchanged (guard the false-negative). Its own review.
+11. **Cross-repo deploy order:** [T120] backend ships first (backward-compatible,
+    unreferenced), verified live; the [FP] Landing CTA repoint (Unit 7/10) is the LAST
+    cutover, behind a flag if possible — no half-live window.
+12. **Smaller fixes:** step-token/abuse table settled before Unit 1's schema (R16);
+    `is_test` set via a post-`parents`-insert service-role UPDATE on the trigger-owned
+    `families` row; test-family email verification uses a server-side confirm restricted
+    to `is_test` rows (never a general bypass); `funnel_resume_tokens` reused only as the
+    token store/CAS + `funnel_rate_events` with a NEW non-session-minting redeem;
+    `ensurePlayerProfile` precondition (`path_student_profiles` child->user row) created
+    in Unit 4; Unit 7 refactors screens 2-5 to take navigation/profile via props (not
+    just a file move); account-enumeration `existing_account` signal accepted as a
+    documented tradeoff; correct file path is `src/state/gameCore.ts` and `signup`
+    stays out of `isLoggedInStage`.
 
 ## Requirements Trace
 
 R9 (one-sitting self-serve create), R10 (idempotent/resumable, existing-parent
-attach), R11 (in-flow parent email verification), R12 (child credential: path a
-existing-email+password, path b provision-an-address), R13 (provision timing +
-exception path), R14 (5-screen UI extends screen 2), R15 (consent gate), R16
-(rate-limited/abuse-protected provisioning + step tokens), R17 (intended CRM
-ingestion), R26 (recap email), R27 (progress digest), R28 (data rights/deletion).
+attach), R11 (in-flow parent email verification), R12 (child credential paths a/b),
+R13 (provision timing + exception), R14 (5-screen UI), R15 (consent gate), R16
+(rate-limited/abuse-protected + step tokens), R17 (CRM ingestion), R26 (recap),
+R27 (digest), R28 (data rights/deletion).
 
 ## Scope Boundaries
 
-- Payments stay mock; no real charge (so the card-in-transaction consent method is
-  NOT available yet — see Consent decision).
-- No public launch / no outside families (launch posture); Slice B is exercised by
-  guarded test families in prod.
-- Reuse The120's funnel primitives; do not fork parent/child/family creation.
-- No new Google integration code — compose the existing `provision-deps.ts`.
+- Payments stay mock (so consent method = email-plus + attestation now).
+- No public launch / no outside families — enforced by a CODE-LEVEL test-family gate,
+  not just posture.
+- Reuse The120 funnel primitives, adapting where the cross-origin/mock-payment context
+  requires (session client, consent adapter) — do not fork account/child/family create.
+- Real `users.insert` gated off for the build except one scripted acceptance run.
 
 ## Context & Research
 
-### Reuse (do not rebuild) — [T120]
+### Reuse (adapting where noted) — [T120]
 - **Parent account:** `app/lib/funnel/account.ts` `provisionOrRecognizeAccount`
-  (`admin.createUser` with `email_confirm:true`, `email_exists → existing_account`
-  never a session, inserts `parents`, `cleanupAccount` compensation).
-- **Child row (RLS-scoped):** `app/lib/funnel/children-core.ts` `insertChild`
-  (under the family's own session, never `supabaseAdmin`, cap 10).
-- **CRM ingestion:** the `on_parent_created`/`parents_families_sync` trigger owns
-  `families.parent_id` — app never writes it; `matchOrCreateLead`
-  (`app/crm/lib/lead-ingest.ts`) is select-then-branch, NEVER upsert.
-- **Child auth (path a):** `app/fp/lib/provision-rules.ts` `.invalid` scheme +
-  `validateStudentPassword` (≥10 chars) + `email_confirm:true` (type-pinned);
-  `app/api/fp/login/profile-core.ts` (the FP player-profile ensure, built for
-  Slice B to import).
-- **Provisioning (path b):** `app/lib/funnel/provision-{core,rules,deps,driver}.ts`;
-  `funnel_student_provisioning` + `provision_lease` (migrations `20260817120000`,
-  `20260818120000` fencing, `20260821120000` refund/never-reissue writer);
-  drive via `app/api/funnel/arrival/route.ts` poll + `app/api/cron/funnel-*`.
-- **Email verification:** `funnel_resume_tokens` + `resume-core.ts` (sha256
-  single-use tokens, redeem-CAS, 60-min TTL), `funnel_rate_events` DB limiter,
-  `app/lib/email.ts` (Resend), `app/fp/lib/actions/invite.ts` (unauth token
-  accept + compensation), `escapeHtml`. `app/lib/auth-mail-guard.ts` default-deny
-  for `@the120.school` (parent mail is external → passes).
-- **CORS + route/pure-core pattern:** mirror `app/api/fp/login/{route,login-rules,
-  profile-core,profile-rules}.ts` (exact-origin allowlist, OPTIONS 204, stateless
-  tokens-in-JSON, one generic failure). Cross-origin signup endpoints = route
-  handlers importing pure cores; `supabaseAdmin()` service-role, `supabaseServer()`
-  anon SSR.
-- **Test families:** `families.is_test` marker + `scripts/provision-path-family.ts`
-  (`@test.the120.invalid`, `casl_consent:false`, gitignored passwords).
+  (`admin.createUser` `email_confirm:true`, `email_exists→existing_account` never a
+  session, inserts `parents`, `cleanupAccount` compensation). Reused as-is.
+- **Child row:** `app/lib/funnel/children-core.ts` `insertChild` — ADAPTED to accept a
+  parent-token-scoped RLS client (see Revision 1). Also create the
+  `path_student_profiles` child->user row (ensurePlayerProfile precondition).
+- **CRM:** `on_parent_created`/`parents_families_sync` trigger owns `families.parent_id`;
+  `matchOrCreateLead` is select-then-branch NEVER upsert. `is_test` set by a post-insert
+  service-role UPDATE on the trigger-created family.
+- **Child auth (path a):** `.invalid` scheme + `validateStudentPassword` +
+  `email_confirm:true`; `app/api/fp/login/{profile-core,profile-rules}.ts` (built for
+  this).
+- **Provisioning (path b):** `provision-{core,rules,deps,driver}.ts` +
+  `funnel_student_provisioning` + `provision_lease` — MODIFY `provision-deps` consent
+  adapter (Revision 2); add an FP-signup drive path + re-drive cron (close the
+  arrival-only-drive gap); enumerate arrival-route enqueue responsibilities so the
+  signup path reproduces the ready-to-drive signal.
+- **Email verification:** reuse the `funnel_resume_tokens` token STORE (sha256-at-rest,
+  redeem-CAS, TTL) + `funnel_rate_events` limiter + `app/lib/email.ts` (Resend) +
+  `escapeHtml`, with a NEW redeem that verifies the inbox WITHOUT minting a session or
+  funnel-routing. `auth-mail-guard.ts` default-deny (parent mail is external → passes).
+- **CORS + pure-core pattern:** mirror `app/api/fp/login/*` (exact-origin allowlist,
+  OPTIONS 204, tokens-in-JSON, one generic failure). `supabaseAdmin()` service-role;
+  token-scoped per-request client for parent-RLS writes.
+- **Test families:** `families.is_test` + `scripts/provision-path-family.ts`
+  (`@test.the120.invalid`), server-side allowlist determination.
 
-### Reuse (do not rebuild) — [FP]
-- Screens 2-5 + primitives (`ProgressBar`, `GreenCta`, `LogoMark`, `TIER_CHIPS`,
-  `CHECKMARKS`) live in `src/screens/Onboarding.tsx` — EXTRACT to a shared module.
-- `src/App.tsx` stage machine + `src/screens/Landing.tsx` CTA (repoint to signup);
-  `src/lib/auth.ts` `loginChild`+`setSession` is the API-call template; the
-  provider's `login()` adopts a session + hydrates + routes.
-- Design tokens, no-em-dash rule, 390px mobile gate, vitest pure-core pattern.
+### Reuse (adapting) — [FP]
+- Screens 2-5 + primitives in `src/screens/Onboarding.tsx` — extract primitives AND
+  refactor the four screens to take navigation/advance + profile via props (decouple
+  from `state.ob`/`SET_OB` and the onboarding-terminal dispatches). `Stage`/`Profile`/
+  `SaveDoc` live in `src/state/gameCore.ts`; keep `signup` out of `isLoggedInStage`.
+- `src/App.tsx` stage machine; `src/screens/Landing.tsx` CTA (repoint LAST, as cutover);
+  `src/lib/auth.ts` `loginChild`+`setSession` template; provider `login()` adopts a
+  session. Design tokens, no-em-dash, 390px gate, vitest pure-core pattern.
 
-### Must-heed traps (from docs/solutions/, both repos)
-1. `admin.createUser` on a non-deliverable address REQUIRES `email_confirm:true`
-   (config.toml lies; prod has confirmations ON).
-2. `signUp()` returns NO session under real confirmations — never write the
-   `parents` row assuming a post-signUp session; `account.ts` uses `admin.createUser`
-   for exactly this reason. Consent must never be forged via unconfirmed signup.
-3. No cross-call transaction — compensate exactly what THIS call created;
-   verify aggregate invariants with a post-write read.
-4. RLS-enabled-zero-policies is only safe if the server truly bypasses PostgREST —
-   state which client (`admin` vs `server`) touches every new table; add policies
-   to match. New client-facing tables clone the `20260827120000_fp_player_tables`
-   per-command-policy + WITH CHECK + column-scoped-grant discipline.
-5. Migration lock: query the LIVE `schema_migrations` immediately before authoring
-   (file listing is not the truth); authoring-is-applying; additive-only; apply via
-   the Management API playbook; next slot ≈ `20260829120000` (verify live).
-6. Lease serializes the TAKE not the RUN — fence every write after an await on
-   `.eq("lease_owner", owner)`. Claim-before-spend (reserve the slot before the
-   priced Google call). Stamp intent (`workspace_attempted_at/_email`) BEFORE the
-   Google create so a crash-replay adopts its own mailbox (never-reissue).
-7. Consent record must bind to the EXACT policy version the client rendered —
-   client echoes the version, server refuses stale; version compare is parse-based
-   (`policyVersionAtLeast`), never string compare.
-8. Client-minted idempotency key ≠ double-submit guard (synchronous ref); a
-   guard with no callers is not a mechanism (enforce child-account invariants in
-   DB/config, not app code a public form routes around).
+### Must-heed traps (docs/solutions/)
+`admin.createUser` needs `email_confirm:true`; `signUp()` returns no session under real
+confirmations (use `admin.createUser`, never assume a post-create session); no
+cross-call transaction → compensate what THIS call created; RLS-zero-policies only safe
+if the server bypasses PostgREST (state which client per table); migration lock (live
+`schema_migrations` query, additive-only, Management API, next slot ≈ `20260829120000`
+verify live); lease serializes the take not the run (fence writes on `lease_owner`),
+claim-before-spend, stamp-intent-before-Google-create (never-reissue); consent binds to
+the exact rendered version (echo + refuse stale, parse-based compare); client idempotency
+key ≠ double-submit guard; a guard with no callers is not a mechanism.
 
 ### External best-practice
-- **Consent (COPPA):** a bare checkbox is not verifiable. COPPA governs under-13
-  (13-16 is a policy choice; GDPR-K is a separate EU track — flag for launch).
-  Strongest v1 is card-in-transaction + confirmed-consent email — but Slice B has
-  no real charge, so see the Consent decision. Store: policy version snapshot,
-  hash, method, parent-identity, timestamp, IP/UA, revocation status.
-- **Workspace Admin SDK:** service account + domain-wide delegation, `users.insert`
-  (random pw + `changePasswordAtNextLogin`, dedicated OU), async/eventual-consistency
-  (a new user isn't immediately usable — poll `users.get`), 409 = already-exists
-  (reconcile, don't re-POST), backoff on 429. The120's `provision-deps.ts` already
-  implements this shape.
+- COPPA: bare checkbox ≠ verifiable; under-13 governed (13-16 policy choice); email-plus
+  is internal-use-only and must pair with a second signal; store version+hash+method+
+  identity+ip/ua+revocation; GDPR-K separate EU track.
+- Workspace Admin SDK: SA + domain-wide delegation, `users.insert` (random pw +
+  `changePasswordAtNextLogin`, dedicated OU), async eventual-consistency (poll
+  `users.get`), 409=already-exists (reconcile), 429 backoff. Already implemented in
+  `provision-deps.ts` (credential-gated).
 
 ## Key Technical Decisions
 
-- **Consent method for Slice B = "email-plus + attestation + versioned record",
-  card-in-transaction deferred to Phase 2/3.** The strongest VPC method (a real
-  card charge) isn't available while payments are mock. Slice B builds a first-class
-  verifiable-consent artifact: the parent verifies their email (email-plus), makes
-  an explicit attestation against a versioned, hashed policy snapshot they rendered,
-  and we store method/version/hash/identity/ip/timestamp. When payments go real
-  (Phase 2/3), upgrade the method to include the card-in-transaction signal. This is
-  a defensible internal-use v1; full legal sign-off remains a launch gate (R15).
-- **Signup endpoints are cross-origin route handlers mirroring `/api/fp/login`,
-  importing pure cores; reuse funnel primitives verbatim.** No fork of account/
-  child/family creation.
-- **Consent is a first-class new table** (decoupled from the Stripe refund policy it
-  currently piggy-backs on) + gates child minting (consentVerdict-style).
-- **Provisioning composes the funnel machinery; close the stale-claim re-drive gap**
-  with an FP-signup drive path (a cron that actually drives, not only pages) so a
-  family that doesn't return still gets provisioned.
-- **Guarded test families**: tag `is_test`, and wire `is_test` exclusion into CRM/GTM
-  reads (the flagged gap) so test signups never pollute funnel metrics.
-- **New parent principal needs its own RLS reach audit** (the R20 analog): a parent
-  session HAS a `parents` row, unlike a child session — re-audit what it reaches.
+(See Plan Revisions above — each numbered resolution is a decision.) Additionally:
+- **Signup endpoints are cross-origin route handlers importing pure cores**; parent-RLS
+  writes use a per-request token-scoped client (not the cookie SSR client).
+- **Consent = first-class table**, extensible jsonb evidence, own version namespace,
+  bound to `(parent_id, signup_attempt_id)`, gates child minting, re-checks session
+  freshness at the attest step.
+- **The new parent principal is audited BEFORE it is introduced** (Unit 0).
 
 ## Open Questions
 
-### Resolved
-- Real provisioning exists (compose it) — resolved by research.
-- Consent method under mock payments — resolved (email-plus + attestation now).
-- Test data location — guarded test families in prod.
+### Resolved during planning / review
+- Real provisioning exists but needs a consent-adapter modification (Rev 2).
+- Cross-origin parent session via signInWithPassword + token-scoped client (Rev 1).
+- Consent method (email-plus + attestation), test-family determination (server-side),
+  is_test enforcement (visibility only), deploy order (backend first, CTA last).
+- Account-enumeration `existing_account` signal: accepted (industry-common), rate-limited.
 
 ### Deferred to implementation
-- Exact new-table schemas (consent record, any signup-state table) + RLS.
-- Whether parent verification reuses `funnel_resume_tokens` directly or a
-  FP-scoped sibling table.
-- The FP-signup provisioning drive cadence (extend a funnel cron vs a new one).
+- Exact schemas (consent, signup-attempt/step-token, any provisioning state addition).
+- Final rate-limit thresholds per step/IP/email.
+- Whether test provisioning writes to the production never-reissue ledger or a
+  segregated namespace (decide in Unit 5 with ops).
 
 ### Dependency / needs ops (not code)
-- `GOOGLE_WORKSPACE_SA_KEY` + Google Admin domain-wide-delegation grants must be
-  installed to verify REAL mailbox creation end to end. Build/test up to the
-  `pending`/claim boundary without it; the real Google call is verified once the
-  key is present (an ops step, like Slice A's live-account gate).
-- COPPA/GDPR-K legal sign-off of the consent text is a launch gate (R15), not a
-  build blocker.
+- `GOOGLE_WORKSPACE_SA_KEY` + domain-wide-delegation grants for the one real-provisioning
+  acceptance run.
+- Legal sign-off of the consent TEXT is a launch gate (schema is hedged via jsonb).
 
 ## Implementation Units
 
-### Phase B1 — [T120] backend (system of record)
+- [ ] **Unit 0: [T120] Parent-principal RLS reach audit (BEFORE any parent session)**
+  **Requirements:** R20-analog. **Approach:** enumerate every `to authenticated` policy /
+  grant a parent session (which HAS a `parents` row) can reach across the shared project
+  (parents/children/deposits/families/CRM/path/fw/gauntlet); confirm cross-family
+  isolation and no CRM/funnel over-reach; record accepted exposure + the required
+  policies for the new tables Unit 1 adds. **Gate:** findings must be clean before Unit 1.
+  **Test:** documented reach table + a probe with a throwaway parent session.
 
 - [ ] **Unit 1: [T120] Consent + signup-state migration**
-  **Requirements:** R15, R10, R16. **Files:** `supabase/migrations/<live-slot>_fp_signup_consent.sql`.
-  **Approach:** a first-class `fp_parental_consent` table (child_id/parent_id, policy
-  version + hash + rendered-text snapshot, method, verified-parent-identity, ip/ua,
-  timestamp, revocation) — service-role-only (RLS on, zero policies), or narrow
-  parent-scoped SELECT if the SPA reads it. Any signup-attempt/step-token table
-  (or a decision to reuse `funnel_resume_tokens`). Clone `20260827120000` RLS
-  discipline. **Query the live `schema_migrations` first.** Post-apply checks.
-  **GATE: applying this migration mutates production schema — pause and confirm.**
-  **Test:** post-apply verification (to_regclass/pg_policies/pg_constraint).
+  **Requirements:** R15, R10, R16. **Files:** `supabase/migrations/<live-slot>_fp_signup.sql`.
+  **Approach:** `fp_parental_consent` (parent_id, signup_attempt_id, child_id nullable-until-mint,
+  policy_version [own namespace], policy_hash, rendered_text snapshot, method,
+  child_dob/age_band, jurisdiction, parent_identity, ip, ua, `evidence jsonb`, revoked_at)
+  + a `fp_signup_attempts`/step-token table (or documented reuse of `funnel_resume_tokens`
+  store). RLS: service-role-only or narrow parent-scoped SELECT per Unit 0. Clone
+  `20260827120000` per-command + WITH CHECK + column-scoped-grant discipline. **Query the
+  LIVE `schema_migrations` first.** **GATE: applying mutates production schema — confirm
+  before apply.** Post-apply checks.
 
-- [ ] **Unit 2: [T120] Parent signup route + in-flow email verification**
-  **Requirements:** R9, R10, R11, R16, R17. **Files:** `app/api/fp/signup/{route.ts,
-  signup-rules.ts,signup-core.ts,__tests__/signup-rules.test.ts}`.
-  **Approach:** CORS mirror of `/api/fp/login`. `signup-core` reuses
-  `provisionOrRecognizeAccount` (parent auth + `parents`, fires CRM trigger) →
-  `email_exists` returns existing-account (SPA routes to login/attach, R10). Issue a
-  `funnel_resume_tokens`-style verification token, send via Resend (escapeHtml).
-  Verify endpoint redeems (CAS, single-use). Rate-limit via `funnel_rate_events` +
-  the login-route limiter. Idempotent/resumable (attempt row + compensation:
-  cleanupAccount on failure). Never assume a session post-create. Tag `is_test` when
-  the signup is a test family.
-  **Tests:** rules (parse/origin/validation/refusal parity); core against injected
-  db mock (new parent, existing-account, verification redeem, compensation).
+- [ ] **Unit 2: [T120] Parent signup route + email verification + launch gate**
+  **Requirements:** R9, R10, R11, R16, R17. **Files:** `app/api/fp/signup/{route,signup-rules,
+  signup-core,__tests__/signup-rules.test}.ts`. **Approach:** CORS mirror of `/api/fp/login`;
+  **code-level test-family gate** (reject non-allowlisted while is_test-only). Reuse
+  `provisionOrRecognizeAccount`; `email_exists→existing_account` (accepted enumeration
+  tradeoff, rate-limited). Issue an FP verification token (store reuse, NEW non-session
+  redeem); send via Resend (escapeHtml); for `is_test` rows, server-side confirm restricted
+  to test rows. Return parent session tokens in JSON on verified (Rev 1). Rate-limit
+  (`funnel_rate_events` + login limiter) with defined per-step/IP/email thresholds.
+  Idempotent/resumable (attempt row + `cleanupAccount` compensation). Post-insert
+  service-role `is_test` UPDATE on the trigger-created family. **Tests:** rules; core
+  (new/existing/verify/compensation/gate/is_test).
 
 - [ ] **Unit 3: [T120] Consent record + gate**
-  **Requirements:** R15. **Files:** `app/api/fp/signup/consent-{rules,core}.ts` (+ tests);
-  wire into Unit 4/5 minting.
-  **Approach:** render a versioned+hashed policy snapshot to the client; the accept
-  call echoes the version (refuse stale, `policyVersionAtLeast`); write the
-  `fp_parental_consent` record with method=email-plus+attestation, verified-parent
-  identity, ip/ua. Minting a child REQUIRES a valid consent verdict.
-  **Tests:** version-echo/refuse-stale; verdict (missing/stale/ok); record shape.
+  **Requirements:** R15. **Files:** `app/api/fp/signup/consent-{rules,core}.ts` (+ tests).
+  **Approach:** render versioned+hashed policy snapshot; accept echoes version (refuse
+  stale, `policyVersionAtLeast` per-namespace); re-check session freshness (just-verified
+  parent); write `fp_parental_consent` bound to `(parent_id, signup_attempt_id)` with
+  method/dob/jurisdiction/identity/ip/ua. Minting requires a valid verdict + attempt-id
+  match. **Tests:** echo/refuse-stale; verdict; binding; freshness.
 
-- [ ] **Unit 4: [T120] Child creation — path (a) credential + player profile**
+- [ ] **Unit 4: [T120] Child creation — path (a)**
   **Requirements:** R12(a), R9. **Files:** `app/api/fp/signup/child-core.ts` (+ tests).
-  **Approach:** under the verified parent session, `insertChild` (RLS-scoped) +
-  child auth account (`.invalid` scheme, `validateStudentPassword`,
-  `email_confirm:true`) + `ensurePlayerProfile` + save seed (reuse Slice A
-  profile-core). Gated by Unit 3 consent. Compensation on partial failure.
-  **Tests:** child+auth+profile happy path; consent-missing refusal; compensation.
+  **Approach:** using the parent-token-scoped RLS client (Rev 1): `insertChild` (adapted) +
+  child auth (`.invalid`, `validateStudentPassword`, `email_confirm:true`) + create the
+  `path_student_profiles` child->user row + `ensurePlayerProfile` + save seed. Gated by
+  Unit 3 (consent + attempt-id). Compensation on partial failure. **Tests:** happy path;
+  consent-missing refusal; precondition row created; compensation.
 
-- [ ] **Unit 5: [T120] Child provisioning — path (b) real Workspace address**
-  **Requirements:** R12(b), R13, R16. **Files:** compose `provision-{core,deps,driver}.ts`;
-  an FP-signup drive path + a re-drive cron (`app/api/cron/fp-provision` or extend
-  a funnel cron) closing the stale-claim gap; migration only if a new state column
-  is needed (else reuse `funnel_student_provisioning`).
-  **Approach:** ensure the claim (idempotent on child_id), lease-fenced writes,
-  stamp-intent-before-Google-create, claim-before-spend, real `users.insert` when
-  the key is present else graceful `pending`. Exception → `notifyOps`. Parent sees
-  a pending state; ready-notification email when the mailbox is live.
-  **Execution note:** credential-gated — verify up to `pending` without the key.
-  **Tests:** claim idempotency, lease fencing, pending-when-unconfigured,
-  exception path (mock the Google deps).
+- [ ] **Unit 5: [T120] Child provisioning — path (b), real Workspace (gated)**
+  **Requirements:** R12(b), R13, R16. **Files:** MODIFY `provision-deps` consent adapter +
+  drive gate (Rev 2); FP-signup drive path + re-drive cron; reproduce the arrival enqueue
+  signal. **Approach:** ensure claim (idempotent on child_id), lease-fenced writes,
+  stamp-intent-before-create, claim-before-spend; real `users.insert` GATED OFF (lands
+  `pending`) except the acceptance run; exception→`notifyOps`; ready-notification email.
+  **Execution note:** credential-gated; a written live-provisioning acceptance protocol
+  (one family, expected 409/429/poll, cleanup) is the ONLY real-call exercise.
+  **Tests:** claim idempotency, lease fencing, consent-adapter reads fp_parental_consent,
+  pending-when-unconfigured, exception (mock deps).
 
-- [ ] **Unit 6: [T120] Parent emails + is_test CRM exclusion**
-  **Requirements:** R26, R27, R28. **Files:** notify wiring; `app/crm/**` reads gain
-  `is_test` exclusion; recap on signup, digest cron; a documented data-deletion path
-  (R28) using the FP-aware order from the Slice A R20 doc.
-  **Approach:** reuse the Resend/notify pipeline + escapeHtml; recap email (accounts,
-  how the child logs in, reset link); low-frequency digest; wire `is_test` filters
-  into CRM/GTM queries; document the service-role deletion order.
-  **Tests:** email content (no em dashes, escaped names); is_test excluded from a CRM
-  read; digest selection.
+- [ ] **Unit 6: [T120] Parent emails + is_test CRM exclusion + R28 cleanup**
+  **Requirements:** R26, R27, R28. **Approach:** recap + digest via Resend/notify (escapeHtml,
+  no em dashes); **enumerate every CRM/GTM families/leads read, apply exclusion via ONE
+  shared helper, assert real-lead counts unchanged** (own review). Implement + test a
+  service-role R28 cleanup executing the deletion order (ledger→saves→profile→child→parent)
+  incl. Workspace suspend/delete. **Tests:** email content; is_test excluded + real counts
+  unchanged; cleanup runs end-to-end on a test family; digest selection.
 
-### Phase B2 — [FP] signup UI
+- [ ] **Unit 7: [FP] signup stage + shared-screen refactor**
+  **Approach:** add `"signup"` to `Stage` (`src/state/gameCore.ts`), keep out of
+  `isLoggedInStage`; extract pure primitives AND refactor screens 2-5 to take navigation/
+  advance + profile via props (decouple from `state.ob`/onboarding-terminal dispatches).
+  Do NOT repoint the Landing CTA yet (cutover is last). **Tests:** stage routing; shared
+  screens render from props; existing Onboarding tests green.
 
-- [ ] **Unit 7: [FP] signup stage + shared onboarding-screen extraction**
-  **Files:** add `"signup"` to `Stage` (`gameCore.ts`); `src/App.tsx` case;
-  `src/screens/Landing.tsx` CTA repoint; extract screens 2-5 + primitives from
-  `Onboarding.tsx` into `src/screens/signup/shared.tsx` (both signup and in-app
-  onboarding import them). **Tests:** stage routing; shared screens still render;
-  existing Onboarding tests green.
+- [ ] **Unit 8: [FP] Screen 1 + child-credential + consent + age UI**
+  **Requirements:** R14, R12, R15. **Approach:** HQ parent-account form (name/email/password
+  ≥8) + guardian note; child DOB/age-band + child-credential step (existing email+password
+  OR provision toggle); consent step rendering the versioned snapshot + explicit attestation;
+  jurisdiction capture. Signup-LOCAL state only. Pure validation module (tested);
+  synchronous double-submit guard; no em dashes. **Tests:** validation; consent version
+  echoed; transitions; age/jurisdiction captured.
 
-- [ ] **Unit 8: [FP] Screen 1 (parent account) + child-credential + consent UI**
-  **Requirements:** R14, R12, R15. **Files:** `src/screens/signup/*`.
-  **Approach:** HQ parent-account form (name/email/password ≥8, validation) with the
-  guardian-consent note; the child-credential step (existing email+password OR a "my
-  kid needs an email" toggle → provision path); the consent step rendering the
-  versioned policy snapshot + explicit attestation. Keep parent/child-credential/
-  consent data in signup-LOCAL state (never the persisted Profile/save doc). Pure
-  validation module, tested. Double-submit guard (synchronous ref). No em dashes.
-  **Tests:** validation rules; consent version echoed; screen transitions.
+- [ ] **Unit 9: [FP] Email-verify wait + signup API wiring + parent session adoption**
+  **Requirements:** R9, R11. **Approach:** `src/lib/auth.ts` signup/verify/createChild
+  mirroring `loginChild`; verify wait screen; on verified obtain the parent session
+  (setSession from returned tokens) for the RLS child-mint call; on child-created adopt the
+  child session via provider `login()`. Flat `{ok:false}` failures. **Tests:** auth fns
+  (mock fetch+setSession); wait transitions.
 
-- [ ] **Unit 9: [FP] Email-verify wait UI + signup API wiring**
-  **Requirements:** R9, R11. **Files:** `src/lib/auth.ts` (signupParent/verifyEmail/
-  createChild mirroring loginChild); a verification wait screen (poll/"I clicked it").
-  **Approach:** call the Unit 2/4 routes; on child-created success, adopt the child
-  session via the provider `login()` (or route to login). Flat `{ok:false}` failure
-  convention. **Tests:** auth fns (mock fetch+setSession); wait-state transitions.
+- [ ] **Unit 10: [FP] Full flow assembly + mobile pass + CTA cutover**
+  **Approach:** assemble screen 1 → verify → child-cred → consent → screens 2-5; progress
+  bar from segment 1; 390px + desktop; no em dashes. **Repoint the Landing CTA to signup as
+  the FINAL cutover** (behind a flag if available), after [T120] backend is verified live.
+  **Tests:** full happy-path render; jsdom walk.
 
-- [ ] **Unit 10: [FP] Full flow assembly + mobile pass**
-  **Files:** the end-to-end 5-screen sequence, progress bar filling from segment 1,
-  wiring all steps. **Approach:** assemble screen 1 → verify → child-cred → consent →
-  screens 2-5 → child can play. 390px pass on every new screen + desktop; no em
-  dashes. **Tests:** full happy-path render; a jsdom walk of the sequence.
-
-### Phase B3 — hardening
-
-- [ ] **Unit 11: [T120+FP] E2E + parent-principal RLS reach audit**
-  **Approach:** run the full signup with guarded test families in prod (both paths,
-  up to the Workspace credential boundary); re-audit what a PARENT session reaches
-  across the shared project (the R20 analog — a parent HAS a `parents` row);
-  compensation/idempotency/double-submit stress; record accepted exposures + any
-  new learnings. **Test:** E2E checklist; RLS probes with a test parent session.
+- [ ] **Unit 11: [T120+FP] E2E + confirmation audit + live-provision acceptance**
+  **Approach:** full signup with guarded test families (both paths); the ONE scripted
+  real-provisioning acceptance run (fixed count, logged); run the implemented R28 cleanup;
+  confirm the Unit 0 parent-principal audit holds post-build; compensation/idempotency/
+  double-submit stress; record learnings. **Test:** E2E checklist; RLS probes; cleanup
+  verified.
 
 ## System-Wide Impact
 
-- Every parent signup fires `on_parent_created` → a `families` CRM row (intended,
-  R17) — test families MUST set `is_test` and CRM reads MUST exclude it.
-- New parent principal is a new identity shape in the shared project's threat model
-  (Slice A only had child sessions) — Unit 11 re-audits it.
-- Real Workspace provisioning burns never-reissue ledger names permanently — test
-  families still consume real addresses; acceptable per the build decision, but
-  bounded (guarded test families, not open signup).
-- Cross-repo: [T120] routes and [FP] UI must move together; PRs cross-linked.
+- Every parent signup fires `on_parent_created` → a `families` CRM row (R17); test
+  families set `is_test` (server-side) and CRM reads exclude it (shared helper, counts
+  guarded).
+- New parent principal audited FIRST (Unit 0), confirmed last (Unit 11).
+- Real provisioning burns never-reissue names permanently — bounded to one acceptance run
+  + segregated OU where possible.
+- Cross-repo: [T120] backend deploys first (unreferenced/backward-compatible); [FP] CTA
+  repoint is the last cutover — no half-live window. PRs cross-linked.
+- Unit 6 mutates EXISTING production CRM reads — treated as a production-behavior change
+  with its own review + count assertions.
 
 ## Risks & Dependencies
 
 | Risk | Mitigation |
 |------|------------|
-| Migration collides / breaks prod | live schema_migrations query, additive/idempotent, Management API, post-apply checks, GATE before apply |
-| signUp/session assumption strands a half-created parent | reuse account.ts admin.createUser + cleanupAccount compensation; no post-create session assumption |
-| Forged/stale consent | first-class versioned+hashed record, client echoes version, refuse stale, email-verified parent |
-| Provisioning double-mints / burns ledger | claim-before-spend, lease fencing, stamp-intent-before-create, idempotent on child_id |
-| Stale claims never provisioned | FP-signup re-drive cron (close the funnel gap) |
-| Test data pollutes CRM/GTM | is_test tag + wire exclusion into CRM reads |
-| Real Google call needs credentials | build/test to pending boundary; real E2E gated on GOOGLE_WORKSPACE_SA_KEY (ops) |
-| COPPA/GDPR-K exposure | defensible email-plus+attestation v1; legal sign-off is a launch gate |
-| Parent principal over-reach in shared DB | Unit 11 RLS reach audit + explicit policies on new tables |
+| Cross-origin route can't supply RLS parent session | signInWithPassword → token-scoped per-request client; adapt insertChild (Rev 1) |
+| Provisioning consent gate dead under mock payments | modify provision-deps consent adapter to read fp_parental_consent (Rev 2) |
+| Public endpoint used by non-test families | code-level test-family allowlist gate; lifting it is a separate reviewed change |
+| Parent principal over-reach in shared DB | Unit 0 audit BEFORE the principal exists; explicit new-table policies |
+| Migration breaks prod | live schema_migrations query, additive/idempotent, Management API, GATE before apply |
+| Half-created/stranded parent + fired CRM trigger | admin.createUser + cleanupAccount compensation; on_parent_created is warning-wrapped |
+| Forged/stale/replayed consent | versioned+hashed record, echo+refuse-stale, session-freshness, attempt-id binding |
+| Age/jurisdiction can't be retrofitted | capture DOB/age-band + jurisdiction at signup now |
+| Consent schema frozen before legal | fixed columns + jsonb evidence blob; own version namespace |
+| Provisioning double-mints / burns ledger | claim-before-spend, lease fencing, stamp-intent, idempotent on child_id |
+| Real Google call unverified until prod | build to pending; ONE scripted acceptance run w/ protocol + cleanup |
+| is_test not honored / real leads dropped | one shared exclusion helper; assert real-lead counts unchanged |
+| Non-atomic cross-repo deploy | backend first (unreferenced), CTA repoint last, flag if possible |
+| Test minor PII persists | implemented+tested R28 cleanup incl. Workspace suspend/delete |
+| COPPA/GDPR-K exposure | defensible v1 + captured age/jurisdiction; legal text sign-off = launch gate |
 
 ## Sources & References
-- Origin: docs/brainstorms/2026-07-31-fpv2-the120-accounts-requirements.md
-- Slice A plan + R20 doc (parent-principal audit basis, deletion order).
-- [T120] `app/lib/funnel/{account,children-core,provision-*}.ts`,
-  `app/crm/lib/lead-ingest.ts`, `app/lib/funnel/resume-core.ts`, `app/lib/email.ts`,
-  `app/api/fp/login/*`, migrations `20260817120000`/`20260818120000`/`20260827120000`,
+- Origin: docs/brainstorms/2026-07-31-fpv2-the120-accounts-requirements.md; Slice A plan + R20 doc.
+- [T120] `app/lib/funnel/{account,children-core,provision-*}.ts`, `app/crm/lib/lead-ingest.ts`,
+  `app/lib/funnel/resume-core.ts`, `app/lib/email.ts`, `app/api/fp/login/*`,
+  `app/api/funnel/arrival/route.ts`, migrations `20260817120000`/`20260818120000`/`20260827120000`,
   `supabase/MIGRATION-LOCK.md`, `scripts/provision-path-family.ts`.
-- [FP] `src/screens/Onboarding.tsx`, `src/lib/auth.ts`, `src/App.tsx`.
-- External: FTC COPPA VPC guidance; Google Admin SDK Directory API (users.insert,
-  limits, DWD).
+- [FP] `src/screens/Onboarding.tsx`, `src/lib/auth.ts`, `src/state/gameCore.ts`, `src/App.tsx`.
+- External: FTC COPPA VPC guidance; Google Admin SDK Directory API.
