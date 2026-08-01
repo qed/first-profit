@@ -5,41 +5,68 @@
  * parent clicks the emailed link — which opens `${origin}/signup/verify?token=...`
  * as a FRESH page load (a new tab, or the same tab navigated away). That reload
  * wipes all in-memory signup state, so the data the verify-return needs to finish
- * the mint (the attempt id + which child to create) is persisted HERE, in
- * `localStorage` (shared across tabs of the same origin on the same device).
+ * the flow (the attempt id, which child to create, and the consent echo the
+ * consent-record step must replay) is persisted HERE, in `localStorage` (shared
+ * across tabs of the same origin on the same device).
  *
- * SECURITY: the parent's OWN password is NEVER persisted. It lived only in the
- * original tab's memory; on the verify-return page it is re-prompted (the
- * "different tab / after reload" reprompt the plan calls for). The child's
- * password IS persisted (the parent set it moments ago, and it is needed both to
- * mint the child and to log the child in for path a) — a deliberate, bounded
- * tradeoff, cleared the instant the mint completes.
+ * SECURITY (Unit 9 review, FIX 2): NO PASSWORD is EVER persisted — neither the
+ * parent's nor the child's. Both are re-prompted on the verify-return screen (the
+ * "different tab / after reload" reprompt). The blob carries only non-secret
+ * carry-forward: the attempt id, the parent email, the child's first name + path
+ * + age band + DOB, the jurisdiction, and the consent policy echo (version + hash
+ * + method) — which are validated-then-discarded server-side at START, so they
+ * must ride the client to reach the consent-record step.
+ *
+ * TTL (FIX 2): the blob is stamped with `createdAt`; a blob older than
+ * `PENDING_TTL_MS` is treated as absent (a stale, abandoned signup degrades to
+ * the "finish on the device you started on" message rather than a broken mint).
+ * The verify-return ALSO clears the blob on every terminal outcome (success or
+ * failure), so an abandoned attempt never lingers past its window.
  *
  * A DIFFERENT device (or cleared storage) has no pending blob at all: the
  * verify-return degrades to a clear "finish on the device you started on"
  * message rather than a broken mint.
  */
 
-import type { SignupCredentialChoice } from "../../lib/auth";
+import type { SignupAgeBand, SignupCredentialChoice } from "../../lib/auth";
 
 const PENDING_KEY = "fp:signup:pending";
+
+/** The pending blob's lifetime. A signup not finished within this window is
+ *  treated as abandoned (the emailed verify link outlives it → reprompt-to-
+ *  restart). 24h comfortably covers "click the email later today". */
+export const PENDING_TTL_MS = 24 * 60 * 60 * 1000;
 
 export interface PendingSignup {
   attemptId: string | null;
   parentEmail: string;
+  /** Epoch ms stamped at save; a blob older than PENDING_TTL_MS is stale. */
+  createdAt: number;
   child: {
     firstName: string;
     credentialChoice: SignupCredentialChoice;
-    /** Path (a) child password; "" for path (b). */
-    password: string;
+    /** The validated age band (echoed to the consent-record step). */
+    ageBand: SignupAgeBand;
+    /** ISO yyyy-mm-dd; optional (the age band is the required signal). */
+    dob?: string;
+  };
+  jurisdiction: string;
+  /** The consent policy echo the consent-record step replays (bind-to-rendered).
+   *  Exactly the fetched policy's version/hash/method the parent attested to. */
+  consent: {
+    policyVersion: string;
+    policyHash: string;
+    method: string;
   };
 }
+
+const AGE_BANDS: readonly SignupAgeBand[] = ["under_13", "13_to_15", "16_plus"];
 
 function hasStorage(): boolean {
   return typeof window !== "undefined" && typeof window.localStorage !== "undefined";
 }
 
-/** Persist the pending signup so the verify-return page can finish the mint. */
+/** Persist the pending signup so the verify-return page can finish the flow. */
 export function savePendingSignup(pending: PendingSignup): void {
   if (!hasStorage()) return;
   try {
@@ -50,8 +77,9 @@ export function savePendingSignup(pending: PendingSignup): void {
   }
 }
 
-/** Read the pending signup, or null if none is stored / it is malformed. */
-export function loadPendingSignup(): PendingSignup | null {
+/** Read the pending signup, or null if none is stored / it is malformed / stale.
+ *  `now` is injectable so the TTL is testable without faking the clock. */
+export function loadPendingSignup(now: number = Date.now()): PendingSignup | null {
   if (!hasStorage()) return null;
   try {
     const raw = window.localStorage.getItem(PENDING_KEY);
@@ -60,21 +88,39 @@ export function loadPendingSignup(): PendingSignup | null {
     if (
       !parsed ||
       typeof parsed.parentEmail !== "string" ||
+      typeof parsed.createdAt !== "number" ||
+      typeof parsed.jurisdiction !== "string" ||
       typeof parsed.child !== "object" ||
       parsed.child === null ||
       typeof parsed.child.firstName !== "string" ||
       (parsed.child.credentialChoice !== "existing_credential" &&
-        parsed.child.credentialChoice !== "provision_workspace")
+        parsed.child.credentialChoice !== "provision_workspace") ||
+      !AGE_BANDS.includes(parsed.child.ageBand as SignupAgeBand) ||
+      typeof parsed.consent !== "object" ||
+      parsed.consent === null ||
+      typeof parsed.consent.policyVersion !== "string" ||
+      typeof parsed.consent.policyHash !== "string" ||
+      typeof parsed.consent.method !== "string"
     ) {
       return null;
     }
+    // TTL: a blob past its window is treated as absent (abandoned signup).
+    if (now - parsed.createdAt > PENDING_TTL_MS) return null;
     return {
       attemptId: typeof parsed.attemptId === "string" ? parsed.attemptId : null,
       parentEmail: parsed.parentEmail,
+      createdAt: parsed.createdAt,
       child: {
         firstName: parsed.child.firstName,
         credentialChoice: parsed.child.credentialChoice,
-        password: typeof parsed.child.password === "string" ? parsed.child.password : "",
+        ageBand: parsed.child.ageBand as SignupAgeBand,
+        dob: typeof parsed.child.dob === "string" ? parsed.child.dob : undefined,
+      },
+      jurisdiction: parsed.jurisdiction,
+      consent: {
+        policyVersion: parsed.consent.policyVersion,
+        policyHash: parsed.consent.policyHash,
+        method: parsed.consent.method,
       },
     };
   } catch {
@@ -82,7 +128,7 @@ export function loadPendingSignup(): PendingSignup | null {
   }
 }
 
-/** Drop the pending signup (call the instant the mint completes). */
+/** Drop the pending signup (call on EVERY terminal outcome — success OR failure). */
 export function clearPendingSignup(): void {
   if (!hasStorage()) return;
   try {

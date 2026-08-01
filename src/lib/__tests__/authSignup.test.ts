@@ -28,6 +28,7 @@ import {
   startSignup,
   verifySignup,
   createSignupChild,
+  recordSignupConsent,
   fetchConsentPolicy,
 } from "../auth";
 
@@ -242,6 +243,72 @@ describe("createSignupChild", () => {
         childPassword: "kidpassword",
       }),
     ).toEqual({ ok: false });
+  });
+});
+
+describe("recordSignupConsent", () => {
+  const CONSENT_INPUT = {
+    attemptId: "attempt-1",
+    echoedVersion: "2026-08-01.1",
+    echoedHash: "f".repeat(64),
+    method: "email_plus_attestation",
+    childAgeBand: "under_13" as const,
+    childDob: "2016-04-01",
+    jurisdiction: "California, US",
+  };
+
+  it("sends the parent Bearer token + exact body, returns { ok:true } on success", async () => {
+    getSession.mockResolvedValue({ data: { session: { access_token: "parent-access" } } });
+    fetchMock().mockResolvedValue(jsonResponse(200, { ok: true, status: "consent_recorded" }));
+
+    const result = await recordSignupConsent(CONSENT_INPUT);
+
+    expect(result).toEqual({ ok: true });
+    const [url, init] = fetchMock().mock.calls[0];
+    expect(url).toBe("https://api.test/api/fp/signup/consent");
+    expect(init.method).toBe("POST");
+    expect(init.headers.Authorization).toBe("Bearer parent-access");
+    expect(JSON.parse(init.body as string)).toEqual({
+      attemptId: "attempt-1",
+      echoedVersion: "2026-08-01.1",
+      echoedHash: "f".repeat(64),
+      method: "email_plus_attestation",
+      childAgeBand: "under_13",
+      jurisdiction: "California, US",
+      childDob: "2016-04-01",
+    });
+  });
+
+  it("omits childDob when not supplied", async () => {
+    getSession.mockResolvedValue({ data: { session: { access_token: "x" } } });
+    fetchMock().mockResolvedValue(jsonResponse(200, { ok: true }));
+    await recordSignupConsent({ ...CONSENT_INPUT, childDob: undefined });
+    const body = JSON.parse(fetchMock().mock.calls[0][1].body as string);
+    expect("childDob" in body).toBe(false);
+  });
+
+  it("duplicate → backend returns 200 ok:true → { ok:true } (idempotent)", async () => {
+    getSession.mockResolvedValue({ data: { session: { access_token: "x" } } });
+    fetchMock().mockResolvedValue(jsonResponse(200, { ok: true, status: "consent_recorded" }));
+    expect(await recordSignupConsent(CONSENT_INPUT)).toEqual({ ok: true });
+  });
+
+  it("no adopted session -> { ok:false } and never fetches", async () => {
+    getSession.mockResolvedValue({ data: { session: null } });
+    expect(await recordSignupConsent(CONSENT_INPUT)).toEqual({ ok: false });
+    expect(fetchMock()).not.toHaveBeenCalled();
+  });
+
+  it("generic 401 -> { ok:false }", async () => {
+    getSession.mockResolvedValue({ data: { session: { access_token: "x" } } });
+    fetchMock().mockResolvedValue(jsonResponse(401, { success: false }));
+    expect(await recordSignupConsent(CONSENT_INPUT)).toEqual({ ok: false });
+  });
+
+  it("network throw -> { ok:false } (never throws)", async () => {
+    getSession.mockResolvedValue({ data: { session: { access_token: "x" } } });
+    fetchMock().mockRejectedValue(new Error("down"));
+    expect(await recordSignupConsent(CONSENT_INPUT)).toEqual({ ok: false });
   });
 });
 

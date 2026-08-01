@@ -30,9 +30,11 @@ import { Factory } from "./screens/Factory";
 import {
   createSignupChild,
   fetchConsentPolicy,
+  recordSignupConsent,
   startSignup,
   verifySignup,
 } from "./lib/auth";
+import { finishSignup } from "./screens/signup/finishSignup";
 import {
   renderedFromFetched,
   type RenderedConsentPolicy,
@@ -107,41 +109,17 @@ function StageRouter() {
     return { ok: false };
   }, []);
 
-  // Verify-return: verify the email + adopt the parent session, mint the child,
-  // then (path a) log the child in and hand off to the game, or (path b) resolve
-  // to the confirmation. Every failure is a flat { ok: false } (never throws).
+  // Verify-return: verify the email + adopt the parent session, RECORD CONSENT,
+  // mint the child, then (path a) log the child in and hand off to the game, or
+  // (path b) resolve to the confirmation. The sequence (incl. the consent-record
+  // step that gates the mint) lives in finishSignup so it is unit-testable; every
+  // failure is a flat { ok: false } (never throws).
   const handleCompleteVerification = useCallback(
-    async (req: CompleteVerificationRequest): Promise<CompleteVerificationResult> => {
-      const verified = await verifySignup({
-        token: req.token,
-        email: req.parentEmail,
-        parentPassword: req.parentPassword,
-      });
-      if (!verified.ok) return { ok: false };
-
-      // The parent session is adopted; mint the child under its Bearer token.
-      const minted = await createSignupChild({
-        attemptId: req.attemptId,
-        childFirstName: req.child.firstName,
-        credentialChoice: req.child.credentialChoice,
-        childPassword:
-          req.child.credentialChoice === "existing_credential" ? req.child.password : undefined,
-      });
-      if (!minted.ok) return { ok: false };
-
-      if (req.child.credentialChoice === "existing_credential") {
-        // PATH A: adopt the CHILD session (replacing the parent session) and hand
-        // off to the game. login() routes to onboard/app, unmounting Signup.
-        const ok = await login(req.child.firstName, req.child.password);
-        if (ok) return { ok: true, outcome: "playing" };
-        // The child login didn't take (a rare handle race): the account exists,
-        // so show the confirmation; the child can log in later.
-        return { ok: true, outcome: "confirmation" };
-      }
-      // PATH B: the provisioned mailbox is not ready yet, so DON'T attempt a child
-      // login. Show the "account created, watch for the setup email" confirmation.
-      return { ok: true, outcome: "confirmation" };
-    },
+    (req: CompleteVerificationRequest): Promise<CompleteVerificationResult> =>
+      finishSignup(
+        { verifySignup, recordSignupConsent, createSignupChild, loginChildIntoGame: login },
+        req,
+      ),
     [login],
   );
 

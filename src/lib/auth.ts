@@ -88,17 +88,20 @@ export async function loginChild(identifier: string, password: string): Promise<
  *
  * The parent Start Building flow talks to the SAME The120 backend as loginChild,
  * with the same fetch+shape discipline: every non-2xx / malformed body / network
- * fault collapses to a flat failure and NEVER throws to the UI. Three POSTs and
+ * fault collapses to a flat failure and NEVER throws to the UI. Four POSTs and
  * one GET, in sequence across an email round-trip:
  *
  *   startSignup   → POST /api/fp/signup          (no session; sends verify mail)
  *   verifySignup  → POST /api/fp/signup/verify   (returns + ADOPTS parent session)
+ *   recordSignupConsent → POST /api/fp/signup/consent (parent Bearer → consent row)
  *   createSignupChild → POST /api/fp/signup/child (parent Bearer → childId)
  *   fetchConsentPolicy → GET /api/fp/signup/consent-policy (rendered policy)
  *
- * The verify step is what authorizes the cross-origin child mint (Plan Revision 1):
- * it adopts the parent session via setSession, and createSignupChild sends that
- * session's access token as `Authorization: Bearer`.
+ * The verify step is what authorizes the cross-origin consent + child mint (Plan
+ * Revision 1): it adopts the parent session via setSession, and both
+ * recordSignupConsent and createSignupChild send that session's access token as
+ * `Authorization: Bearer`. Consent MUST land before the mint (the child route is
+ * consent-gated; without the consent row the mint fails `consent_required`).
  */
 
 /** The child age bands, mirroring the backend `child_age_band` enum. */
@@ -292,6 +295,67 @@ export async function createSignupChild(
     const childId = asString(parsed.childId);
     if (parsed.ok !== true || !childId) return { ok: false };
     return { ok: true, childId };
+  } catch {
+    return { ok: false };
+  }
+}
+
+export interface RecordSignupConsentInput {
+  attemptId: string;
+  /** The version + hash the client's bundle RENDERED (bind-to-rendered proof) —
+   *  echoed EXACTLY as fetched from the backend's consent policy. */
+  echoedVersion: string;
+  echoedHash: string;
+  method: string;
+  childAgeBand: SignupAgeBand;
+  /** ISO yyyy-mm-dd; optional (the age band is the required legal signal). */
+  childDob?: string;
+  jurisdiction: string;
+}
+
+/**
+ * Record verifiable parental consent under the ADOPTED parent session (Unit 9
+ * review, FIX 1): the request carries that session's access token as
+ * `Authorization: Bearer`, mirroring createSignupChild. This is the consent-record
+ * seam WITHOUT which every real child mint fails `consent_required` — it must run
+ * AFTER verifySignup (so the parent session exists) and BEFORE createSignupChild.
+ *
+ * Flat `{ ok }` result, NEVER throws. A duplicate (a retried consent) is
+ * idempotent success on the backend, so it surfaces here as `{ ok: true }`. Any
+ * non-2xx / malformed body / missing session / network fault is `{ ok: false }`.
+ */
+export async function recordSignupConsent(
+  input: RecordSignupConsentInput,
+): Promise<{ ok: boolean }> {
+  try {
+    const { t120ApiUrl } = getConfig();
+    const supabase = getSupabase();
+    const { data } = await supabase.auth.getSession();
+    const accessToken = data.session?.access_token;
+    if (!accessToken) return { ok: false };
+
+    const body: Record<string, unknown> = {
+      attemptId: input.attemptId,
+      echoedVersion: input.echoedVersion,
+      echoedHash: input.echoedHash,
+      method: input.method,
+      childAgeBand: input.childAgeBand,
+      jurisdiction: input.jurisdiction,
+    };
+    if (input.childDob) body.childDob = input.childDob;
+
+    const res = await fetch(`${t120ApiUrl.replace(/\/$/, "")}/api/fp/signup/consent`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${accessToken}`,
+      },
+      body: JSON.stringify(body),
+    });
+    if (!res.ok) return { ok: false };
+
+    const parsed = (await res.json()) as { ok?: unknown };
+    return { ok: parsed.ok === true };
   } catch {
     return { ok: false };
   }

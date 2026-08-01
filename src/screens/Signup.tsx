@@ -16,11 +16,12 @@
  *   2. shows the "check your email" WAIT screen.
  * The parent clicks the emailed link → the app boots at `/signup/verify?token=..`
  * → App reads the token and re-mounts this container with `verifyToken` set,
- * which renders the VERIFY-RETURN screen: it re-prompts the parent password (the
- * password was never persisted; on a fresh load / different tab it is not in
- * memory), then calls `onCompleteVerification` (verify → adopt parent session →
- * mint child → path a: log the child in and hand off to the game; path b: show
- * the "account created, watch for the setup email" confirmation).
+ * which renders the VERIFY-RETURN screen: it re-prompts the parent password AND
+ * (path a) the child password (NO password is ever persisted — FIX 2; on a fresh
+ * load / different tab neither is in memory), then calls `onCompleteVerification`
+ * (verify → adopt parent session → RECORD CONSENT → mint child → path a: log the
+ * child in and hand off to the game; path b: show the "account created, watch for
+ * the setup email" confirmation).
  *
  * Why local state, not the engine: `signup` is a LOGGED-OUT stage (kept out of
  * `isLoggedInStage`, Unit 7). There is no session, save, or tick during signup;
@@ -45,6 +46,8 @@ import {
 import {
   buildSubmission,
   emptySignupData,
+  isChildPasswordValid,
+  type AgeBand,
   type CredentialChoice,
   type SignupData,
   type SignupSubmission,
@@ -83,7 +86,18 @@ export interface CompleteVerificationRequest {
   parentEmail: string;
   parentPassword: string;
   attemptId: string;
-  child: { firstName: string; credentialChoice: CredentialChoice; password: string };
+  jurisdiction: string;
+  /** The consent policy echo the consent-record step replays (bind-to-rendered). */
+  consent: { echoedVersion: string; echoedHash: string; method: string };
+  child: {
+    firstName: string;
+    credentialChoice: CredentialChoice;
+    ageBand: AgeBand;
+    /** ISO yyyy-mm-dd; optional. */
+    dob?: string;
+    /** Path a only — RE-PROMPTED on the verify-return screen, never persisted. */
+    password?: string;
+  };
 }
 
 export interface SignupProps {
@@ -197,18 +211,29 @@ function SignupStepFlow({
     setSubmitting(true);
     setSubmitError(false);
     try {
-      const result = await onSubmitSignup(buildSubmission(data, consentMetaFor(policy)));
+      const submission = buildSubmission(data, consentMetaFor(policy));
+      const result = await onSubmitSignup(submission);
       if (result.ok) {
-        // Persist what the verify-return needs to finish the mint across the
-        // email link's fresh page load. The parent password is NEVER persisted;
-        // it is re-prompted on return.
+        // Persist what the verify-return needs to finish the flow across the
+        // email link's fresh page load. NO PASSWORD is persisted (FIX 2) —
+        // neither the parent's nor the child's; both are re-prompted on return.
+        // The consent echo rides along so the consent-record step can replay the
+        // exact version/hash the parent attested to.
         savePendingSignup({
           attemptId: result.attemptId ?? null,
-          parentEmail: data.parentEmail.trim(),
+          parentEmail: submission.parent.email,
+          createdAt: Date.now(),
           child: {
-            firstName: data.childFirstName.trim(),
-            credentialChoice: data.credentialChoice,
-            password: data.childPassword,
+            firstName: submission.child.firstName,
+            credentialChoice: submission.child.credentialChoice,
+            ageBand: submission.child.ageBand,
+            dob: submission.child.dob || undefined,
+          },
+          jurisdiction: submission.jurisdiction,
+          consent: {
+            policyVersion: submission.consent.policyVersion,
+            policyHash: submission.consent.policyHash,
+            method: submission.consent.method,
           },
         });
         setStep("done");
@@ -317,14 +342,19 @@ function VerifyReturn({
   const pendingRef = useRef(loadPendingSignup());
   const pending = pendingRef.current;
   const canFinish = Boolean(pending && pending.attemptId && onComplete);
+  // Path a's child credential is a parent-set password (never persisted, FIX 2):
+  // re-prompt it here, next to the parent password. Path b has none.
+  const isPathA = pending?.child.credentialChoice === "existing_credential";
 
   const [password, setPassword] = useState("");
+  const [childPassword, setChildPassword] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(false);
   const [confirmed, setConfirmed] = useState(false);
   const busyRef = useRef(false);
   const mountedRef = useRef(true);
   const [show, setShow] = useState(false);
+  const [showChild, setShowChild] = useState(false);
 
   useEffect(() => {
     mountedRef.current = true;
@@ -333,10 +363,15 @@ function VerifyReturn({
     };
   }, []);
 
+  // Both credentials must be present before the finish CTA enables. Path a also
+  // needs the re-prompted child password; path b needs only the parent password.
+  const childPasswordReady = !isPathA || childPassword.length > 0;
+  const canSubmit = password.length > 0 && childPasswordReady;
+
   const finish = async () => {
     if (busyRef.current) return;
     if (!pending || !pending.attemptId || !onComplete) return;
-    if (password.length === 0) return;
+    if (!canSubmit) return;
     busyRef.current = true;
     setBusy(true);
     setError(false);
@@ -346,20 +381,31 @@ function VerifyReturn({
         parentEmail: pending.parentEmail,
         parentPassword: password,
         attemptId: pending.attemptId,
-        child: pending.child,
+        jurisdiction: pending.jurisdiction,
+        consent: {
+          echoedVersion: pending.consent.policyVersion,
+          echoedHash: pending.consent.policyHash,
+          method: pending.consent.method,
+        },
+        child: {
+          firstName: pending.child.firstName,
+          credentialChoice: pending.child.credentialChoice,
+          ageBand: pending.child.ageBand,
+          dob: pending.child.dob,
+          password: isPathA ? childPassword : undefined,
+        },
       });
       if (!mountedRef.current) return;
-      if (res.ok) {
-        // Both outcomes clear the pending blob. `playing` navigates the app away
-        // (this unmounts); `confirmation` shows the setup-email screen below.
-        clearPendingSignup();
-        if (res.outcome === "confirmation") setConfirmed(true);
-      } else {
-        setError(true);
-      }
+      if (res.ok && res.outcome === "confirmation") setConfirmed(true);
+      else if (!res.ok) setError(true);
     } catch {
       if (mountedRef.current) setError(true);
     } finally {
+      // Clear the pending blob on EVERY terminal outcome (success OR failure,
+      // FIX 2): the in-memory pendingRef still drives any in-session retry, so a
+      // failed/abandoned finish leaves nothing persisted. `playing` also unmounts
+      // this screen; clearing in `finally` guarantees it runs even then.
+      clearPendingSignup();
       if (mountedRef.current) {
         busyRef.current = false;
         setBusy(false);
@@ -367,8 +413,9 @@ function VerifyReturn({
     }
   };
 
-  // Path b (and a login-failed path a): the account exists, the child logs in
-  // later once the mailbox / setup email lands.
+  // The confirmation screen (path b, or a login-failed path a). The copy differs
+  // by path (FIX 5): path a's credential is the parent-set password (NOT emailed);
+  // path b's is a provisioned address that arrives by a setup email.
   if (confirmed) {
     return (
       <div className="text-center">
@@ -378,10 +425,18 @@ function VerifyReturn({
         <h2 className="mt-2 font-display text-[26px] font-black leading-[1.15] text-[hsl(25_34%_20%)]">
           You are all set.
         </h2>
-        <p className="mt-2 text-sm leading-[1.6] text-[hsl(25_20%_38%)]">
-          We are finishing your child's sign-in details and will email them to you. Once they arrive,
-          your child can log in and start playing.
-        </p>
+        {isPathA ? (
+          <p className="mt-2 break-words text-sm leading-[1.6] text-[hsl(25_20%_38%)]">
+            <b className="text-[hsl(25_34%_20%)]">{pending?.child.firstName}</b> can log in with the
+            first name you chose and the password you set. Nothing else is emailed. If the sign-in
+            does not take right away, try again in a moment.
+          </p>
+        ) : (
+          <p className="mt-2 text-sm leading-[1.6] text-[hsl(25_20%_38%)]">
+            We are provisioning your child's school sign-in address and will email it to you. Once it
+            arrives, your child can log in with that address and start playing.
+          </p>
+        )}
       </div>
     );
   }
@@ -420,8 +475,15 @@ function VerifyReturn({
         Confirm your password.
       </h2>
       <p className="mt-2 break-words text-sm leading-[1.6] text-[hsl(25_20%_38%)]">
-        Your email is verified. Enter the password you chose for <b className="text-[hsl(25_34%_20%)]">{pending.parentEmail}</b> to
-        finish setting up <b className="text-[hsl(25_34%_20%)]">{pending.child.firstName}</b>.
+        Your email is verified. Enter the password you chose for <b className="text-[hsl(25_34%_20%)]">{pending.parentEmail}</b>
+        {isPathA ? (
+          <>
+            {" "}and the password you set for <b className="text-[hsl(25_34%_20%)]">{pending.child.firstName}</b> to finish
+            setting up their account.
+          </>
+        ) : (
+          <> to finish setting up <b className="text-[hsl(25_34%_20%)]">{pending.child.firstName}</b>.</>
+        )}
       </p>
 
       <div className="mt-6">
@@ -450,16 +512,49 @@ function VerifyReturn({
         </span>
       </div>
 
+      {isPathA ? (
+        <div className="mt-4">
+          <label htmlFor="fp-verify-child-password" className="mb-1.5 block font-mono text-[11px] uppercase tracking-[0.08em] text-[hsl(25_20%_38%)]">
+            {pending.child.firstName}'s password
+          </label>
+          <span className="relative block">
+            <input
+              id="fp-verify-child-password"
+              type={showChild ? "text" : "password"}
+              value={childPassword}
+              autoComplete="new-password"
+              autoCapitalize="none"
+              autoCorrect="off"
+              onChange={(e) => setChildPassword(e.target.value)}
+              className={`${REPROMPT_INPUT_CLS} pr-16`}
+            />
+            <button
+              type="button"
+              onClick={() => setShowChild((s) => !s)}
+              aria-pressed={showChild}
+              className="absolute right-1 top-1/2 flex min-h-[44px] -translate-y-1/2 items-center rounded-lg px-3 font-mono text-[11px] uppercase tracking-wider text-[hsl(25_20%_38%)] hover:text-ink"
+            >
+              {showChild ? "Hide" : "Show"}
+            </button>
+          </span>
+          {childPassword.length > 0 && !isChildPasswordValid(childPassword) ? (
+            <p className="mt-1.5 text-[13px] leading-snug text-[hsl(25_20%_38%)]">
+              Use at least 10 characters (the same password you set earlier).
+            </p>
+          ) : null}
+        </div>
+      ) : null}
+
       {error ? (
         <p
           role="alert"
           className="mt-3 rounded-xl border-l-4 border-goldleaf bg-goldleaf/10 px-3.5 py-3 text-sm leading-relaxed text-ink"
         >
-          We couldn't finish setting up the account. Check your password and try again.
+          We couldn't finish setting up the account. Check your details and try again.
         </p>
       ) : null}
 
-      <GreenCta onClick={finish} disabled={busy || password.length === 0}>
+      <GreenCta onClick={finish} disabled={busy || !canSubmit}>
         {busy ? "Finishing..." : "Finish setup →"}
       </GreenCta>
       <BackLink onClick={() => onExit?.()} />

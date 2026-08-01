@@ -156,7 +156,7 @@ describe("Signup container", () => {
     expect(screen.queryByText("Check your email.")).toBeNull();
   });
 
-  it("on START success persists the pending signup (attempt id + child) for the verify-return", async () => {
+  it("on START success persists the pending signup (attempt id + carry-forward, NO password) for the verify-return", async () => {
     const onSubmitSignup = vi.fn(async (_s: SignupSubmission) => ({ ok: true, attemptId: "attempt-9" }));
     render(<Signup onSubmitSignup={onSubmitSignup} onExit={vi.fn()} />);
     fillParent();
@@ -166,11 +166,21 @@ describe("Signup container", () => {
     fireEvent.click(screen.getByRole("button", { name: /Create my child's account/ }));
 
     await waitFor(() => expect(screen.getByText("Check your email.")).toBeTruthy());
-    expect(loadPendingSignup()).toEqual({
+    const pending = loadPendingSignup();
+    expect(pending).toMatchObject({
       attemptId: "attempt-9",
       parentEmail: "sam@example.com",
-      child: { firstName: "Alex", credentialChoice: "existing_credential", password: "kidpassword" },
+      jurisdiction: "California, US",
+      child: { firstName: "Alex", credentialChoice: "existing_credential", ageBand: "13_to_15", dob: AGE_DOB },
+      consent: {
+        policyVersion: "2026-08-01.1",
+        method: "email_plus_attestation",
+      },
     });
+    expect(typeof pending?.createdAt).toBe("number");
+    // FIX 2: no child password rides in the persisted blob.
+    const raw = window.localStorage.getItem("fp:signup:pending") ?? "";
+    expect(raw).not.toContain("kidpassword");
   });
 });
 
@@ -179,28 +189,36 @@ describe("Signup container", () => {
 const PENDING_A: PendingSignup = {
   attemptId: "attempt-9",
   parentEmail: "sam@example.com",
-  child: { firstName: "Alex", credentialChoice: "existing_credential", password: "kidpassword" },
+  createdAt: Date.now(),
+  child: { firstName: "Alex", credentialChoice: "existing_credential", ageBand: "13_to_15", dob: "2011-05-04" },
+  jurisdiction: "California, US",
+  consent: { policyVersion: "2026-08-01.1", policyHash: "f".repeat(64), method: "email_plus_attestation" },
 };
 
 describe("Signup verify-return", () => {
   beforeEach(() => window.localStorage.clear());
 
-  it("reprompts the parent password (NOT prefilled) and completes the mint (path a -> playing)", async () => {
+  it("reprompts BOTH passwords (NOT prefilled) and completes the mint (path a -> playing)", async () => {
     savePendingSignup(PENDING_A);
     const onCompleteVerification = vi.fn(
       async (_r: CompleteVerificationRequest) => ({ ok: true, outcome: "playing" as const }),
     );
     render(<Signup verifyToken="tok-123" onCompleteVerification={onCompleteVerification} onExit={vi.fn()} />);
 
-    // The password is NOT carried across the reload (different tab / fresh load):
-    // the field is empty and the CTA is disabled until it is entered.
+    // Neither password is carried across the reload (different tab / fresh load):
+    // both fields are empty and the CTA is disabled until BOTH are entered.
     expect(screen.getByText("Confirm your password.")).toBeTruthy();
     const pw = screen.getByLabelText("Your password") as HTMLInputElement;
+    const childPw = screen.getByLabelText("Alex's password") as HTMLInputElement;
     expect(pw.value).toBe("");
+    expect(childPw.value).toBe("");
     const cta = screen.getByRole("button", { name: /Finish setup/ });
     expect((cta as HTMLButtonElement).disabled).toBe(true);
 
+    // Only the parent password → still disabled (path a needs the child password).
     fireEvent.change(pw, { target: { value: "parentpass" } });
+    expect((cta as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.change(childPw, { target: { value: "kidpassword" } });
     fireEvent.click(screen.getByRole("button", { name: /Finish setup/ }));
 
     await waitFor(() => expect(onCompleteVerification).toHaveBeenCalledTimes(1));
@@ -209,38 +227,62 @@ describe("Signup verify-return", () => {
       parentEmail: "sam@example.com",
       parentPassword: "parentpass",
       attemptId: "attempt-9",
-      child: { firstName: "Alex", credentialChoice: "existing_credential", password: "kidpassword" },
+      jurisdiction: "California, US",
+      consent: {
+        echoedVersion: "2026-08-01.1",
+        echoedHash: "f".repeat(64),
+        method: "email_plus_attestation",
+      },
+      child: {
+        firstName: "Alex",
+        credentialChoice: "existing_credential",
+        ageBand: "13_to_15",
+        dob: "2011-05-04",
+        password: "kidpassword",
+      },
     });
     // A playing outcome clears the pending blob (the game has taken over).
     await waitFor(() => expect(loadPendingSignup()).toBeNull());
   });
 
-  it("path b (provision) resolves to the setup-email confirmation", async () => {
+  it("path b (provision) needs only the parent password and resolves to the setup-email confirmation", async () => {
     savePendingSignup({
       attemptId: "attempt-b",
       parentEmail: "sam@example.com",
-      child: { firstName: "Robin", credentialChoice: "provision_workspace", password: "" },
+      createdAt: Date.now(),
+      child: { firstName: "Robin", credentialChoice: "provision_workspace", ageBand: "16_plus" },
+      jurisdiction: "California, US",
+      consent: { policyVersion: "2026-08-01.1", policyHash: "f".repeat(64), method: "email_plus_attestation" },
     });
     const onCompleteVerification = vi.fn(
       async (_r: CompleteVerificationRequest) => ({ ok: true, outcome: "confirmation" as const }),
     );
     render(<Signup verifyToken="tok-b" onCompleteVerification={onCompleteVerification} onExit={vi.fn()} />);
 
+    // Path b renders NO child-password field.
+    expect(screen.queryByLabelText("Robin's password")).toBeNull();
     fireEvent.change(screen.getByLabelText("Your password"), { target: { value: "parentpass" } });
     fireEvent.click(screen.getByRole("button", { name: /Finish setup/ }));
 
     await waitFor(() => expect(screen.getByText("You are all set.")).toBeTruthy());
+    // Path b confirmation copy references the provisioned address / setup email.
+    expect(screen.getByText(/school sign-in address/i)).toBeTruthy();
+    expect(onCompleteVerification.mock.calls[0][0].child.password).toBeUndefined();
     expect(loadPendingSignup()).toBeNull();
   });
 
-  it("surfaces an error and stays on the reprompt when completion fails", async () => {
+  it("surfaces an error, clears the persisted blob, but stays on the reprompt when completion fails (FIX 2)", async () => {
     savePendingSignup(PENDING_A);
     const onCompleteVerification = vi.fn(async (_r: CompleteVerificationRequest) => ({ ok: false }));
     render(<Signup verifyToken="tok" onCompleteVerification={onCompleteVerification} onExit={vi.fn()} />);
     fireEvent.change(screen.getByLabelText("Your password"), { target: { value: "parentpass" } });
+    fireEvent.change(screen.getByLabelText("Alex's password"), { target: { value: "kidpassword" } });
     fireEvent.click(screen.getByRole("button", { name: /Finish setup/ }));
     await waitFor(() => expect(screen.getByRole("alert")).toBeTruthy());
+    // Still on the reprompt (the in-memory copy drives a retry) ...
     expect(screen.getByText("Confirm your password.")).toBeTruthy();
+    // ... but a failed finish leaves NOTHING persisted.
+    expect(loadPendingSignup()).toBeNull();
   });
 
   it("different device / no pending -> shows the finish-on-your-device message, never mints", () => {
