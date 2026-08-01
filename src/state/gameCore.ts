@@ -290,6 +290,7 @@ export type Action =
   | { type: "OPEN_CHECKOUT" }
   | { type: "CLOSE_CHECKOUT" }
   | { type: "SET_AVATAR"; x: number; y: number }
+  | { type: "RESET_SESSION" }
   | { type: "HYDRATE"; doc: SaveDoc };
 
 /**
@@ -434,6 +435,18 @@ export function reducer(state: GameState, action: Action): GameState {
     case "SET_AVATAR":
       return { ...state, avatar: { x: action.x, y: action.y } };
 
+    case "RESET_SESSION": {
+      // Clear all per-account business/financial + UI state so no previous
+      // child's ideas/ledger can leak into the next session on a shared device.
+      // `stage` and `profile` are deliberately left for the caller to set.
+      const fresh = initialState();
+      return {
+        ...fresh,
+        stage: state.stage,
+        profile: state.profile,
+      };
+    }
+
     case "HYDRATE": {
       const { doc } = action;
       return {
@@ -442,6 +455,9 @@ export function reducer(state: GameState, action: Action): GameState {
           fields: { ...idea.fields },
           done: { ...idea.done },
         })),
+        // The ledger lives append-only in fp_ledger, never the save doc. Reset
+        // it here so a hydrate can never carry a prior session's rows forward.
+        ledger: [],
         activeIdea: doc.activeIdea,
         profile: { ...state.profile, siteHeadline: doc.siteHeadline },
         onboardingComplete: doc.onboardingComplete,

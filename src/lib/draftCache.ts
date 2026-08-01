@@ -73,7 +73,11 @@ export function getDraft<T = unknown>(userId: string, name: string, storage?: St
   }
 }
 
-/** List the draft names (the `<name>` segment) stored for a user. */
+/**
+ * List the draft names (the `<name>` segment) stored for a user. This does NOT
+ * validate the stored JSON — callers must still read each value through
+ * `getDraft`, which defensively discards corrupted entries.
+ */
 export function listDraftNames(userId: string, storage?: Storage): string[] {
   const s = resolveStorage(storage);
   const scope = `${FP_PREFIX}${userId}:`;

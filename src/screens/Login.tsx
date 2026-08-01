@@ -1,5 +1,5 @@
 /**
- * Child login screen — HQ visual language (white card, Fraunces headings).
+ * Child login screen in the HQ visual language (white card, Fraunces headings).
  *
  * One generic, kid-friendly error for EVERY failure (R4 enumeration
  * resistance): we never tell a child whether the name or the password was the
@@ -67,6 +67,8 @@ export function Login() {
                 autoCorrect="off"
                 value={identifier}
                 onChange={(e) => setIdentifier(e.target.value)}
+                aria-invalid={error}
+                aria-describedby={error ? "fp-login-error" : undefined}
                 className="mt-1.5 min-h-[48px] w-full rounded-xl border border-[hsl(40_10%_80%)] bg-[hsl(40_30%_99%)] px-4 font-display text-lg font-bold text-ink outline-none focus:border-sell focus:ring-2 focus:ring-sell/30"
               />
             </div>
@@ -82,12 +84,15 @@ export function Login() {
                 autoComplete="current-password"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
+                aria-invalid={error}
+                aria-describedby={error ? "fp-login-error" : undefined}
                 className="mt-1.5 min-h-[48px] w-full rounded-xl border border-[hsl(40_10%_80%)] bg-[hsl(40_30%_99%)] px-4 font-display text-lg font-bold text-ink outline-none focus:border-sell focus:ring-2 focus:ring-sell/30"
               />
             </div>
 
             {error ? (
               <p
+                id="fp-login-error"
                 role="alert"
                 className="rounded-xl border-l-4 border-goldleaf bg-goldleaf/10 px-3.5 py-3 text-sm leading-relaxed text-ink"
               >

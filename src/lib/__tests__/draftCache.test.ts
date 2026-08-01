@@ -73,6 +73,11 @@ describe("draftCache", () => {
     // User B logs in on the same device.
     const last = getLastUserId(s);
     if (last !== USER_B) wipeAllFpKeys(s);
+
+    // The real guard: the out-of-namespace marker survives the wipe, BEFORE we
+    // overwrite it. (Asserting after setLastUserId(USER_B) would mask a wipe
+    // that clobbered the marker.)
+    expect(getLastUserId(s)).toBe(USER_A);
     setLastUserId(USER_B, s);
 
     // No fp:* draft/outbox keys survive.
@@ -82,7 +87,6 @@ describe("draftCache", () => {
       (k) => k !== null && k.startsWith(FP_PREFIX),
     );
     expect(remainingFp).toEqual([]);
-    // The out-of-namespace last-user marker survives the wipe.
     expect(getLastUserId(s)).toBe(USER_B);
   });
 

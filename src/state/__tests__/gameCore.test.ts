@@ -450,6 +450,68 @@ describe("selectors: ledger sums", () => {
   });
 });
 
+describe("RESET_SESSION (shared-device state clear)", () => {
+  it("clears ideas, ledger, and UI but keeps stage + profile, and stays usable", () => {
+    let s = withOneIdea();
+    s = reducer(s, { type: "SET_STAGE", stage: "app" });
+    s = reducer(s, { type: "SET_PROFILE", patch: { firstName: "Ada", handle: "ada" } });
+    s = reducer(s, { type: "SET_FIELD", ideaIndex: 0, key: "oneLiner", value: "Bracelets" });
+    s = reducer(s, { type: "OPEN_ROOM", room: "market" });
+    s = reducer(s, { type: "OPEN_RUNNER", stepId: "1.1", index: 2 });
+    s = reducer(s, { type: "OPEN_CHECKOUT" });
+    s = reducer(s, {
+      type: "ADD_LEDGER",
+      id: "l1",
+      kind: "backing",
+      payer: "Pat",
+      amountCents: 2500,
+      createdAt: "2026-07-31T00:00:00.000Z",
+    });
+
+    const reset = reducer(s, { type: "RESET_SESSION" });
+
+    // Business/financial + UI state is gone.
+    expect(reset.ideas).toEqual([]);
+    expect(reset.ledger).toEqual([]);
+    expect(reset.activeIdea).toBe(0);
+    expect(reset.pickFor).toBeNull();
+    expect(reset.runnerOpen).toBe(false);
+    expect(reset.runnerStep).toBeNull();
+    expect(reset.runnerIndex).toBe(0);
+    expect(reset.celebrate).toBeNull();
+    expect(reset.room).toBeNull();
+    expect(reset.checkoutOpen).toBe(false);
+    expect(reset.avatar).toEqual(initialState().avatar);
+
+    // Caller-controlled fields are preserved for the provider to overwrite.
+    expect(reset.stage).toBe("app");
+    expect(reset.profile).toEqual({ firstName: "Ada", handle: "ada", siteHeadline: "" });
+
+    // The reducer remains usable afterwards.
+    const revived = reducer(reset, { type: "CREATE_IDEA" });
+    expect(revived.ideas).toHaveLength(1);
+  });
+});
+
+describe("HYDRATE resets the session ledger", () => {
+  it("empties an existing ledger even when hydrating onto populated state", () => {
+    let s = withOneIdea();
+    s = reducer(s, {
+      type: "ADD_LEDGER",
+      id: "l1",
+      kind: "sale",
+      payer: "Prior child",
+      amountCents: 5000,
+      createdAt: "2026-07-31T00:00:00.000Z",
+    });
+    expect(s.ledger).toHaveLength(1);
+
+    const doc = toSaveDoc(withOneIdea());
+    const hydrated = reducer(s, { type: "HYDRATE", doc });
+    expect(hydrated.ledger).toEqual([]);
+  });
+});
+
 describe("serialization round-trip", () => {
   it("initial -> acts -> toSaveDoc -> fromSaveDoc -> HYDRATE preserves persistent state", () => {
     let s = withOneIdea();

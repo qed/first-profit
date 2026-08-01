@@ -25,7 +25,9 @@ export interface ChildProfile {
   firstName: string;
 }
 
-export type LoginResult = { ok: true; profile: ChildProfile } | { ok: false };
+export type LoginResult =
+  | { ok: true; profile: ChildProfile; userId: string | null }
+  | { ok: false };
 
 export type LogoutScope = "idle" | "explicit";
 
@@ -61,7 +63,7 @@ export async function loginChild(identifier: string, password: string): Promise<
     if (!accessToken || !refreshToken) return { ok: false };
 
     const supabase = getSupabase();
-    const { error } = await supabase.auth.setSession({
+    const { data, error } = await supabase.auth.setSession({
       access_token: accessToken,
       refresh_token: refreshToken,
     });
@@ -69,6 +71,7 @@ export async function loginChild(identifier: string, password: string): Promise<
 
     return {
       ok: true,
+      userId: data.user?.id ?? null,
       profile: {
         handle: asString(body.profile?.handle),
         firstName: asString(body.profile?.firstName),
@@ -102,8 +105,11 @@ export async function logout(scope: LogoutScope): Promise<LogoutScope> {
   try {
     await supabase.auth.signOut();
   } catch {
-    // A network hiccup on signOut must not strand the UI in a logged-in stage;
-    // we still purge local session keys below and let the caller route on.
+    // Server-side revocation failed (network hiccup, etc.). Surface it — a
+    // refresh token that was NOT revoked is a real shared-device risk — but do
+    // not strand the UI: we still purge local session keys and route on.
+    // Token-free warning only; never log the session or its contents.
+    console.warn(`[fp:auth] logout (${scope}): server-side session revocation failed; purged local keys only.`);
   }
   purgeSupabaseStorageKeys();
   return scope;
@@ -119,6 +125,10 @@ export async function getCurrentUserId(): Promise<string | null> {
 /**
  * Subscribe to auth-state changes; the callback receives the current user id
  * (or `null` when signed out). Returns an unsubscribe function.
+ *
+ * TODO(Unit 6): the provider will subscribe here to react to background token
+ * refresh/expiry (e.g. surface the login stage on an expired session during
+ * play). Kept now as the wired seam so Unit 6 imports rather than re-adds it.
  */
 export function onAuthChange(cb: (userId: string | null) => void): () => void {
   const supabase = getSupabase();

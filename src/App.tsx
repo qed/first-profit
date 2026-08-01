@@ -103,19 +103,21 @@ function FounderChip() {
   const label = profile.firstName || profile.handle || "Founder";
   return (
     <header className="flex items-center justify-between gap-4 rounded-3xl border border-[hsl(40_14%_89%)] bg-white px-4 py-3">
-      <div className="flex items-center gap-2">
-        <span className="flex h-7 items-end gap-[2px]" aria-hidden>
+      <div className="flex min-w-0 items-center gap-2">
+        <span className="flex h-7 shrink-0 items-end gap-[2px]" aria-hidden>
           <span className="h-2.5 w-1 rounded-sm bg-sell" />
           <span className="h-4 w-1 rounded-sm bg-build" />
           <span className="h-5 w-1 rounded-sm bg-grow" />
           <span className="h-7 w-1 rounded-sm bg-scale" />
         </span>
-        <span className="font-mono text-xs uppercase tracking-wider text-ink/70">{label}</span>
+        <span className="min-w-0 truncate font-mono text-xs uppercase tracking-wider text-ink/70">
+          {label}
+        </span>
       </div>
       <button
         type="button"
         onClick={() => void logout()}
-        className="inline-flex min-h-[44px] items-center rounded-full border-2 border-ink/15 px-4 font-mono text-xs uppercase tracking-wider text-ink hover:border-ink/30"
+        className="inline-flex min-h-[44px] shrink-0 items-center rounded-full border-2 border-ink/15 px-4 font-mono text-xs uppercase tracking-wider text-ink hover:border-ink/30"
       >
         Log out
       </button>

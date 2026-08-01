@@ -86,18 +86,24 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      const userId = await getCurrentUserId();
-      if (cancelled) return;
-      if (!userId) {
-        dispatch({ type: "SET_STAGE", stage: "landing" });
-        return;
+      try {
+        const userId = await getCurrentUserId();
+        if (cancelled) return;
+        if (!userId) {
+          dispatch({ type: "SET_STAGE", stage: "landing" });
+          return;
+        }
+        // A session exists. Unit 6 will fetch the save and decide onboard vs app
+        // from onboardingComplete.
+        // TODO(Unit 6): fetch fp_player_saves and HYDRATE (dispatch { type:
+        //   "HYDRATE", doc }); the reducer already routes to onboard/app from
+        //   doc.onboardingComplete. Until then a restored session defaults to app.
+        dispatch({ type: "SET_STAGE", stage: "app" });
+      } catch {
+        // An unresolvable session must never strand the app on the boot spinner.
+        // Treat it as logged-out and fall through to the landing stage.
+        if (!cancelled) dispatch({ type: "SET_STAGE", stage: "landing" });
       }
-      // A session exists. Unit 6 will fetch the save and decide onboard vs app
-      // from onboardingComplete.
-      // TODO(Unit 6): fetch fp_player_saves and HYDRATE (dispatch { type:
-      //   "HYDRATE", doc }); the reducer already routes to onboard/app from
-      //   doc.onboardingComplete. Until then a restored session defaults to app.
-      dispatch({ type: "SET_STAGE", stage: "app" });
     })();
     return () => {
       cancelled = true;
@@ -106,29 +112,43 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
 
   // ── Login ────────────────────────────────────────────────────────────────
   const login = useCallback(async (identifier: string, password: string): Promise<boolean> => {
+    // Clear any resident per-account state up front so no path can advance the
+    // stage with a previous child's ideas/ledger resident on a shared device.
+    dispatch({ type: "RESET_SESSION" });
+
     const result = await loginChild(identifier, password);
     if (!result.ok) return false;
 
-    // Same-user vs different-user: wipe ALL fp:* drafts/outbox before hydrating
-    // when a different child logs in on this device.
-    const userId = await getCurrentUserId();
-    if (userId) {
-      const last = getLastUserId();
-      if (last && last !== userId) {
-        wipeAllFpKeys();
+    try {
+      // Same-user vs different-user: wipe ALL fp:* drafts/outbox before hydrating
+      // when a different child logs in on this device. The user id comes from
+      // loginChild's setSession result — no second async session lookup.
+      const { userId } = result;
+      if (userId) {
+        const last = getLastUserId();
+        if (last && last !== userId) {
+          wipeAllFpKeys();
+        }
+        setLastUserId(userId);
       }
-      setLastUserId(userId);
+
+      const profile: ChildProfile = result.profile;
+      dispatch({
+        type: "SET_PROFILE",
+        patch: { firstName: profile.firstName, handle: profile.handle },
+      });
+
+      // TODO(Unit 6): fetch fp_player_saves for this profile and HYDRATE — the
+      //   reducer routes to onboard/app from doc.onboardingComplete, and the
+      //   sync layer restores same-user drafts/outbox from the account cache.
+      //   Until then: no save exists yet, so onboarding is incomplete → onboard.
+      dispatch({ type: "SET_STAGE", stage: "onboard" });
+      return true;
+    } catch {
+      // A storage or dispatch failure post-auth must surface as a clean login
+      // failure so the screen can reset loading and show the generic error.
+      return false;
     }
-
-    const profile: ChildProfile = result.profile;
-    dispatch({ type: "SET_PROFILE", patch: { firstName: profile.firstName, handle: profile.handle } });
-
-    // TODO(Unit 6): fetch fp_player_saves for this profile and HYDRATE — the
-    //   reducer routes to onboard/app from doc.onboardingComplete, and the
-    //   sync layer restores same-user drafts/outbox from the account cache.
-    //   Until then: no save exists yet, so onboarding is incomplete → onboard.
-    dispatch({ type: "SET_STAGE", stage: "onboard" });
-    return true;
   }, []);
 
   // ── Logout (explicit + idle share a core, differ on draft handling). ──────
@@ -140,6 +160,9 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
       // NOT — origin R6 keeps the same user's Step Runner input for re-login.
       wipeAllForUser(userId);
     }
+    // Clear resident ideas/ledger/UI on BOTH scopes so a shared device never
+    // carries one child's business/financial state past logout.
+    dispatch({ type: "RESET_SESSION" });
     dispatch({ type: "SET_PROFILE", patch: { firstName: "", handle: "", siteHeadline: "" } });
     dispatch({ type: "SET_STAGE", stage: scope === "explicit" ? "landing" : "login" });
   }, []);
@@ -164,14 +187,18 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
 
     const windowEvents: (keyof WindowEventMap)[] = ["mousedown", "keydown", "touchstart"];
     for (const ev of windowEvents) window.addEventListener(ev, reset, { passive: true });
-    // `visibilitychange` fires on `document`, not `window`.
-    document.addEventListener("visibilitychange", reset);
+    // `visibilitychange` fires on `document`. Count only a RETURN to a visible
+    // tab as activity — backgrounding the tab must not reset the idle clock.
+    const onVisibility = () => {
+      if (document.visibilityState === "visible") reset();
+    };
+    document.addEventListener("visibilitychange", onVisibility);
     reset();
 
     return () => {
       clearTimeout(timer);
       for (const ev of windowEvents) window.removeEventListener(ev, reset);
-      document.removeEventListener("visibilitychange", reset);
+      document.removeEventListener("visibilitychange", onVisibility);
     };
   }, [state.stage, runLogout]);
 
