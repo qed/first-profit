@@ -1119,6 +1119,20 @@ the anon-key parallel-auth exposure is the documented accepted posture.
 - Pre-launch items recorded in the R20 doc: FP-aware deletion path for R28,
   gauntlet-leaderboard hardening, handle-enumeration product decision, CAPTCHA +
   password-length raise (all The120-side, outside Slice A).
+- **Candidate-scan cap lockout (P1, found in the full-branch review; blocks
+  launch at scale).** Both `/api/fp/login` and The120's existing `/fp`
+  `signInStudent` resolve a student by scanning `path_student_profiles` ordered
+  by `created_at` and password-probing at most `MAX_SIGN_IN_CANDIDATES` (5)
+  same-normalized-name rows. The 6th+ student system-wide sharing a common first
+  name (Mia, Liam, ...) can never authenticate — their row is never reached, and
+  the refusal is byte-identical to a wrong password. Not a regression (inherited
+  from `/fp`) and harmless at tiny tester volume, but a hard launch blocker as
+  enrollment grows. Real fix (affects both routes): add/populate a
+  `normalized_name` column + index on `path_student_profiles` and push the name
+  filter into the query instead of JS-truncating a `created_at` prefix. This is
+  the "normalized-name column, pre-public-launch carry-forward" work the login
+  route already references. (The sibling handle-exhaustion cliff was fixed in
+  Slice A via a random-suffix fallback; only the auth candidate scan remains.)
 
 Slice A is code-complete. Next: **Slice B** (Start Building signup +
 provisioning, R9-R17), then payment Phase 2 (real Stripe test mode).
