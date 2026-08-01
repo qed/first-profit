@@ -132,6 +132,8 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
 }
 
+// Shallow shape-coercion only: leaf values are trusted for v1 (the docVersion
+// guard in fromSaveDoc is the real cross-version compatibility gate).
 function coerceIdea(value: unknown): Idea {
   if (!isRecord(value)) return { fields: {}, done: {} };
   const fields = isRecord(value.fields) ? (value.fields as Record<string, string>) : {};
@@ -283,14 +285,7 @@ export type Action =
   | { type: "OPEN_ROOM"; room: RoomId }
   | { type: "CLOSE_ROOM" }
   | { type: "SET_PICK_FOR"; pickFor: string | null }
-  | {
-      type: "ADD_LEDGER";
-      id: string;
-      kind: LedgerKind;
-      payer: string;
-      amountCents: number;
-      createdAt: string;
-    }
+  | ({ type: "ADD_LEDGER" } & LedgerEntry)
   | { type: "DISMISS_CELEBRATION" }
   | { type: "OPEN_CHECKOUT" }
   | { type: "CLOSE_CHECKOUT" }
@@ -412,9 +407,15 @@ export function reducer(state: GameState, action: Action): GameState {
       };
       let next: GameState = { ...state, ledger: [...state.ledger, entry] };
       if (action.kind === "sale") {
-        // A logged sale auto-completes the LAST task of 1.2 for the active idea.
+        // A logged sale auto-completes the LAST task of 1.2 for the active idea,
+        // but only when 1.2 is unlocked for it (1.1 complete). A stray sale event
+        // before then must not light 1.2's final pip while earlier pips are dark.
         const saleStep = stepById("1.2");
-        if (saleStep && hasIdea(next, next.activeIdea)) {
+        if (
+          saleStep &&
+          hasIdea(next, next.activeIdea) &&
+          isStepUnlocked(next, next.activeIdea, "1.2")
+        ) {
           next = markTaskDone(next, next.activeIdea, "1.2", saleStep.tasks.length - 1);
         }
       }

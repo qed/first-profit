@@ -176,6 +176,26 @@ describe("ADD_LEDGER", () => {
     expect(isCriterionDone(s, 0, "1.2")).toBe(false);
   });
 
+  it("a sale before 1.2 is unlocked appends the row but completes no task", () => {
+    // withOneIdea has 1.1 incomplete, so 1.2 is locked for idea #0.
+    const s = withOneIdea();
+    expect(isStepUnlocked(s, 0, "1.2")).toBe(false);
+    const after = reducer(s, {
+      type: "ADD_LEDGER",
+      id: "stray-sale",
+      kind: "sale",
+      payer: "Drew",
+      amountCents: 900,
+      createdAt: "2026-07-31T00:03:00.000Z",
+    });
+    // Ledger row lands, but the idea's done map is untouched (referentially).
+    expect(after.ledger).toHaveLength(1);
+    expect(after.ideas[0]).toBe(s.ideas[0]);
+    expect(after.ideas[0].done).toEqual({});
+    expect(isTaskDone(after, 0, "1.2", LAST_1_2_INDEX)).toBe(false);
+    expect(after.celebrate).toBeNull();
+  });
+
   it("is idempotent on ledger id (retried inserts do not double-append)", () => {
     const row: Extract<Action, { type: "ADD_LEDGER" }> = {
       type: "ADD_LEDGER",
@@ -253,6 +273,95 @@ describe("stale-event tolerance (out-of-range idea index)", () => {
     const after = reducer(s, { type: "SET_ACTIVE_IDEA", ideaIndex: 3 });
     expect(after).toBe(s);
   });
+
+  it("COMPLETE_TASK with an out-of-range task index is a referential no-op", () => {
+    const s = withOneIdea();
+    const tooHigh = reducer(s, {
+      type: "COMPLETE_TASK",
+      ideaIndex: 0,
+      stepId: "1.1",
+      index: getStep("1.1").tasks.length,
+    });
+    expect(tooHigh).toBe(s);
+    const negative = reducer(s, {
+      type: "COMPLETE_TASK",
+      ideaIndex: 0,
+      stepId: "1.1",
+      index: -1,
+    });
+    expect(negative).toBe(s);
+  });
+
+  it("COMPLETE_TASK with an unknown stepId is a referential no-op", () => {
+    const s = withOneIdea();
+    const after = reducer(s, { type: "COMPLETE_TASK", ideaIndex: 0, stepId: "9.9", index: 0 });
+    expect(after).toBe(s);
+  });
+});
+
+describe("OPEN_RUNNER", () => {
+  it("honors an explicit stepId and index", () => {
+    const s = reducer(withOneIdea(), { type: "OPEN_RUNNER", stepId: "1.2", index: 3 });
+    expect(s.runnerOpen).toBe(true);
+    expect(s.runnerStep).toBe("1.2");
+    expect(s.runnerIndex).toBe(3);
+  });
+
+  it("falls back to nextUpFor when no stepId is given and a criterion is incomplete", () => {
+    let s = withOneIdea();
+    s = completeCriterion(s, 0, "1.1");
+    s = reducer(s, { type: "OPEN_RUNNER" });
+    expect(s.runnerStep).toBe("1.2");
+    expect(s.runnerIndex).toBe(0);
+  });
+
+  it("falls back to the first playable criterion when all criteria are done", () => {
+    let s = withOneIdea();
+    s = completeCriterion(s, 0, "1.1");
+    s = completeCriterion(s, 0, "1.2");
+    expect(nextUpFor(s, 0)).toBeNull();
+    s = reducer(s, { type: "OPEN_RUNNER" });
+    expect(s.runnerStep).toBe(PLAYABLE_STEPS[0]);
+  });
+});
+
+describe("immutability", () => {
+  it("COMPLETE_TASK / SET_FIELD / ADD_LEDGER do not mutate the prior object graph", () => {
+    const s = withOneIdea();
+    const ideaSnapshot = structuredClone(s.ideas[0]);
+    const priorIdeaRef = s.ideas[0];
+
+    const afterComplete = reducer(s, {
+      type: "COMPLETE_TASK",
+      ideaIndex: 0,
+      stepId: "1.1",
+      index: 0,
+    });
+    expect(s.ideas[0]).toEqual(ideaSnapshot);
+    expect(s.ideas[0]).toBe(priorIdeaRef);
+    expect(afterComplete.ideas[0]).not.toBe(priorIdeaRef);
+
+    const afterField = reducer(s, {
+      type: "SET_FIELD",
+      ideaIndex: 0,
+      key: "oneLiner",
+      value: "hi",
+    });
+    expect(s.ideas[0]).toEqual(ideaSnapshot);
+    expect(afterField.ideas[0]).not.toBe(priorIdeaRef);
+
+    const ledgerSnapshot = structuredClone(s.ledger);
+    const afterLedger = reducer(s, {
+      type: "ADD_LEDGER",
+      id: "imm-1",
+      kind: "backing",
+      payer: "Q",
+      amountCents: 100,
+      createdAt: "2026-07-31T00:04:00.000Z",
+    });
+    expect(s.ledger).toEqual(ledgerSnapshot);
+    expect(afterLedger.ledger).not.toBe(s.ledger);
+  });
 });
 
 describe("field + misc reducer actions", () => {
@@ -311,6 +420,36 @@ describe("selectors: pips and progress", () => {
   });
 });
 
+describe("selectors: ledger sums", () => {
+  it("count only their own kind, and empty ledger sums to 0", () => {
+    expect(backingSumCents(withOneIdea())).toBe(0);
+    expect(salesSumCents(withOneIdea())).toBe(0);
+
+    // Reach a state where a sale is allowed (1.1 complete) so both kinds land.
+    let s = withOneIdea();
+    s = completeCriterion(s, 0, "1.1");
+    s = reducer(s, { type: "DISMISS_CELEBRATION" });
+    s = reducer(s, {
+      type: "ADD_LEDGER",
+      id: "b1",
+      kind: "backing",
+      payer: "A",
+      amountCents: 2500,
+      createdAt: "2026-07-31T00:05:00.000Z",
+    });
+    s = reducer(s, {
+      type: "ADD_LEDGER",
+      id: "s1",
+      kind: "sale",
+      payer: "B",
+      amountCents: 1500,
+      createdAt: "2026-07-31T00:06:00.000Z",
+    });
+    expect(backingSumCents(s)).toBe(2500);
+    expect(salesSumCents(s)).toBe(1500);
+  });
+});
+
 describe("serialization round-trip", () => {
   it("initial -> acts -> toSaveDoc -> fromSaveDoc -> HYDRATE preserves persistent state", () => {
     let s = withOneIdea();
@@ -350,6 +489,9 @@ describe("serialization round-trip", () => {
     expect(hydrated.onboardingComplete).toBe(s.onboardingComplete);
     // Ledger is session-only, not restored from the save doc.
     expect(hydrated.ledger).toEqual([]);
+    // Incomplete onboarding routes to the onboarding stage.
+    expect(hydrated.onboardingComplete).toBe(false);
+    expect(hydrated.stage).toBe("onboard");
     // Completed onboarding routes straight to the app.
     const done = reducer(initialState(), {
       type: "HYDRATE",
