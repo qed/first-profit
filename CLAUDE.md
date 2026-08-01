@@ -21,12 +21,17 @@ Every UI change MUST look good and work well on mobile before it is considered d
 
 - `src/components/FactoryFloor.tsx` renders the desktop 2D floor at `lg`+ and delegates to
   `src/components/MobilePath.tsx` (vertical path of pod cards) below `lg`, via a
-  `matchMedia` hook. Both honor the same `walkTo`/`onArrived` contract used by
-  `src/App.tsx` and `NextStepCoach`.
-- Room panels (`RoomShell`) are full-screen takeovers on mobile, floating modals from `sm` up.
-- The Next Step coach docks full-width at the bottom on phones; `MobilePath` reserves
-  bottom padding so it never covers the last card. Preserve that padding if you change
-  either component.
+  `matchMedia` hook. Both honor the same `walkTo`/`onWalk`/`onArrived` lifted-intent
+  contract owned by `src/screens/Factory.tsx` (the intent lives above the conditional
+  mount so a walk survives the breakpoint swap; see the documented solution below).
+- Overlays (the Step Runner, criterion Celebration, room dialogs, and the mock checkout,
+  all mounted at `src/screens/Factory.tsx` above the floor) are full-screen takeovers on
+  mobile and floating dialogs from `sm` up. Their open-state lives in the `gameCore`
+  reducer, which is above the breakpoint mount, so they survive the swap too.
+- The fpv2 floor uses click-to-walk plus a bottom hint pill and the HUD for guidance; there
+  is no separate "Next Step coach" component (a v1 concept the fpv2 design superseded).
+  `MobilePath` still reserves bottom padding (`pb-80`) so a bottom-docked HUD/overlay never
+  covers the last card. Preserve that padding if you change either component.
 - Styling is Tailwind mobile-first: base classes are the mobile styles; desktop is layered
   on with `sm:`/`lg:` variants. When fixing mobile, don't silently change desktop —
   re-assert desktop values at the appropriate breakpoint.
