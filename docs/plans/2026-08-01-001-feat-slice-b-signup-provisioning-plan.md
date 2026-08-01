@@ -247,12 +247,22 @@ key ≠ double-submit guard; a guard with no callers is not a mechanism.
   (new/existing/verify/compensation/gate/is_test).
 
 - [ ] **Unit 3: [T120] Consent record + gate**
-  **Requirements:** R15. **Files:** `app/api/fp/signup/consent-{rules,core}.ts` (+ tests).
+  **Requirements:** R15. **Files:** `app/api/fp/signup/consent-{rules,core}.ts` (+ tests);
+  a follow-up migration `<live-slot>_fp_consent_hardening.sql`.
   **Approach:** render versioned+hashed policy snapshot; accept echoes version (refuse
   stale, `policyVersionAtLeast` per-namespace); re-check session freshness (just-verified
   parent); write `fp_parental_consent` bound to `(parent_id, signup_attempt_id)` with
   method/dob/jurisdiction/identity/ip/ua. Minting requires a valid verdict + attempt-id
-  match. **Tests:** echo/refuse-stale; verdict; binding; freshness.
+  match.
+  **Carry the Unit 1 migration-review hardenings HERE (consent rows first exist now):**
+  (a) a partial UNIQUE index `on fp_parental_consent (signup_attempt_id) where revoked_at
+  is null and signup_attempt_id is not null` — makes the anti-mis-attachment binding a DB
+  invariant, not an app assumption; (b) once the consent write guarantees the fields,
+  `child_age_band` NOT NULL + a `jurisdiction <> ''` check (NOT VALID then VALIDATE) so a
+  caller bug can't silently persist an unretrofittable empty legal field. Query live
+  schema_migrations; GATE before applying.
+  **Tests:** echo/refuse-stale; verdict; binding; freshness; duplicate-consent-per-attempt
+  rejected by the unique index.
 
 - [ ] **Unit 4: [T120] Child creation — path (a)**
   **Requirements:** R12(a), R9. **Files:** `app/api/fp/signup/child-core.ts` (+ tests).
