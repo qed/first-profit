@@ -5,7 +5,6 @@
  * app. This unit ships the login screen and MINIMAL placeholders for the other
  * stages so the whole flow is walkable end to end; the real surfaces arrive in
  * later units:
- *   - landing   → Unit 7
  *   - onboard   → Unit 8
  *   - app floor → Units 9-11
  *
@@ -16,6 +15,7 @@
  */
 import { GameProvider, useGame } from "./state/GameContext";
 import { Login } from "./screens/Login";
+import { Landing } from "./screens/Landing";
 
 function Boot() {
   return (
@@ -28,45 +28,6 @@ function Boot() {
           <span className="h-9 w-[5px] animate-pulse rounded-sm bg-scale" />
         </span>
         <p className="font-mono text-[11px] uppercase tracking-[0.28em] text-ink/50">Loading</p>
-      </div>
-    </main>
-  );
-}
-
-/** Minimal placeholder landing (real one is Unit 7). Both CTAs route to login. */
-function Landing() {
-  const { dispatch } = useGame();
-  const toLogin = () => dispatch({ type: "SET_STAGE", stage: "login" });
-
-  return (
-    <main className="flex min-h-screen w-full flex-col items-center justify-center bg-[hsl(40_30%_99%)] px-4 py-8 text-ink">
-      <div className="w-full max-w-md text-center">
-        <p className="font-mono text-[11px] uppercase tracking-[0.28em] text-sell">
-          Home Study Edition
-        </p>
-        <h1 className="mt-3 font-display text-4xl font-black leading-tight sm:text-5xl">
-          First Profit
-        </h1>
-        <p className="mt-4 text-base leading-relaxed text-ink/60">
-          Your kid&rsquo;s first $1,000, earned for real.
-        </p>
-
-        <div className="mt-8 flex flex-col gap-3">
-          <button
-            type="button"
-            onClick={toLogin}
-            className="flex min-h-[52px] w-full items-center justify-center rounded-2xl bg-verified px-5 font-display text-lg font-bold text-white shadow-[0_6px_0_hsl(150_52%_26%)] transition active:translate-y-0.5 active:shadow-[0_3px_0_hsl(150_52%_26%)]"
-          >
-            Start Building →
-          </button>
-          <button
-            type="button"
-            onClick={toLogin}
-            className="flex min-h-[48px] w-full items-center justify-center rounded-2xl border-2 border-ink/15 bg-white px-5 font-display text-base font-bold text-ink hover:border-ink/30"
-          >
-            Log in
-          </button>
-        </div>
       </div>
     </main>
   );
