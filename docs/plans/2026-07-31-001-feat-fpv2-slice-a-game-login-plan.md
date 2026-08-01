@@ -343,7 +343,7 @@ onboarding is complete.
 
 ### Phase A1 — The120 foundation
 
-- [ ] **Unit 1: [T120] FP tables migration (profiles, saves, ledger) with RLS**
+- [x] **Unit 1: [T120] FP tables migration (profiles, saves, ledger) with RLS**
 
 **Goal:** The three FP-owned tables exist in production with child-scoped RLS,
 indexes, and RESTRICT FKs.
@@ -427,7 +427,7 @@ not a hardening follow-up.)
   `source <> 'mock'` or a foreign `profile_id`, and cannot skip the revision
   sequence; the schema_migrations row reads back with this migration's name.
 
-- [ ] **Unit 2: [T120] Child login route (`/api/fp/login`)**
+- [x] **Unit 2: [T120] Child login route (`/api/fp/login`)**
 
 **Goal:** A cross-origin login endpoint that authenticates name-or-email +
 password, gates to children, ensures the player profile, and returns session
@@ -552,7 +552,7 @@ vitest is node-only).
 
 ### Phase A2 — SPA foundation
 
-- [ ] **Unit 3: [FP] App scaffolding — env, Supabase client, fonts, motion, vitest**
+- [x] **Unit 3: [FP] App scaffolding — env, Supabase client, fonts, motion, vitest**
 
 **Goal:** The SPA can hold configuration, talk to Supabase lazily, load the
 handoff's fonts self-hosted, and run tests.
@@ -595,7 +595,7 @@ handoff's fonts self-hosted, and run tests.
   same-origin woff2 (no fonts.googleapis.com requests); app boots env-less in
   dev with the clear failure message.
 
-- [ ] **Unit 4: [FP] GameContext v2 — stage machine, multi-idea model, ledger kinds**
+- [x] **Unit 4: [FP] GameContext v2 — stage machine, multi-idea model, ledger kinds**
 
 **Goal:** The state layer matches the fpv2 handoff: stages, up to 5 ideas with
 per-idea `fields`/`done`, active idea, backing/sale ledger, celebrations,
@@ -650,7 +650,7 @@ are the heart of the game and the likeliest source of subtle bugs.
 - Core test suite green; existing floor/rooms still function against the
   wrapped provider (manual smoke at both breakpoints).
 
-- [ ] **Unit 5: [FP] Login screen + session lifecycle**
+- [x] **Unit 5: [FP] Login screen + session lifecycle**
 
 **Goal:** Children sign in (name or email + password) through The120's route;
 sessions persist, log out cleanly, and drafts are account-scoped.
@@ -708,7 +708,7 @@ unsent Step Runner draft (it restores after re-login as same user).
   reopens: still signed in. Log out → drafts gone, back at login. A parent
   credential shows the same generic failure as a typo.
 
-- [ ] **Unit 6: [FP] Server sync — save snapshots, ledger writes, outbox**
+- [x] **Unit 6: [FP] Server sync — save snapshots, ledger writes, outbox**
 
 **Goal:** Game progress survives devices: snapshot upserts with revision
 guard, append-only ledger inserts, flush-on-hide, retry outbox.
@@ -787,7 +787,7 @@ calls stubbed at the module seam.
 
 ### Phase A3 — the fpv2 game surfaces
 
-- [ ] **Unit 7: [FP] Landing page**
+- [x] **Unit 7: [FP] Landing page**
 
 **Goal:** The parent-facing landing page per handoff §A, at the `landing` stage.
 
@@ -813,7 +813,7 @@ mockup scales, no horizontal scroll.
 **Verification:** Side-by-side with prototype screens 01; 390px pass; no em
 dashes; fonts/tokens exact.
 
-- [ ] **Unit 8: [FP] First-run in-game onboarding (screens 2–5)**
+- [x] **Unit 8: [FP] First-run in-game onboarding (screens 2–5)**
 
 **Goal:** An existing child's first login flows through founder profile →
 website reveal → money booth → The Path, with the 5-segment progress bar and
@@ -849,7 +849,7 @@ persists the save, enters `app`.
 viewport, lands on the floor with name tag, handle, Idea #1; second login
 skips straight to the floor.
 
-- [ ] **Unit 9: [FP] Factory floor v2 — Path / Company / Products rows + Sell floor**
+- [x] **Unit 9: [FP] Factory floor v2 — Path / Company / Products rows + Sell floor**
 
 **Goal:** The handoff's floor: three rows of compact cards, phase-bordered
 floor panel, avatar walking, and the Sell-phase sub-floor (5 rooms, sequential
@@ -887,7 +887,7 @@ unlock, Your Ideas row with the only new-idea entry point).
 **Verification:** Screens 08–09 fidelity check; 390px + desktop pass;
 walk-then-open behavior on both variants.
 
-- [ ] **Unit 10: [FP] Step Runner + celebrations**
+- [x] **Unit 10: [FP] Step Runner + celebrations**
 
 **Goal:** The task dialog (rail, task body, inputs, "I did it") and the
 criterion-passed celebration with wax stamp and unlock listing.
@@ -920,7 +920,7 @@ on task completion.
 **Verification:** Screen 10 fidelity; a full 1.1 run end-to-end persists all
 five answers server-side (visible after re-login).
 
-- [ ] **Unit 11: [FP] Room dialogs + mock Stripe checkout**
+- [x] **Unit 11: [FP] Room dialogs + mock Stripe checkout**
 
 **Goal:** Your Site, Checkout Booth (with ledger), Sales Room (log a sale),
 Idea Room, and the two-pane mock Stripe checkout overlay that writes
@@ -963,7 +963,7 @@ rows visible after re-login on another device.
 
 ### Phase A4 — hardening
 
-- [ ] **Unit 12: [FP + T120] End-to-end verification pass**
+- [x] **Unit 12: [FP + T120] End-to-end verification pass**
 
 **Goal:** The Slice A success criteria from the origin doc hold against
 production infrastructure, and every screen passes the mobile bar.
@@ -1091,6 +1091,37 @@ filed before Slice A is called done.
   as `docs/solutions/` entries (both repos use the same frontmatter scheme).
 - Slice B planning should start from this plan's login-route pure modules and
   the origin doc's R9–R17.
+
+## Implementation Status (2026-08-01)
+
+All 12 units implemented on branches `first-profit@feat/fpv2-slice-a` and
+`120-The120@feat/fp-slice-a`, each through a work -> full ce:review -> fix ->
+(compound where warranted) -> commit -> push cycle. Migrations `20260827120000`
+and `20260828120000` are applied to the production Supabase project (verified:
+tables, per-command policies, constraints, triggers, column-scoped grants).
+
+**Verified now (automated / analytic):** 139 SPA unit tests green; build/lint
+clean; `tsc --noEmit` clean; The120 suite green (4468) incl. login-rules tests.
+RLS cross-tenant isolation and the R20 whole-surface reach verified by policy
+analysis + live migration post-apply checks (see
+`docs/solutions/security-issues/r20-fp-child-session-reach-across-the-shared-supabase-project-accepted-exposure-2026-08-01.md`).
+Live auth config read (public signup ON, no CAPTCHA, password_min_length 6) —
+the anon-key parallel-auth exposure is the documented accepted posture.
+
+**Remaining before onboarding real families (human / live-account gates):**
+- Live 390px pass on every screen with a real The120 child account through the
+  deployed route (the SPA fail-fasts without env + a real login, so this cannot
+  run headless from the build environment). Every screen was built mobile-first
+  and structurally verified per-unit.
+- Live two-child RLS probe and attacker-with-anon-key probes (signUp /
+  updateUser / direct `.invalid` sign-in) — analyzed and expected-safe; confirm
+  with throwaway accounts against production.
+- Pre-launch items recorded in the R20 doc: FP-aware deletion path for R28,
+  gauntlet-leaderboard hardening, handle-enumeration product decision, CAPTCHA +
+  password-length raise (all The120-side, outside Slice A).
+
+Slice A is code-complete. Next: **Slice B** (Start Building signup +
+provisioning, R9-R17), then payment Phase 2 (real Stripe test mode).
 
 ## Sources & References
 
