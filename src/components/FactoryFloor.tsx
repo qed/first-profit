@@ -1,126 +1,117 @@
-import React, { useEffect, useRef, useState } from 'react';
-import { motion } from 'framer-motion';
-import { ROOMS, doorOf, roomById } from '../data/rooms';
-import { phaseById, type RoomId } from '../data/path';
-import { useGame } from '../state/GameContext';
-import { Avatar } from './Avatar';
-import { MobilePath } from './MobilePath';
-import { PodCardContent } from './PodCardContent';
+/**
+ * The factory floor, fpv2 (handoff §H). Keeps the matchMedia(1024px) desktop /
+ * mobile swap and the lifted-intent contract from
+ * docs/solutions/ui-bugs/breakpoint-crossing-drops-navigation:
+ *
+ *   - `walkTo` (a WalkIntent) is owned by the parent (screens/Factory), ABOVE the
+ *     conditional mount. Card taps call `onWalk` → parent sets `walkTo`. Each
+ *     variant's `useEffect([walkTo])` drives its own walk animation and, on
+ *     arrival, calls `onArrived(intent)`. The parent runs the real action and
+ *     clears `walkTo` only in `onArrived` (at-least-once). Crossing lg unmounts
+ *     the active variant and cancels its local timer, but the intent survives in
+ *     the parent, so the freshly-mounted variant's effect resumes it on mount.
+ *   - `floorView` (phases | sell) also lives in the parent — it must survive the
+ *     breakpoint swap too, so it is NOT variant-local state.
+ *   - Dialog / runner / picker open-state lives in the gameCore reducer (in the
+ *     provider, above everything), so those survive the swap for free.
+ */
+import { useEffect, useRef, useState } from "react";
+import { useGame } from "../state/GameContext";
+import type { RoomId } from "../data/path";
+import { AvatarSprite } from "./Avatar";
+import { MobilePath } from "./MobilePath";
+import { PhasesFloor } from "./PhasesFloor";
+import { SellFloor } from "./SellFloor";
 
-const DESKTOP_QUERY = '(min-width: 1024px)';
+const DESKTOP_QUERY = "(min-width: 1024px)";
+
+/** What a card tap wants to happen once the avatar has walked over. */
+export type WalkIntent =
+  | { kind: "openSellFloor" }
+  | { kind: "openRoom"; room: RoomId }
+  | { kind: "enterCriterion"; stepId: string }
+  | { kind: "openIdea"; ideaIndex: number }
+  | { kind: "createIdea" };
+
+export type FloorView = "phases" | "sell";
+
+export interface FloorProps {
+  walkTo: WalkIntent | null;
+  onArrived: (intent: WalkIntent) => void;
+  /** Route taps through the parent's walkTo so an in-flight walk survives the
+   * desktop/mobile variant swapping at the lg breakpoint. */
+  onWalk: (intent: WalkIntent) => void;
+  floorView: FloorView;
+  /** Immediate (no-walk) return to the phases view; a parent-level setter. */
+  onBack: () => void;
+}
 
 function useIsDesktop() {
   const [isDesktop, setIsDesktop] = useState(() => window.matchMedia(DESKTOP_QUERY).matches);
   useEffect(() => {
     const media = window.matchMedia(DESKTOP_QUERY);
     const onChange = () => setIsDesktop(media.matches);
-    media.addEventListener('change', onChange);
-    return () => media.removeEventListener('change', onChange);
+    media.addEventListener("change", onChange);
+    return () => media.removeEventListener("change", onChange);
   }, []);
   return isDesktop;
-}
-
-export interface FloorProps {
-  walkTo: RoomId | null;
-  onArrived: (room: RoomId) => void;
-  /** Route pod taps through the parent's walkTo state so an in-flight walk
-   * survives the desktop/mobile variant swapping at the lg breakpoint. */
-  onWalk: (room: RoomId) => void;
 }
 
 export function FactoryFloor(props: FloorProps) {
   return useIsDesktop() ? <DesktopFloor {...props} /> : <MobilePath {...props} />;
 }
 
-function DesktopFloor({ walkTo, onArrived, onWalk }: FloorProps) {
-  const { company, isRoomUnlocked, roomProgress, nextStep } = useGame();
-  const [pos, setPos] = useState({ x: 50, y: 52 });
+const HINT = "Click the floor to walk · click a room to enter it";
+
+function DesktopFloor({ walkTo, onArrived, onWalk, floorView, onBack }: FloorProps) {
+  const { profile } = useGame();
+  const [pos, setPos] = useState({ x: 50, y: 94 });
   const timer = useRef<number | null>(null);
 
-  const walk = (room: RoomId, thenOpen: boolean) => {
-    const target = doorOf(roomById(room));
-    setPos(target);
-    if (timer.current) window.clearTimeout(timer.current);
-    timer.current = window.setTimeout(() => {
-      if (thenOpen) onArrived(room);
-    }, 750);
-  };
-
+  // Drive the walk from the parent's intent (survives the breakpoint swap).
   useEffect(() => {
-    if (walkTo) walk(walkTo, true);
+    if (!walkTo) return;
+    // Cosmetic: glide toward the middle of the floor, then fire the intent.
+    setPos({ x: 50, y: 46 });
+    if (timer.current) window.clearTimeout(timer.current);
+    timer.current = window.setTimeout(() => onArrived(walkTo), 550);
+    return () => {
+      if (timer.current) window.clearTimeout(timer.current);
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [walkTo]);
-
-  useEffect(() => () => {if (timer.current) window.clearTimeout(timer.current);}, []);
 
   const onFloorClick = (e: React.MouseEvent<HTMLDivElement>) => {
     const rect = e.currentTarget.getBoundingClientRect();
     setPos({
-      x: (e.clientX - rect.left) / rect.width * 100,
-      y: (e.clientY - rect.top) / rect.height * 100
+      x: ((e.clientX - rect.left) / rect.width) * 100,
+      y: ((e.clientY - rect.top) / rect.height) * 100,
     });
   };
 
   return (
     <div
-      className="fp-grid relative h-full w-full overflow-hidden rounded-3xl border-2 border-ink/10 bg-[#F1EADC]"
+      className="fp-grid relative h-full w-full overflow-hidden rounded-[22px] border-2 border-[hsl(14_78%_54%/0.5)] bg-[hsl(38_40%_92%)]"
       onClick={onFloorClick}
       role="application"
-      aria-label="First Profit factory floor">
-      
-      {/* floor markings */}
-      <div className="pointer-events-none absolute inset-x-[4%] top-[40%] h-[3px] rounded bg-ember/20" />
-      <div className="pointer-events-none absolute inset-y-[6%] left-[33.5%] w-[3px] rounded bg-ocean/15" />
-      <div className="pointer-events-none absolute inset-y-[6%] right-[33.5%] w-[3px] rounded bg-ocean/15" />
-      <p className="pointer-events-none absolute left-1/2 top-[68%] -translate-x-1/2 font-display text-[13px] font-bold uppercase tracking-[0.35em] text-ink/15">
-        The Path
+      aria-label="First Profit factory floor"
+    >
+      {/* Content scrolls within the floor panel. Clicks on empty area bubble to
+          onFloorClick (cosmetic avatar walk); card buttons handle their own tap. */}
+      <div className="absolute inset-0 overflow-y-auto p-7 pb-14">
+        {floorView === "phases" ? <PhasesFloor onWalk={onWalk} /> : <SellFloor onWalk={onWalk} onBack={onBack} />}
+      </div>
+
+      <div
+        className="pointer-events-none absolute z-30 -translate-x-1/2 -translate-y-full"
+        style={{ left: `${pos.x}%`, top: `${pos.y}%`, transition: "left .8s cubic-bezier(.22,1,.36,1), top .8s cubic-bezier(.22,1,.36,1)" }}
+      >
+        <AvatarSprite name={profile.firstName || profile.handle || "Founder"} />
+      </div>
+
+      <p className="pointer-events-none absolute bottom-2.5 left-1/2 -translate-x-1/2 rounded-full bg-[hsl(25_34%_20%/0.55)] px-3 py-1 font-mono text-[9.5px] uppercase tracking-[0.08em] text-[hsl(40_55%_97%)]">
+        {HINT}
       </p>
-
-      {ROOMS.map((room) => {
-        const unlocked = isRoomUnlocked(room.id);
-        const { done, total } = roomProgress(room.id);
-        const phase = phaseById(room.phase);
-        const isNext = nextStep?.room === room.id;
-        return (
-          <motion.button
-            key={room.id}
-            type="button"
-            disabled={!unlocked}
-            onClick={(e) => {
-              e.stopPropagation();
-              onWalk(room.id);
-            }}
-            whileHover={unlocked ? { y: -4 } : undefined}
-            className={[
-            'group absolute z-20 flex flex-col justify-between rounded-2xl border-2 p-3 text-left transition-shadow',
-            unlocked ?
-            'border-ink/15 bg-parchment shadow-pod hover:shadow-[0_14px_0_rgba(26,23,18,0.16)]' :
-            'cursor-not-allowed border-dashed border-ink/15 bg-ink/[0.04]',
-            isNext ? 'ring-4 ring-go/30' : ''].
-            join(' ')}
-            style={{
-              left: `${room.x}%`,
-              top: `${room.y}%`,
-              width: `${room.w}%`,
-              height: `${room.h}%`
-            }}>
-
-            <PodCardContent
-              room={room}
-              unlocked={unlocked}
-              done={done}
-              total={total}
-              phase={phase} />
-
-          </motion.button>);
-
-      })}
-
-      <Avatar x={pos.x} y={pos.y} name={company.founder} />
-
-      <p className="pointer-events-none absolute bottom-3 left-1/2 -translate-x-1/2 rounded-full bg-ink/70 px-3 py-1 font-mono text-[10px] uppercase tracking-wider text-paper">
-        Click the floor to walk · click a pod to go in
-      </p>
-    </div>);
-
+    </div>
+  );
 }

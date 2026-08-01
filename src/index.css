@@ -30,3 +30,41 @@ body {
   background: #e4d9c4;
   border-radius: 999px;
 }
+
+/* fpv2 floor motion (design_handoff §Design Tokens · Motion). */
+@keyframes fp-bob {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-3px);
+  }
+}
+@keyframes fp-stamp {
+  0% {
+    transform: rotate(-6deg) scale(0);
+    opacity: 0;
+  }
+  100% {
+    transform: rotate(-6deg) scale(1);
+    opacity: 1;
+  }
+}
+@keyframes fp-rise {
+  0% {
+    transform: translateY(12px);
+    opacity: 0;
+  }
+  100% {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .fp-bob,
+  .fp-stamp,
+  .fp-rise {
+    animation: none !important;
+  }
+}
