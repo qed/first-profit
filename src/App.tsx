@@ -16,6 +16,7 @@ import { GameProvider, useGame } from "./state/GameContext";
 import { Login } from "./screens/Login";
 import { Landing } from "./screens/Landing";
 import { Onboarding } from "./screens/Onboarding";
+import { Signup } from "./screens/Signup";
 import { Factory } from "./screens/Factory";
 
 function Boot() {
@@ -35,7 +36,7 @@ function Boot() {
 }
 
 function StageRouter() {
-  const { stage } = useGame();
+  const { stage, dispatch } = useGame();
   switch (stage) {
     case "boot":
       return <Boot />;
@@ -43,6 +44,12 @@ function StageRouter() {
       return <Landing />;
     case "login":
       return <Login />;
+    case "signup":
+      // Signup owns its own signup-LOCAL state; the only stage seam it needs is a
+      // route back to landing (a plain SET_STAGE, no engine/save touched). The
+      // real API submit + email-verify wait + session adoption arrive in Unit 9,
+      // which passes an onSubmitSignup here; Unit 8 uses the built-in mock.
+      return <Signup onExit={() => dispatch({ type: "SET_STAGE", stage: "landing" })} />;
     case "onboard":
       return <Onboarding />;
     case "app":

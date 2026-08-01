@@ -1,0 +1,137 @@
+// @vitest-environment jsdom
+/**
+ * Signup container (Slice B Unit 8) — walks the four-step sequence from local
+ * state alone (no game context) and proves it calls the INJECTED submit stub
+ * once, with the captured fields in the backend-contract shape. Also covers the
+ * back-out `onExit` seam and the synchronous double-submit guard.
+ */
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { Signup } from "../Signup";
+import type { SignupSubmission } from "../signup/validation";
+
+afterEach(cleanup);
+
+/** Drive the four steps with a valid path-a founder. */
+function fillParent() {
+  fireEvent.change(screen.getByPlaceholderText("Sam Rivera"), { target: { value: "Sam Rivera" } });
+  fireEvent.change(screen.getByPlaceholderText("you@example.com"), {
+    target: { value: "sam@example.com" },
+  });
+  fireEvent.change(screen.getByLabelText("Create a password"), { target: { value: "parentpass" } });
+  fireEvent.click(screen.getByRole("button", { name: /Continue/ }));
+}
+
+function fillAge() {
+  fireEvent.click(screen.getByRole("button", { name: /13 to 15/ }));
+  fireEvent.change(screen.getByLabelText("Date of birth"), { target: { value: "2011-06-01" } });
+  fireEvent.change(screen.getByPlaceholderText("Country or state"), {
+    target: { value: "California, US" },
+  });
+  fireEvent.click(screen.getByRole("button", { name: /Continue/ }));
+}
+
+function fillCredentialPathA() {
+  fireEvent.change(screen.getByPlaceholderText("Alex"), { target: { value: "Alex" } });
+  fireEvent.change(screen.getByLabelText("Password for your child"), {
+    target: { value: "kidpassword" },
+  });
+  fireEvent.click(screen.getByRole("button", { name: /Continue/ }));
+}
+
+describe("Signup container", () => {
+  it("walks all four steps and submits the backend-contract shape (path a)", async () => {
+    const onSubmitSignup = vi.fn(async (_s: SignupSubmission) => ({ ok: true }));
+    render(<Signup onSubmitSignup={onSubmitSignup} onExit={vi.fn()} />);
+
+    fillParent();
+    fillAge();
+    fillCredentialPathA();
+
+    // Consent step: attest, then submit.
+    expect(screen.getByText("Step 4 of 4 · Your consent")).toBeTruthy();
+    fireEvent.click(screen.getByRole("checkbox"));
+    fireEvent.click(screen.getByRole("button", { name: /Create my child's account/ }));
+
+    await waitFor(() => expect(onSubmitSignup).toHaveBeenCalledTimes(1));
+    const submission = onSubmitSignup.mock.calls[0][0] as SignupSubmission;
+    expect(submission.parent.email).toBe("sam@example.com");
+    expect(submission.child.credentialChoice).toBe("existing_credential");
+    expect(submission.child.password).toBe("kidpassword");
+    expect(submission.child.provisionAddress).toBeNull();
+    expect(submission.child.ageBand).toBe("13_to_15");
+    expect(submission.child.dob).toBe("2011-06-01");
+    expect(submission.jurisdiction).toBe("California, US");
+    expect(submission.consent.accepted).toBe(true);
+    expect(submission.consent.policyNamespace).toBe("fp_parental_consent");
+    expect(submission.consent.method).toBe("email_plus_attestation");
+
+    // On success the container shows the confirmation.
+    await waitFor(() => expect(screen.getByText("Check your email.")).toBeTruthy());
+  });
+
+  it("submits path b with a provision address and no password", async () => {
+    const onSubmitSignup = vi.fn(async (_s: SignupSubmission) => ({ ok: true }));
+    render(<Signup onSubmitSignup={onSubmitSignup} onExit={vi.fn()} />);
+
+    fillParent();
+    fillAge();
+    fireEvent.change(screen.getByPlaceholderText("Alex"), { target: { value: "Robin" } });
+    fireEvent.click(screen.getByRole("button", { name: /Give them a school email/ }));
+    fireEvent.click(screen.getByRole("button", { name: /Continue/ }));
+
+    fireEvent.click(screen.getByRole("checkbox"));
+    fireEvent.click(screen.getByRole("button", { name: /Create my child's account/ }));
+
+    await waitFor(() => expect(onSubmitSignup).toHaveBeenCalledTimes(1));
+    const submission = onSubmitSignup.mock.calls[0][0] as SignupSubmission;
+    expect(submission.child.credentialChoice).toBe("provision_workspace");
+    expect(submission.child.password).toBeNull();
+    expect(submission.child.provisionAddress).toBe("robin@the120.school");
+  });
+
+  it("exits to landing from step 1 back, and step 2 back returns to step 1", () => {
+    const onExit = vi.fn();
+    render(<Signup onSubmitSignup={vi.fn(async (_s: SignupSubmission) => ({ ok: true }))} onExit={onExit} />);
+    // Step 2 back returns to step 1 (does not exit).
+    fillParent();
+    expect(screen.getByText("Step 2 of 4 · Your child")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: /Back/ }));
+    expect(screen.getByText("Step 1 of 4 · Your grown-up account")).toBeTruthy();
+    expect(onExit).not.toHaveBeenCalled();
+    // Step 1 back exits to landing.
+    fireEvent.click(screen.getByRole("button", { name: /Back/ }));
+    expect(onExit).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not double-submit when the stub is slow (synchronous guard)", async () => {
+    let resolve!: (v: { ok: boolean }) => void;
+    const onSubmitSignup = vi.fn(
+      () => new Promise<{ ok: boolean }>((r) => (resolve = r)),
+    );
+    render(<Signup onSubmitSignup={onSubmitSignup} onExit={vi.fn()} />);
+    fillParent();
+    fillAge();
+    fillCredentialPathA();
+    fireEvent.click(screen.getByRole("checkbox"));
+    const cta = screen.getByRole("button", { name: /Creating account|Create my child's account/ });
+    fireEvent.click(cta);
+    fireEvent.click(cta); // second tap in-flight must be dropped
+    expect(onSubmitSignup).toHaveBeenCalledTimes(1);
+    await act(async () => {
+      resolve({ ok: true });
+    });
+  });
+
+  it("surfaces an error and stays on consent when the submit stub fails", async () => {
+    const onSubmitSignup = vi.fn(async () => ({ ok: false }));
+    render(<Signup onSubmitSignup={onSubmitSignup} onExit={vi.fn()} />);
+    fillParent();
+    fillAge();
+    fillCredentialPathA();
+    fireEvent.click(screen.getByRole("checkbox"));
+    fireEvent.click(screen.getByRole("button", { name: /Create my child's account/ }));
+    await waitFor(() => expect(screen.getByRole("alert")).toBeTruthy());
+    expect(screen.queryByText("Check your email.")).toBeNull();
+  });
+});

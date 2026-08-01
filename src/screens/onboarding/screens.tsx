@@ -37,8 +37,12 @@ export function LogoMark() {
   );
 }
 
-/** The five phase colors, filled left-to-right as onboarding progresses. */
-const PHASE_COLORS = [
+/**
+ * The five phase colors, filled left-to-right as onboarding progresses.
+ * Exported so the signup flow (Unit 8) can size its own progress bar from the
+ * same palette without redefining the tokens.
+ */
+export const PHASE_COLORS = [
   "hsl(14 78% 54%)", // sell
   "hsl(217 74% 56%)", // build
   "hsl(265 52% 58%)", // validate
@@ -63,21 +67,34 @@ export function ProgressBar({ filled }: { filled: number }) {
   );
 }
 
-/** The green Fraunces CTA with the design system's hard shadow. */
-function GreenCta({ children, onClick }: { children: React.ReactNode; onClick: () => void }) {
+/**
+ * The green Fraunces CTA with the design system's hard shadow. Exported for
+ * reuse by the signup flow (Unit 8). `disabled` renders a dimmed, un-clickable
+ * button (used to gate the consent step until the parent has attested).
+ */
+export function GreenCta({
+  children,
+  onClick,
+  disabled,
+}: {
+  children: React.ReactNode;
+  onClick: () => void;
+  disabled?: boolean;
+}) {
   return (
     <button
       type="button"
       onClick={onClick}
-      className="mt-6 flex min-h-[54px] w-full items-center justify-center gap-2 rounded-2xl bg-verified px-5 font-display text-lg font-bold text-white shadow-[0_6px_0_hsl(150_52%_26%)] transition-transform hover:-translate-y-0.5 active:translate-y-px active:shadow-[0_3px_0_hsl(150_52%_26%)]"
+      disabled={disabled}
+      className="mt-6 flex min-h-[54px] w-full items-center justify-center gap-2 rounded-2xl bg-verified px-5 font-display text-lg font-bold text-white shadow-[0_6px_0_hsl(150_52%_26%)] transition-transform hover:-translate-y-0.5 active:translate-y-px active:shadow-[0_3px_0_hsl(150_52%_26%)] disabled:cursor-not-allowed disabled:opacity-50 disabled:shadow-[0_6px_0_hsl(150_52%_26%)] disabled:hover:translate-y-0"
     >
       {children}
     </button>
   );
 }
 
-/** A small back affordance (>=44px tap area) for screens 3..5. */
-function BackLink({ onClick }: { onClick: () => void }) {
+/** A small back affordance (>=44px tap area), exported for reuse by signup. */
+export function BackLink({ onClick }: { onClick: () => void }) {
   return (
     <div className="mt-3.5 flex justify-center">
       <button
