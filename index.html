@@ -2,6 +2,15 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
+    <!--
+      Referrer policy (Slice B Unit 9 review, FIX 3): the signup verify link
+      arrives as /signup/verify?token=... . Without this, the initial-load
+      subresource requests would send the full URL (token included) in the
+      Referer header, and any static host would log the query string. strict-
+      origin-when-cross-origin strips the path+query from cross-origin Referers
+      (and sends only the origin), so the one-time token never leaks off-site.
+    -->
+    <meta name="referrer" content="strict-origin-when-cross-origin" />
     <link rel="icon" type="image/svg+xml" href="/vite.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>First Profit Business Simulator</title>

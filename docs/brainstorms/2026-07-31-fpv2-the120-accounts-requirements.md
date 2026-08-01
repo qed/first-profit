@@ -410,8 +410,29 @@ Two slices, so a playable increment exists before the cross-repo funnel is done:
   (tasks, criteria evidence) seeds their fpv2 game state, and what `/fp` parity
   means concretely before child-facing retirement.
 
+## Slice B build decisions (brainstorm, 2026-08-01)
+
+Refinements confirmed before planning Slice B (Start Building signup +
+provisioning). These override the minimal framing above where they conflict:
+
+- **Real Google Workspace provisioning, end to end.** The provision-an-address
+  path (R12b/R13) wires The120's live Workspace address-issuance machinery so a
+  signup that requests an address mints a real one (consuming the never-reissue
+  ledger). Not stubbed. Planning must confirm the existing machinery is callable
+  and handle the async/exception-queue path for real.
+- **Full verifiable-parental-consent flow now.** Consent (R15) is built as a real
+  flow in Slice B, not deferred to a launch-time legal note. Planning designs the
+  consent step, what it records (`consent_policy_version` + evidence), and how it
+  gates account/child creation.
+- **Guarded test families in production.** No separate staging DB; Slice B is
+  exercised with clearly-tagged test families in the production Supabase (a
+  recognizable test-origin marker + a cleanup path), matching how Slice A applied
+  migrations to prod. Planning defines the tagging + teardown so test data never
+  pollutes real CRM/funnel state.
+
 ## Next Steps
 
--> `/ce:plan` for structured implementation planning, starting with **Slice A**
-(game + child login via The120 route + player profiles + server-side state +
-mock checkout).
+-> **Slice A: SHIPPED** (merged to main in both repos; see the plan's
+Implementation Status). -> `/ce:plan` for **Slice B** (Start Building signup +
+provisioning, R9-R17 + parent emails R26-R28), incorporating the three build
+decisions above. Then payment Phase 2.

@@ -7,8 +7,13 @@
  * dark Path section (5 phase cards), the "Day one takes ten minutes" 3-step row
  * with the coach/verifier banner, and the parchment CTA band.
  *
- * Slice A boundary: every "Start Building" CTA routes to `login` (Slice B signup
- * does not exist yet — pre-launch, no outside traffic).
+ * CTA cutover (Slice B Unit 10, Plan Revision 11 — "no half-live window"): every
+ * "Start Building" CTA routes to `login` by DEFAULT (Slice A behavior). When the
+ * `VITE_ENABLE_SIGNUP` flag is on (`isSignupEnabled`, flipped only after the
+ * [T120] signup backend is verified live) the same CTAs route to `signup`. The
+ * flag defaults OFF so merging/deploying this branch never cuts over on its own;
+ * flipping it is the deliberate, reversible go-live step. `signupEnabled` is a
+ * prop (defaulting to the resolved flag) purely so the routing is unit-testable.
  *
  * Copy rule (global product rule): NO em dashes anywhere. The handoff uses "·"
  * middots and commas/periods; this file matches that exactly.
@@ -19,6 +24,7 @@
  * horizontal scrollbar. Only the two governing breakpoints (sm 640, lg 1024).
  */
 import { useGame } from "../state/GameContext";
+import { isSignupEnabled } from "../config";
 
 /** Logo mark: five ascending steps, one per phase color (adapted from
  * assets/logo-mark.svg). Inline so it inherits `height` from the className. */
@@ -181,10 +187,12 @@ function AzeapMockup() {
   );
 }
 
-export function Landing() {
+export function Landing({ signupEnabled = isSignupEnabled() }: { signupEnabled?: boolean } = {}) {
   const { dispatch } = useGame();
-  // Slice A: Start Building routes to login (Slice B signup does not exist yet).
-  const toLogin = () => dispatch({ type: "SET_STAGE", stage: "login" });
+  // The Start Building cutover (Rev 11): flag OFF -> login (Slice A, no half-live
+  // window); flag ON -> signup, flipped only once the [T120] backend is live.
+  const onStartBuilding = () =>
+    dispatch({ type: "SET_STAGE", stage: signupEnabled ? "signup" : "login" });
 
   return (
     <main className="min-h-screen w-full overflow-x-hidden bg-[hsl(40_30%_99%)] text-ink">
@@ -200,7 +208,7 @@ export function Landing() {
           </span>
           <button
             type="button"
-            onClick={toLogin}
+            onClick={onStartBuilding}
             className="inline-flex min-h-[44px] items-center rounded-lg bg-ink px-[18px] text-sm font-medium text-white transition-colors hover:bg-[hsl(30_12%_22%)]"
           >
             Start Building
@@ -223,7 +231,7 @@ export function Landing() {
             a time. You are the coach and the verifier, never the doer.
           </p>
           <div className="mt-7 flex gap-3">
-            <StartBuildingButton onClick={toLogin} />
+            <StartBuildingButton onClick={onStartBuilding} />
           </div>
           <p className="mt-3.5 font-mono text-[11px] text-[hsl(30_6%_52%)]">
             Free while we test · a parent sets up every account
@@ -334,7 +342,7 @@ export function Landing() {
               Set up takes one parent, one kid, and about four minutes.
             </p>
           </div>
-          <StartBuildingButton onClick={toLogin} size="lg" />
+          <StartBuildingButton onClick={onStartBuilding} size="lg" />
         </div>
       </section>
 

@@ -23,7 +23,16 @@ export const MAX_IDEAS = 5;
 /** taskKey shape mirrors the existing GameContext convention: `${stepId}#${index}`. */
 export const taskKey = (stepId: string, index: number): string => `${stepId}#${index}`;
 
-export type Stage = "boot" | "landing" | "login" | "onboard" | "app";
+/**
+ * Top-level stage machine. `signup` is the parent-facing Start Building flow
+ * (Slice B): a user who is creating an account but is NOT yet authenticated.
+ * Like `landing`/`login`, `signup` is a LOGGED-OUT stage — it has no engine, no
+ * save, and no session — so it is deliberately excluded from `isLoggedInStage`
+ * in GameContext (the engine/save/tick effects must not fire during signup).
+ * SET_STAGE is generic, so boot/landing can route INTO signup and signup can
+ * route on to login or onboard/app as the flow later needs.
+ */
+export type Stage = "boot" | "landing" | "login" | "signup" | "onboard" | "app";
 
 export type LedgerKind = "sale" | "backing";
 

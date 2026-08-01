@@ -84,7 +84,16 @@ export interface GameApi extends GameState {
 
 const GameContext = createContext<GameApi | null>(null);
 
-function isLoggedInStage(stage: GameState["stage"]): boolean {
+/**
+ * The stages that own an authenticated session: an engine, a save, and the idle
+ * clock. ONLY `app` and `onboard` qualify. The logged-OUT stages — `boot`,
+ * `landing`, `login`, and `signup` — must all return false here: a signing-up
+ * parent has no engine, no save, and no session yet, so the engine/save/tick
+ * effects (the reducer->sync subscription and the idle timeout) must NOT fire
+ * during `signup`, exactly as they don't for `landing`/`login`. Exported for
+ * direct unit testing of this gate.
+ */
+export function isLoggedInStage(stage: GameState["stage"]): boolean {
   return stage === "app" || stage === "onboard";
 }
 

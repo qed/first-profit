@@ -68,7 +68,7 @@ vi.mock("../../lib/sync", () => ({
   },
 }));
 
-import { GameProvider, useGame, type GameApi } from "../GameContext";
+import { GameProvider, useGame, isLoggedInStage, type GameApi } from "../GameContext";
 
 // A probe that surfaces the live provider API to the test body.
 let api: GameApi | null = null;
@@ -103,6 +103,40 @@ beforeEach(() => {
 
 afterEach(() => {
   cleanup();
+});
+
+describe("isLoggedInStage gate (Slice B Unit 7)", () => {
+  it("is true ONLY for app + onboard (the session-owning stages)", () => {
+    expect(isLoggedInStage("app")).toBe(true);
+    expect(isLoggedInStage("onboard")).toBe(true);
+  });
+
+  it("is false for every logged-OUT stage, including signup", () => {
+    // signup is the load-bearing addition: a signing-up parent has no engine,
+    // no save, and no session, so the engine/save/tick effects must not fire.
+    expect(isLoggedInStage("signup")).toBe(false);
+    expect(isLoggedInStage("boot")).toBe(false);
+    expect(isLoggedInStage("landing")).toBe(false);
+    expect(isLoggedInStage("login")).toBe(false);
+  });
+});
+
+describe("signup stage does not run login-only effects", () => {
+  it("dispatching SET_STAGE signup starts no engine (no session for a signup user)", async () => {
+    authMock.getCurrentUserId.mockResolvedValue(null);
+    renderProvider();
+    await waitFor(() => expect(api?.stage).toBe("landing"));
+    expect(engines).toHaveLength(0);
+
+    act(() => {
+      getApi().dispatch({ type: "SET_STAGE", stage: "signup" });
+    });
+
+    // The reducer->sync subscription and the idle timer are both gated on
+    // isLoggedInStage, so a signup user never spins up an engine.
+    await waitFor(() => expect(api?.stage).toBe("signup"));
+    expect(engines).toHaveLength(0);
+  });
 });
 
 describe("GameProvider boot", () => {
