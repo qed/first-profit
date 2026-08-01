@@ -430,16 +430,22 @@ describe("createSyncEngine", () => {
   let doc: SaveDoc;
   let reauth: number;
 
+  let engineStorage: Storage;
+  let setRevisionCalls: number;
+
   function makeEngine() {
     statuses = [];
     revision = 5;
     doc = docWith();
     reauth = 0;
+    setRevisionCalls = 0;
+    engineStorage = fakeStorage();
     return createSyncEngine({
       userId: USER,
-      storage: fakeStorage(),
+      storage: engineStorage,
       getSnapshot: () => ({ doc, revision }),
       setRevision: (r) => {
+        setRevisionCalls += 1;
         revision = r;
       },
       onStatus: (s) => statuses.push(s),
@@ -461,10 +467,12 @@ describe("createSyncEngine", () => {
 
   it("debounces a snapshot change and writes revision base+1 after ~3s", async () => {
     const engine = makeEngine();
-    // resolveProfileId happens in start(); await the microtasks it schedules.
+    // Capture the patch and assert AFTER the awaited flush — asserting inside the
+    // handler would let saveSnapshot's try/catch reclassify the thrown
+    // AssertionError as a retryable error and swallow it.
+    let sentRevision: number | null = null;
     handlers.update = (patch) => {
-      const p = patch as { revision: number };
-      expect(p.revision).toBe(6); // base(5) + 1
+      sentRevision = (patch as { revision: number }).revision;
       return { data: [{ profile_id: PROFILE }], error: null };
     };
     await engine.start();
@@ -473,6 +481,7 @@ describe("createSyncEngine", () => {
     expect(statuses).not.toContain("saving"); // still debouncing
 
     await vi.advanceTimersByTimeAsync(3_000);
+    expect(sentRevision).toBe(6); // base(5) + 1
     expect(statuses).toContain("saving");
     expect(statuses).toContain("saved");
     expect(revision).toBe(6); // base adopted
@@ -575,6 +584,154 @@ describe("createSyncEngine", () => {
 
     expect(statuses[statuses.length - 1]).toBe("error");
     expect(readOutbox(USER, storage).snapshot).toBeNull(); // NOT parked -> no replay storm
+    engine.stop();
+  });
+
+  // ── P0: cross-session write guard (the shared-device corruption bug) ────────
+  it("an in-flight save whose engine is stopped mid-flight does NOT issue the rebase write or mutate revision", async () => {
+    const engine = makeEngine();
+
+    // Control the FIRST saveSnapshot so it is genuinely in flight across stop().
+    let releaseFirst: () => void = () => undefined;
+    let updateCalls = 0;
+    handlers.update = () => {
+      updateCalls += 1;
+      if (updateCalls === 1) {
+        // A stale base -> the flush would proceed to loadSave + a rebase write.
+        return new Promise((resolve) => {
+          releaseFirst = () => resolve({ data: [], error: null });
+        });
+      }
+      return { data: [{ profile_id: PROFILE }], error: null };
+    };
+    await engine.start();
+
+    engine.notifySnapshotChange();
+    await vi.advanceTimersByTimeAsync(3_000); // flushPending runs, awaits saveSnapshot
+
+    // Simulate a session switch on the shared device: child B's state is now live
+    // in the shared refs, and the engine is torn down for the new session.
+    doc = docWith({ onboardingComplete: true, ideas: [{ fields: {}, done: {} }] });
+    revision = 99;
+    engine.stop(); // bumps the generation
+
+    releaseFirst(); // first save resolves (cas-rejected)
+    await vi.advanceTimersByTimeAsync(0);
+
+    // The rebase write (which would carry B's doc under A's profile_id) never fires,
+    // and A's flush never writes the shared revision.
+    expect(updateCalls).toBe(1);
+    expect(setRevisionCalls).toBe(0);
+    expect(revision).toBe(99); // B's revision untouched by A's superseded flush
+  });
+
+  // ── P1: rebase then retryable-failure parks the REBASED base (not the stale) ─
+  it("cas-rejected -> rebase -> rebased retry fails retryable: parks the REBASED revision/doc", async () => {
+    const engine = makeEngine();
+    let attempt = 0;
+    handlers.update = () => {
+      attempt += 1;
+      // 1st (base=5): stale -> zero rows. 2nd (rebased base=8): retryable network fail.
+      return attempt === 1
+        ? { data: [], error: null }
+        : { data: null, error: new Error("network dropped") };
+    };
+    await engine.start();
+    const rebasedDoc = docWith({ onboardingComplete: true });
+    // After start caches the profile id, re-point select at the save row so the
+    // CAS refetch reads revision 8, and make the current doc the rebased one.
+    handlers.select = () => ({ data: { doc: rebasedDoc, revision: 8 }, error: null });
+    doc = rebasedDoc;
+
+    engine.notifySnapshotChange();
+    await vi.advanceTimersByTimeAsync(3_000);
+    await vi.advanceTimersByTimeAsync(0);
+
+    const parked = readOutbox(USER, engineStorage).snapshot;
+    expect(parked).not.toBeNull();
+    // The parked base is the REBASED 8 (not the stale 5), so replay can CAS-succeed.
+    expect(parked?.baseRevision).toBe(8);
+    expect(parked?.doc.onboardingComplete).toBe(true);
+    engine.stop();
+  });
+
+  // ── P2 + flushOnHide coverage ───────────────────────────────────────────────
+  it("flushOnHide with NO access token parks the pending snapshot (not lost)", async () => {
+    const engine = makeEngine();
+    getSession.mockResolvedValue({ data: { session: null } }); // no token
+    await engine.start();
+
+    engine.notifySnapshotChange();
+    engine.flushOnHide();
+
+    expect(readOutbox(USER, engineStorage).snapshot).not.toBeNull();
+    engine.stop();
+  });
+
+  it("flushOnHide with an oversized body parks the snapshot after the too-large keepalive", async () => {
+    const engine = makeEngine();
+    global.fetch = vi.fn().mockResolvedValue({ ok: true }) as unknown as typeof fetch;
+    await engine.start();
+
+    doc = docWith({ siteHeadline: "x".repeat(KEEPALIVE_MAX_BYTES + 10) });
+    engine.notifySnapshotChange();
+    engine.flushOnHide();
+
+    const parked = readOutbox(USER, engineStorage).snapshot;
+    expect(parked).not.toBeNull(); // parked, not dropped
+    engine.stop();
+  });
+
+  it("flushOnHide parks the snapshot BEFORE the best-effort keepalive send (normal path)", async () => {
+    const engine = makeEngine();
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true });
+    global.fetch = fetchMock as unknown as typeof fetch;
+    await engine.start();
+
+    engine.notifySnapshotChange();
+    engine.flushOnHide();
+
+    // Durable park happened regardless of whether the keepalive completes.
+    expect(readOutbox(USER, engineStorage).snapshot).not.toBeNull();
+    // And the keepalive PATCH was still attempted as the fast path.
+    const patchCalls = fetchMock.mock.calls.filter(
+      ([, init]) => (init as { method?: string }).method === "PATCH",
+    );
+    expect(patchCalls).toHaveLength(1);
+    engine.stop();
+  });
+
+  it("flushOnHide fires queued outbox ledger entries via keepalive", async () => {
+    const engine = makeEngine();
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true });
+    global.fetch = fetchMock as unknown as typeof fetch;
+    // Leave a ledger entry queued (an insert that never confirmed).
+    handlers.insert = () => ({ error: new Error("offline") });
+    await engine.start();
+
+    engine.notifyLedger({ id: "led-h", kind: "sale", payer: "Kid", amountCents: 250 });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(readOutbox(USER, engineStorage).ledger).toHaveLength(1); // still queued
+
+    engine.flushOnHide();
+    const postCalls = fetchMock.mock.calls.filter(
+      ([url]) => typeof url === "string" && url.includes("/rest/v1/fp_ledger"),
+    );
+    expect(postCalls).toHaveLength(1);
+    engine.stop();
+  });
+
+  // ── persistLedger immediate-write terminal branch ───────────────────────────
+  it("an immediate ledger insert that fails terminally is dropped (outbox empty) and status ends error", async () => {
+    const engine = makeEngine();
+    handlers.insert = () => ({ error: { code: "23514", message: "amount out of bounds" } });
+    await engine.start();
+
+    engine.notifyLedger({ id: "led-t", kind: "sale", payer: "Kid", amountCents: 999999 });
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(readOutbox(USER, engineStorage).ledger).toHaveLength(0); // dropped, not stuck
+    expect(statuses[statuses.length - 1]).toBe("error");
     engine.stop();
   });
 });

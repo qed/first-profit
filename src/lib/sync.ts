@@ -114,6 +114,23 @@ export function classifyWriteError(error: unknown): WriteFailure {
   return { ok: false, reason: "retryable", needsReauth: false, error };
 }
 
+/**
+ * Collapse a ledger insert result into the one decision both the immediate-write
+ * path (persistLedger) and the outbox drain (replayOutbox) share:
+ *  - `sent`  → landed (or already-landed via 23505); resolve/drop from the queue.
+ *  - `drop`  → a structural rejection that recurs identically; drop it, no storm.
+ *  - `keep`  → retryable (network / expired session); keep queued for replay.
+ */
+export type LedgerDecision = "sent" | "drop" | "keep";
+
+export function classifyLedgerOutcome(
+  result: LedgerResult,
+): { decision: LedgerDecision; needsReauth: boolean } {
+  if (result.ok) return { decision: "sent", needsReauth: false };
+  if (result.reason === "terminal") return { decision: "drop", needsReauth: false };
+  return { decision: "keep", needsReauth: result.needsReauth };
+}
+
 // ── Profile id resolution (RLS "own row") ────────────────────────────────────
 
 let cachedProfileId: string | null = null;
@@ -375,13 +392,13 @@ export async function replayOutbox(
       remaining.push(entry);
       continue;
     }
-    const result = await insertLedger(profileId, entry.row);
-    if (result.ok) {
+    const { decision, needsReauth } = classifyLedgerOutcome(await insertLedger(profileId, entry.row));
+    if (decision === "sent") {
       ledgerSent += 1;
-    } else if (result.reason === "terminal") {
+    } else if (decision === "drop") {
       ledgerDroppedTerminal += 1;
     } else {
-      if (result.needsReauth) reauthNeeded = true;
+      if (needsReauth) reauthNeeded = true;
       remaining.push(entry);
       stopped = true;
     }
@@ -521,7 +538,6 @@ export interface SyncEngine {
   flushPending: () => Promise<void>;
   /** Flush pending writes via keepalive on hide/unload. */
   flushOnHide: () => void;
-  profileId: () => string | null;
 }
 
 /**
@@ -538,6 +554,16 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine {
   let pending = false;
   let unsubAuth: (() => void) | null = null;
   let stopped = false;
+  // Session generation. Bumped on stop() so an in-flight async write (awaiting
+  // the network) can detect that its session has ended — GameContext shares one
+  // stateRef/revisionRef across sessions on a shared device, so an old flush
+  // must NEVER write the next child's doc under the previous child's profile_id.
+  let generation = 0;
+
+  /** True only while THIS flush's captured generation is still the live one. */
+  function isCurrent(gen: number): boolean {
+    return !stopped && gen === generation;
+  }
 
   function clearTimers(): void {
     if (debounceTimer) {
@@ -556,21 +582,41 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine {
 
   async function flushPending(): Promise<void> {
     clearTimers();
-    if (!pending || !profileId) return;
+    if (stopped || !pending || !profileId) return;
+    const gen = generation;
+    const pid = profileId;
     pending = false;
     setStatus("saving");
 
-    const { doc, revision } = deps.getSnapshot();
-    let result = await saveSnapshot(profileId, revision, doc);
+    // Track the base/doc actually written so a rebase re-parks the REBASED base,
+    // not the stale one (a stale-base park would CAS-reject on replay and be lost).
+    let saveRevision: number;
+    let saveDoc: SaveDoc;
+    {
+      const snap = deps.getSnapshot();
+      saveRevision = snap.revision;
+      saveDoc = snap.doc;
+    }
+    let result = await saveSnapshot(pid, saveRevision, saveDoc);
 
     if (!result.ok && result.reason === "cas-rejected") {
+      // P0: the session may have ended during the network round-trip. Never issue
+      // the rebase write under a superseded session.
+      if (!isCurrent(gen)) return;
       // Refetch + rebase: re-save the CURRENT local doc against the fresh
       // revision. The server doc is discarded (this tab is authoritative for its
       // own snapshot); the CAS guard's job was only to reject the STALE write.
-      const fresh = await loadSave(profileId);
+      const fresh = await loadSave(pid);
       const current = deps.getSnapshot();
-      result = await saveSnapshot(profileId, fresh.revision, current.doc);
+      saveRevision = fresh.revision;
+      saveDoc = current.doc;
+      if (!isCurrent(gen)) return;
+      result = await saveSnapshot(pid, saveRevision, saveDoc);
     }
+
+    // P0: do not mutate the shared revision / outbox / status for a session that
+    // has since been superseded — the new session owns persistence now.
+    if (!isCurrent(gen)) return;
 
     if (result.ok) {
       deps.setRevision(result.revision);
@@ -591,8 +637,9 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine {
       setStatus("error");
       return;
     }
-    // Retryable (network / expired session): park and replay later.
-    parkSnapshot(userId, revision, doc, storage);
+    // Retryable (network / expired session): park the REBASED base/doc so replay
+    // can actually succeed, then replay later.
+    parkSnapshot(userId, saveRevision, saveDoc, storage);
     if (result.needsReauth) deps.onReauthNeeded();
     setStatus("pending");
   }
@@ -614,19 +661,27 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine {
 
   async function persistLedger(row: LedgerInsertRow): Promise<void> {
     if (!profileId) return; // will be replayed from the outbox once profile resolves.
-    const result = await insertLedger(profileId, row);
-    if (result.ok) {
+    const gen = generation;
+    const pid = profileId;
+    const { decision, needsReauth } = classifyLedgerOutcome(await insertLedger(pid, row));
+    if (decision === "sent") {
+      // A → A insert is always correct to resolve from A's outbox, even if the
+      // session has since switched (the row is A's, keyed by A's frozen userId).
       resolveLedger(userId, row.id, storage);
       return;
     }
-    if (result.reason === "terminal") {
+    if (decision === "drop") {
       // Structural rejection (e.g. amount out of bounds) — drop it, never storm.
       resolveLedger(userId, row.id, storage);
-      setStatus("error");
+      if (isCurrent(gen)) setStatus("error");
       return;
     }
-    if (result.needsReauth) deps.onReauthNeeded();
-    setStatus("pending"); // stays queued in the outbox for replay.
+    // Retryable: stays queued in the outbox for replay. Only touch the shared UI
+    // status/reauth if this session is still the live one.
+    if (isCurrent(gen)) {
+      if (needsReauth) deps.onReauthNeeded();
+      setStatus("pending");
+    }
   }
 
   function notifyLedger(row: LedgerInsertRow): void {
@@ -644,27 +699,23 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine {
   }
 
   function flushOnHide(): void {
-    if (!profileId) return;
+    if (stopped || !profileId) return;
     const auth = keepaliveAuth();
-    if (!auth) {
-      // No usable token — cannot keepalive. Park the pending snapshot so the
-      // next boot/online replay picks it up rather than dropping it.
-      if (pending) {
-        const { doc, revision } = deps.getSnapshot();
-        parkSnapshot(userId, revision, doc, storage);
-        pending = false;
-      }
-      return;
-    }
+
     if (pending) {
       const { doc, revision } = deps.getSnapshot();
-      const res = flushSnapshotViaKeepalive(auth, profileId, revision, doc);
-      if (!res.sent) {
-        // Body too large for keepalive — let the big snapshot ride the outbox.
-        parkSnapshot(userId, revision, doc, storage);
-      }
+      // Park FIRST, unconditionally. A keepalive PATCH on tab-close is
+      // fire-and-forget: it may never complete (network drop), the body may be
+      // too large, or there may be no token. In every case the durable outbox
+      // must hold the edit; the next boot's replayOutbox reconciles it via CAS.
+      // Mirrors the ledger path, which keeps entries queued until a confirmed
+      // insert. The keepalive below is then a best-effort fast path only.
+      parkSnapshot(userId, revision, doc, storage);
       pending = false;
+      if (auth) flushSnapshotViaKeepalive(auth, profileId, revision, doc);
     }
+
+    if (!auth) return;
     // Small ledger delta: fire via keepalive; entries stay queued and the next
     // replay confirms/removes them idempotently.
     const outbox = readOutbox(userId, storage);
@@ -714,6 +765,10 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine {
 
   function stop(): void {
     stopped = true;
+    // Supersede this session: any in-flight flushPending/persistLedger awaiting
+    // the network will see the generation change and short-circuit before
+    // touching shared state (the P0 cross-session guard).
+    generation += 1;
     clearTimers();
     pending = false;
     if (typeof window !== "undefined") {
@@ -736,6 +791,5 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine {
     notifyLedger,
     flushPending,
     flushOnHide,
-    profileId: () => profileId,
   };
 }
