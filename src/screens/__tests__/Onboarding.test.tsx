@@ -69,8 +69,11 @@ describe("Onboarding screens", () => {
     ).toBeTruthy();
     expect(screen.getByText("$10 → $20")).toBeTruthy();
     // "See your live checkout" is a visual affordance only (no broken link).
+    // It stays focusable (not native-disabled) so its aria-disabled state and
+    // explanation reach keyboard/screen-reader users; the click is a no-op.
     const checkout = screen.getByText("See your live checkout ↗") as HTMLButtonElement;
-    expect(checkout.disabled).toBe(true);
+    expect(checkout.getAttribute("aria-disabled")).toBe("true");
+    expect(checkout.disabled).toBe(false);
   });
 
   it("screen 5 completion seeds Idea #1, marks onboarding complete, enters app", () => {
