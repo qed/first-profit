@@ -21,7 +21,7 @@
  * screens own the field markup and CTAs; this shell owns the card, logo row, and
  * the 4-segment signup progress bar.
  */
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { LogoMark } from "./onboarding/screens";
 import {
   AgeJurisdiction,
@@ -36,7 +36,11 @@ import {
   type SignupData,
   type SignupSubmission,
 } from "./signup/validation";
-import { CONSENT_META } from "./signup/consentPolicy";
+import {
+  DEFAULT_CONSENT_POLICY,
+  consentMetaFor,
+  type RenderedConsentPolicy,
+} from "./signup/consentPolicy";
 
 /** The signup step cursor. `done` is the local post-submit confirmation. */
 type Step = "parent" | "age" | "credential" | "consent" | "done";
@@ -55,6 +59,13 @@ export interface SignupProps {
   onSubmitSignup?: (submission: SignupSubmission) => Promise<SubmitResult>;
   /** Route out of signup (back to landing). App wires this to SET_STAGE. */
   onExit?: () => void;
+  /**
+   * The rendered consent policy the parent attests to. Defaults to the Unit-8
+   * backend-aligned policy; Unit 9 fetches the policy (text + version + hash) from
+   * the backend and injects it here, so what is displayed and what is echoed on
+   * submit are exactly what the server records. No rewrite needed at that seam.
+   */
+  policy?: RenderedConsentPolicy;
 }
 
 /** Default submit stub: resolves success (no backend in Unit 8; Unit 9 replaces). */
@@ -65,11 +76,20 @@ async function mockSubmit(submission: SignupSubmission): Promise<SubmitResult> {
   return { ok: true };
 }
 
-export function Signup({ onSubmitSignup = mockSubmit, onExit }: SignupProps) {
+export function Signup({
+  onSubmitSignup = mockSubmit,
+  onExit,
+  policy = DEFAULT_CONSENT_POLICY,
+}: SignupProps) {
   const [step, setStep] = useState<Step>("parent");
   const [data, setData] = useState<SignupData>(emptySignupData);
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState(false);
+  // A synchronous double-submit guard. The `submitting` STATE drives the disabled
+  // button UX, but its value is captured per render, so two taps in the same tick
+  // both read `false` from the closure; this ref flips synchronously so the second
+  // tap is truly dropped, never issuing a duplicate submission.
+  const submittingRef = useRef(false);
 
   const patch = (p: Partial<SignupData>) => setData((d) => ({ ...d, ...p }));
 
@@ -83,13 +103,14 @@ export function Signup({ onSubmitSignup = mockSubmit, onExit }: SignupProps) {
   };
 
   const submit = async () => {
-    // Synchronous double-submit guard: flip the flag before the await so a second
+    // Synchronous double-submit guard: flip the ref before the await so a second
     // tap in the same tick is dropped, never issuing a duplicate submission.
-    if (submitting) return;
+    if (submittingRef.current) return;
+    submittingRef.current = true;
     setSubmitting(true);
     setSubmitError(false);
     try {
-      const result = await onSubmitSignup(buildSubmission(data, CONSENT_META));
+      const result = await onSubmitSignup(buildSubmission(data, consentMetaFor(policy)));
       if (result.ok) {
         setStep("done");
       } else {
@@ -98,6 +119,7 @@ export function Signup({ onSubmitSignup = mockSubmit, onExit }: SignupProps) {
     } catch {
       setSubmitError(true);
     } finally {
+      submittingRef.current = false;
       setSubmitting(false);
     }
   };
@@ -146,6 +168,7 @@ export function Signup({ onSubmitSignup = mockSubmit, onExit }: SignupProps) {
                 onSubmit={submit}
                 onBack={() => goBackFrom("consent")}
                 submitting={submitting}
+                policy={policy}
               />
               {submitError ? (
                 <p

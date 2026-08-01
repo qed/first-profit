@@ -12,6 +12,16 @@ import type { SignupSubmission } from "../signup/validation";
 
 afterEach(cleanup);
 
+/** A DOB (yyyy-mm-dd) for a child who turns `age` today, so it stays consistent
+ *  with the band the test picks regardless of the calendar day the suite runs. */
+function dobForAge(age: number): string {
+  const now = new Date();
+  const d = new Date(now.getFullYear() - age, now.getMonth(), now.getDate());
+  const mm = String(d.getMonth() + 1).padStart(2, "0");
+  const dd = String(d.getDate()).padStart(2, "0");
+  return `${d.getFullYear()}-${mm}-${dd}`;
+}
+
 /** Drive the four steps with a valid path-a founder. */
 function fillParent() {
   fireEvent.change(screen.getByPlaceholderText("Sam Rivera"), { target: { value: "Sam Rivera" } });
@@ -22,9 +32,12 @@ function fillParent() {
   fireEvent.click(screen.getByRole("button", { name: /Continue/ }));
 }
 
+/** Age 14 keeps the DOB consistent with the 13-15 band whatever day this runs. */
+const AGE_DOB = dobForAge(14);
+
 function fillAge() {
-  fireEvent.click(screen.getByRole("button", { name: /13 to 15/ }));
-  fireEvent.change(screen.getByLabelText("Date of birth"), { target: { value: "2011-06-01" } });
+  fireEvent.click(screen.getByRole("radio", { name: /13 to 15/ }));
+  fireEvent.change(screen.getByLabelText("Date of birth"), { target: { value: AGE_DOB } });
   fireEvent.change(screen.getByPlaceholderText("Country or state"), {
     target: { value: "California, US" },
   });
@@ -60,7 +73,7 @@ describe("Signup container", () => {
     expect(submission.child.password).toBe("kidpassword");
     expect(submission.child.provisionAddress).toBeNull();
     expect(submission.child.ageBand).toBe("13_to_15");
-    expect(submission.child.dob).toBe("2011-06-01");
+    expect(submission.child.dob).toBe(AGE_DOB);
     expect(submission.jurisdiction).toBe("California, US");
     expect(submission.consent.accepted).toBe(true);
     expect(submission.consent.policyNamespace).toBe("fp_parental_consent");
@@ -77,7 +90,7 @@ describe("Signup container", () => {
     fillParent();
     fillAge();
     fireEvent.change(screen.getByPlaceholderText("Alex"), { target: { value: "Robin" } });
-    fireEvent.click(screen.getByRole("button", { name: /Give them a school email/ }));
+    fireEvent.click(screen.getByRole("radio", { name: /Give them a school email/ }));
     fireEvent.click(screen.getByRole("button", { name: /Continue/ }));
 
     fireEvent.click(screen.getByRole("checkbox"));

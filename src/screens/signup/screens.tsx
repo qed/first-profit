@@ -23,7 +23,10 @@
 import { useState } from "react";
 import { BackLink, GreenCta, PHASE_COLORS } from "../onboarding/screens";
 import {
+  CHILD_FIRST_NAME_MAX,
   CHILD_PASSWORD_MIN,
+  JURISDICTION_MAX,
+  PARENT_NAME_MAX,
   PARENT_PASSWORD_MIN,
   canContinueAge,
   canContinueConsent,
@@ -31,15 +34,16 @@ import {
   canContinueParent,
   derivedProvisionAddress,
   isChildPasswordValid,
+  isDobConsistentWithBand,
+  isValidDob,
   type AgeBand,
   type CredentialChoice,
   type SignupData,
 } from "./validation";
 import {
-  CONSENT_POLICY_BODY,
-  CONSENT_POLICY_TITLE,
-  CONSENT_POLICY_VERSION,
+  DEFAULT_CONSENT_POLICY,
   consentEmphasis,
+  type RenderedConsentPolicy,
 } from "./consentPolicy";
 
 // ── Small shared field primitives (kept local to the signup module) ──────────
@@ -99,6 +103,7 @@ function TextField({
   autoComplete,
   hint,
   className,
+  maxLength,
 }: {
   id: string;
   label: string;
@@ -109,6 +114,7 @@ function TextField({
   autoComplete?: string;
   hint?: React.ReactNode;
   className?: string;
+  maxLength?: number;
 }) {
   return (
     <Field id={id} label={label} hint={hint} className={className}>
@@ -118,6 +124,7 @@ function TextField({
         value={value}
         placeholder={placeholder}
         autoComplete={autoComplete}
+        maxLength={maxLength}
         autoCapitalize={type === "email" ? "none" : undefined}
         autoCorrect={type === "email" ? "off" : undefined}
         onChange={(e) => onChange(e.target.value)}
@@ -218,6 +225,7 @@ export function SignupIntro({ data, onChange, onNext, onBack }: SignupIntroProps
         onChange={(v) => onChange({ parentName: v })}
         autoComplete="name"
         placeholder="Sam Rivera"
+        maxLength={PARENT_NAME_MAX}
         className="mt-6"
       />
 
@@ -266,6 +274,13 @@ export interface AgeJurisdictionProps {
 
 export function AgeJurisdiction({ data, onChange, onNext, onBack }: AgeJurisdictionProps) {
   const canContinue = canContinueAge(data);
+  // Only warn once the parent has entered a usable DOB and picked a band: a valid
+  // but band-inconsistent pair (e.g. band 16+ with a DOB making the child 8) must
+  // be corrected before continue, and must never bank a self-contradictory record.
+  const bandMismatch =
+    data.ageBand !== null &&
+    isValidDob(data.dob) &&
+    !isDobConsistentWithBand(data.dob, data.ageBand);
   return (
     <>
       <StepKicker text="Step 2 of 4 · Your child" color="hsl(217 74% 46%)" />
@@ -276,16 +291,19 @@ export function AgeJurisdiction({ data, onChange, onNext, onBack }: AgeJurisdict
         This sets the right privacy protections. We never put an age on the public website.
       </p>
 
-      <fieldset className="mt-6">
-        <legend className={LABEL_CLS}>Age band</legend>
-        <div className="flex flex-col gap-2">
+      <div className="mt-6">
+        <p className={LABEL_CLS} id="fp-age-band-label">
+          Age band
+        </p>
+        <div className="flex flex-col gap-2" role="radiogroup" aria-labelledby="fp-age-band-label">
           {AGE_BANDS.map((band) => {
             const selected = data.ageBand === band.value;
             return (
               <button
                 key={band.value}
                 type="button"
-                aria-pressed={selected}
+                role="radio"
+                aria-checked={selected}
                 onClick={() => onChange({ ageBand: band.value })}
                 className={`flex min-h-[52px] w-full items-center justify-between rounded-xl border-2 px-4 text-left transition-colors ${
                   selected
@@ -312,7 +330,7 @@ export function AgeJurisdiction({ data, onChange, onNext, onBack }: AgeJurisdict
             );
           })}
         </div>
-      </fieldset>
+      </div>
 
       <TextField
         id="fp-child-dob"
@@ -320,6 +338,14 @@ export function AgeJurisdiction({ data, onChange, onNext, onBack }: AgeJurisdict
         type="date"
         value={data.dob}
         onChange={(v) => onChange({ dob: v })}
+        hint={
+          bandMismatch ? (
+            <span role="alert" className="text-sell">
+              This date of birth does not match the age band you picked. Please check the band or the
+              date.
+            </span>
+          ) : undefined
+        }
       />
 
       <TextField
@@ -329,6 +355,7 @@ export function AgeJurisdiction({ data, onChange, onNext, onBack }: AgeJurisdict
         onChange={(v) => onChange({ jurisdiction: v })}
         autoComplete="country-name"
         placeholder="Country or state"
+        maxLength={JURISDICTION_MAX}
       />
 
       <GreenCta onClick={onNext} disabled={!canContinue}>
@@ -372,13 +399,19 @@ export function ChildCredential({ data, onChange, onNext, onBack }: ChildCredent
         onChange={(v) => onChange({ childFirstName: v })}
         autoComplete="off"
         placeholder="Alex"
+        maxLength={CHILD_FIRST_NAME_MAX}
         className="mt-6"
       />
 
-      <div className="mt-5 grid grid-cols-1 gap-2" role="group" aria-label="Login method">
+      <div
+        className="mt-5 grid grid-cols-1 gap-2"
+        role="radiogroup"
+        aria-label="Login method"
+      >
         <button
           type="button"
-          aria-pressed={!isProvision}
+          role="radio"
+          aria-checked={!isProvision}
           onClick={() => setChoice("existing_credential")}
           className={`min-h-[52px] rounded-xl border-2 px-4 py-3 text-left transition-colors ${
             !isProvision
@@ -395,7 +428,8 @@ export function ChildCredential({ data, onChange, onNext, onBack }: ChildCredent
         </button>
         <button
           type="button"
-          aria-pressed={isProvision}
+          role="radio"
+          aria-checked={isProvision}
           onClick={() => setChoice("provision_workspace")}
           className={`min-h-[52px] rounded-xl border-2 px-4 py-3 text-left transition-colors ${
             isProvision
@@ -459,9 +493,22 @@ export interface ConsentScreenProps {
   onBack: () => void;
   /** True while the injected submit stub is in flight (double-submit guard). */
   submitting: boolean;
+  /**
+   * The rendered policy the parent attests to (title + version + text). Defaults
+   * to the Unit-8 backend-aligned policy; Unit 9 injects the fetched policy so the
+   * text shown and the version/hash echoed are exactly what the server records.
+   */
+  policy?: RenderedConsentPolicy;
 }
 
-export function ConsentScreen({ data, onChange, onSubmit, onBack, submitting }: ConsentScreenProps) {
+export function ConsentScreen({
+  data,
+  onChange,
+  onSubmit,
+  onBack,
+  submitting,
+  policy = DEFAULT_CONSENT_POLICY,
+}: ConsentScreenProps) {
   const emphasis = consentEmphasis(data.ageBand);
   const canSubmit = canContinueConsent(data) && !submitting;
   return (
@@ -477,10 +524,10 @@ export function ConsentScreen({ data, onChange, onSubmit, onBack, submitting }: 
       <div className="mt-5 rounded-2xl border-2 border-[hsl(25_34%_20%/0.15)] bg-white">
         <div className="flex items-center justify-between border-b-2 border-[hsl(25_34%_20%/0.1)] px-4 py-2.5">
           <p className="font-display text-[15px] font-bold text-[hsl(25_34%_20%)]">
-            {CONSENT_POLICY_TITLE}
+            {policy.title}
           </p>
           <span className="ml-3 shrink-0 font-mono text-[10px] uppercase tracking-[0.06em] text-[hsl(25_20%_38%)]">
-            v{CONSENT_POLICY_VERSION}
+            v{policy.version}
           </span>
         </div>
         <div className="max-h-56 overflow-y-auto px-4 py-3.5">
@@ -489,16 +536,7 @@ export function ConsentScreen({ data, onChange, onSubmit, onBack, submitting }: 
               {emphasis}
             </p>
           ) : null}
-          <ul className="flex flex-col gap-2.5">
-            {CONSENT_POLICY_BODY.map((para, i) => (
-              <li key={i} className="flex gap-2 text-[13px] leading-[1.55] text-[hsl(25_20%_38%)]">
-                <span aria-hidden className="shrink-0 text-verified">
-                  ✓
-                </span>
-                {para}
-              </li>
-            ))}
-          </ul>
+          <p className="text-[13px] leading-[1.6] text-[hsl(25_20%_38%)]">{policy.text}</p>
         </div>
       </div>
 

@@ -19,6 +19,16 @@ import { emptySignupData, type SignupData } from "../signup/validation";
 
 afterEach(cleanup);
 
+/** A DOB (yyyy-mm-dd) for a child who turns `age` today, so it stays consistent
+ *  with the band the test picks regardless of the calendar day the suite runs. */
+function dobForAge(age: number): string {
+  const now = new Date();
+  const d = new Date(now.getFullYear() - age, now.getMonth(), now.getDate());
+  const mm = String(d.getMonth() + 1).padStart(2, "0");
+  const dd = String(d.getDate()).padStart(2, "0");
+  return `${d.getFullYear()}-${mm}-${dd}`;
+}
+
 /** Stateful harness so the controlled screens behave like they do in the app. */
 function Harness({
   render: renderScreen,
@@ -87,8 +97,8 @@ describe("AgeJurisdiction (screen 2)", () => {
     const cta = () => screen.getByRole("button", { name: /Continue/ }) as HTMLButtonElement;
     expect(cta().disabled).toBe(true);
 
-    fireEvent.click(screen.getByRole("button", { name: /Under 13/ }));
-    fireEvent.change(screen.getByLabelText("Date of birth"), { target: { value: "2014-03-02" } });
+    fireEvent.click(screen.getByRole("radio", { name: /Under 13/ }));
+    fireEvent.change(screen.getByLabelText("Date of birth"), { target: { value: dobForAge(9) } });
     expect(cta().disabled).toBe(true); // jurisdiction still empty
     fireEvent.change(screen.getByPlaceholderText("Country or state"), {
       target: { value: "Texas, US" },
@@ -133,7 +143,7 @@ describe("ChildCredential (screen 3) path a/b toggle", () => {
         )}
       />,
     );
-    fireEvent.click(screen.getByRole("button", { name: /Give them a school email/ }));
+    fireEvent.click(screen.getByRole("radio", { name: /Give them a school email/ }));
     expect(screen.queryByLabelText("Password for your child")).toBeNull();
     expect(screen.getByText("alex@the120.school")).toBeTruthy();
     // No password needed on path b, so continue is enabled with just a name.
@@ -159,7 +169,7 @@ describe("ConsentScreen (screen 4) gate + versioned policy", () => {
         )}
       />,
     );
-    expect(screen.getByText(/v2026-08-01\.v1/)).toBeTruthy();
+    expect(screen.getByText(/v2026-08-01\.1/)).toBeTruthy();
     const cta = () => screen.getByRole("button", { name: /Create my child's account/ }) as HTMLButtonElement;
     expect(cta().disabled).toBe(true);
     fireEvent.click(cta());
@@ -206,6 +216,74 @@ describe("ConsentScreen (screen 4) gate + versioned policy", () => {
     );
     const cta = screen.getByRole("button", { name: /Creating account/ }) as HTMLButtonElement;
     expect(cta.disabled).toBe(true);
+  });
+});
+
+describe("AgeJurisdiction DOB / band consistency", () => {
+  it("blocks continue and warns when the DOB contradicts the chosen band", () => {
+    render(
+      <Harness
+        render={(data, patch) => (
+          <AgeJurisdiction data={data} onChange={patch} onNext={vi.fn()} onBack={vi.fn()} />
+        )}
+      />,
+    );
+    const cta = () => screen.getByRole("button", { name: /Continue/ }) as HTMLButtonElement;
+    fireEvent.click(screen.getByRole("radio", { name: /16 or older/ }));
+    // A DOB making the child 8 contradicts the 16+ band.
+    fireEvent.change(screen.getByLabelText("Date of birth"), { target: { value: dobForAge(8) } });
+    fireEvent.change(screen.getByPlaceholderText("Country or state"), {
+      target: { value: "Texas, US" },
+    });
+    expect(screen.getByRole("alert").textContent).toMatch(/does not match the age band/);
+    expect(cta().disabled).toBe(true);
+    // Correcting the DOB to a consistent age clears the warning and enables continue.
+    fireEvent.change(screen.getByLabelText("Date of birth"), { target: { value: dobForAge(17) } });
+    expect(screen.queryByRole("alert")).toBeNull();
+    expect(cta().disabled).toBe(false);
+  });
+});
+
+describe("single-select groups expose radiogroup semantics (a11y)", () => {
+  it("age band is a radiogroup of radios with a single checked option", () => {
+    render(
+      <Harness
+        render={(data, patch) => (
+          <AgeJurisdiction data={data} onChange={patch} onNext={vi.fn()} onBack={vi.fn()} />
+        )}
+      />,
+    );
+    const group = screen.getByRole("radiogroup", { name: "Age band" });
+    expect(group).toBeTruthy();
+    const radios = screen.getAllByRole("radio");
+    expect(radios.length).toBe(3);
+    fireEvent.click(screen.getByRole("radio", { name: /13 to 15/ }));
+    expect(
+      (screen.getByRole("radio", { name: /13 to 15/ }) as HTMLElement).getAttribute("aria-checked"),
+    ).toBe("true");
+    expect(
+      (screen.getByRole("radio", { name: /Under 13/ }) as HTMLElement).getAttribute("aria-checked"),
+    ).toBe("false");
+  });
+
+  it("login method is a radiogroup of radios", () => {
+    render(
+      <Harness
+        initial={{ childFirstName: "Alex" }}
+        render={(data, patch) => (
+          <ChildCredential data={data} onChange={patch} onNext={vi.fn()} onBack={vi.fn()} />
+        )}
+      />,
+    );
+    expect(screen.getByRole("radiogroup", { name: "Login method" })).toBeTruthy();
+    const radios = screen.getAllByRole("radio");
+    expect(radios.length).toBe(2);
+    // Default choice (set a password now) is checked; provision is not.
+    expect(
+      (screen.getByRole("radio", { name: /Set a password now/ }) as HTMLElement).getAttribute(
+        "aria-checked",
+      ),
+    ).toBe("true");
   });
 });
 
