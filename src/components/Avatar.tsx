@@ -1,15 +1,18 @@
-import React from 'react';
-import { motion } from 'framer-motion';
+import { motion, useReducedMotion } from 'framer-motion';
 
 /** The bobbing founder figure with name tag, without any positioning. */
 export function AvatarSprite({ name }: {name: string;}) {
+  // Respect prefers-reduced-motion: hold the figure static instead of bobbing.
+  const reduceMotion = useReducedMotion();
   return (
     <motion.div
-      animate={{ y: [0, -3, 0] }}
-      transition={{ repeat: Infinity, duration: 2, ease: 'easeInOut' }}
+      animate={reduceMotion ? undefined : { y: [0, -3, 0] }}
+      transition={reduceMotion ? undefined : { repeat: Infinity, duration: 2, ease: 'easeInOut' }}
       className="flex flex-col items-center">
 
-      <span className="mb-1 whitespace-nowrap rounded-full bg-ink px-2.5 py-1 font-mono text-[10px] font-semibold uppercase tracking-wider text-paper">
+      {/* max-w + truncate so a long child-entered first name can never push past
+          the 390px viewport (no-horizontal-scroll is a hard rule). */}
+      <span className="mb-1 block max-w-[7.5rem] truncate rounded-full bg-ink px-2.5 py-1 font-mono text-[10px] font-semibold uppercase tracking-wider text-paper">
         {name}
       </span>
       <svg width="34" height="46" viewBox="0 0 34 46" aria-hidden>

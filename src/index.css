@@ -1,5 +1,4 @@
-/* @import url() FONT IMPORTS MUST ALWAYS BE AT THE VERY TOP OF THIS FILE, ABOVE THE TAILWIND IMPORTS — DO NOT DELETE THIS COMMENT */
-@import url('https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,700;9..144,900&family=IBM+Plex+Mono:wght@400;600&family=Inter:wght@400;500;600;700&display=swap');
+/* Fonts are self-hosted via Fontsource and imported in src/index.tsx — no Google Fonts @import here. */
 
 /* CRITICAL: THE FOLLOWING TAILWIND IMPORTS MUST NEVER BE DELETED OR REORDERED — DO NOT DELETE THIS COMMENT */
 @import 'tailwindcss/base';
@@ -16,7 +15,7 @@ body,
 body {
   background-color: #f7f2e8;
   color: #1a1712;
-  font-family: 'Inter', system-ui, sans-serif;
+  font-family: 'Inter Variable', system-ui, sans-serif;
   -webkit-font-smoothing: antialiased;
 }
 .fp-grid {
@@ -30,4 +29,42 @@ body {
 .fp-scroll::-webkit-scrollbar-thumb {
   background: #e4d9c4;
   border-radius: 999px;
+}
+
+/* fpv2 floor motion (design_handoff §Design Tokens · Motion). */
+@keyframes fp-bob {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-3px);
+  }
+}
+@keyframes fp-stamp {
+  0% {
+    transform: rotate(-6deg) scale(0);
+    opacity: 0;
+  }
+  100% {
+    transform: rotate(-6deg) scale(1);
+    opacity: 1;
+  }
+}
+@keyframes fp-rise {
+  0% {
+    transform: translateY(12px);
+    opacity: 0;
+  }
+  100% {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .fp-bob,
+  .fp-stamp,
+  .fp-rise {
+    animation: none !important;
+  }
 }

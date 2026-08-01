@@ -93,7 +93,7 @@ export const STEPS: Step[] = [
   doneWhen:
   'A non-family adult can say back what your product is and what you asked them to do.',
   coach:
-  'Start here. Write one sentence — what it is, who it is for, why they want it. Everything else in First Profit hangs off that sentence.',
+  'Start here. Write one sentence. What it is, who it is for, why they want it. Everything else in First Profit hangs off that sentence.',
   xp: 60,
   field: {
     key: 'oneLiner',
@@ -123,7 +123,7 @@ export const STEPS: Step[] = [
   'Choose the offer and set the price',
   'Build the first prospect list of ten',
   'Set up the point of sale and dress-rehearse it',
-  'Ask until one yes — log the sale']
+  'Ask until one yes. Log the sale']
 
 },
 {

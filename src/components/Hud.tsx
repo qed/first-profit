@@ -1,82 +1,96 @@
-import React from 'react';
-import { PHASES, phaseById } from '../data/path';
-import { useGame } from '../state/GameContext';
-import { Chip } from './ui';
+/**
+ * Factory-floor HUD (handoff §H): parchment rounded bar with logo + wordmark, a
+ * Sell phase chip (n/5 criteria), right-side Sales / Profit stats, the founder
+ * chip, a small save-status indicator (from useGame().syncStatus), and Log out.
+ *
+ * Per the handoff HUD spec: NO XP, NO website link.
+ * Dollars are whole-dollar (cents / 100, floored) mono numerals.
+ */
+import { useGame } from "../state/GameContext";
+import { PLAYABLE_STEPS } from "../state/gameCore";
+import type { SyncStatus } from "../lib/sync";
 
-export function Hud() {
-  const { company, currentPhase, phaseProgress, xp, revenue, profit } = useGame();
-  const active = phaseById(currentPhase);
-
+function LogoMark() {
   return (
-    <header className="flex flex-wrap items-center gap-x-6 gap-y-3 rounded-3xl border-2 border-ink/10 bg-parchment px-5 py-3">
-      <div className="flex items-center gap-3">
-        <span className="flex h-9 items-end gap-[3px]" aria-hidden>
-          <span className="h-3 w-[5px] rounded-sm bg-gold" />
-          <span className="h-5 w-[5px] rounded-sm bg-ember" />
-          <span className="h-7 w-[5px] rounded-sm bg-ocean" />
-          <span className="h-9 w-[5px] rounded-sm bg-ink" />
-        </span>
-        <div>
-          <p className="font-display text-base font-black uppercase tracking-tight leading-none">
-            First Profit
-          </p>
-          <p className="font-mono text-[10px] uppercase tracking-wider text-graphite">
-            {company.founder} · {company.name}
-          </p>
-        </div>
-      </div>
-
-      <nav
-        aria-label="The Path"
-        className="order-3 flex w-full items-center justify-between gap-1 lg:order-none lg:w-auto lg:justify-start lg:gap-1.5">
-        {PHASES.map((phase) => {
-          const { done, total } = phaseProgress(phase.id);
-          const isActive = phase.id === currentPhase;
-          const isPassed = done === total;
-          return (
-            <div
-              key={phase.id}
-              className={[
-              'flex items-center gap-1.5 rounded-xl border-2 px-1.5 py-1.5 lg:gap-2 lg:px-2.5',
-              isActive ? 'border-ink/25' : 'border-transparent'].
-              join(' ')}
-              style={{ backgroundColor: isActive || isPassed ? phase.tint : 'transparent' }}
-              title={phase.promise}>
-              
-              <span
-                className="flex h-5 w-5 items-center justify-center rounded-md font-mono text-[10px] font-bold text-white"
-                style={{ backgroundColor: isPassed || isActive ? phase.color : '#B7AF9E' }}>
-                
-                {phase.index}
-              </span>
-              <span className="hidden text-xs font-semibold sm:inline" style={{ color: phase.color }}>
-                {phase.name}
-              </span>
-              <span className="font-mono text-[10px] text-graphite">
-                {done}/{total}
-              </span>
-            </div>);
-
-        })}
-      </nav>
-
-      <div className="ml-auto flex items-center gap-4">
-        <Stat label="Sales" value={`$${revenue.toLocaleString()}`} sub="of $1,000" />
-        <Stat label="Profit" value={`$${Math.max(0, Math.round(profit)).toLocaleString()}`} sub="of $10,000" />
-        <Chip color={active.color} tint={active.tint}>
-          {xp} XP
-        </Chip>
-      </div>
-    </header>);
-
+    <span className="flex h-6 shrink-0 items-end gap-[3px]" aria-label="First Profit" role="img">
+      <span className="h-2.5 w-[4px] rounded-sm bg-sell" />
+      <span className="h-3.5 w-[4px] rounded-sm bg-build" />
+      <span className="h-[18px] w-[4px] rounded-sm bg-validate" />
+      <span className="h-[22px] w-[4px] rounded-sm bg-grow" />
+      <span className="h-6 w-[4px] rounded-sm bg-scale" />
+    </span>
+  );
 }
 
-function Stat({ label, value, sub }: {label: string;value: string;sub: string;}) {
-  return (
-    <div className="text-right">
-      <p className="font-mono text-[10px] uppercase tracking-wider text-graphite">{label}</p>
-      <p className="font-display text-lg font-bold leading-none">{value}</p>
-      <p className="font-mono text-[10px] text-graphite">{sub}</p>
-    </div>);
+function dollars(cents: number): string {
+  return Math.floor(cents / 100).toLocaleString("en-US");
+}
 
+/** Maps sync status to a short, kid-legible line (empty for idle). */
+function SaveIndicator({ status }: { status: SyncStatus }) {
+  const map: Record<SyncStatus, { text: string; className: string } | null> = {
+    idle: null,
+    pending: { text: "Saving…", className: "text-[hsl(25_20%_38%)]" },
+    saving: { text: "Saving…", className: "text-[hsl(25_20%_38%)]" },
+    saved: { text: "Saved", className: "text-verified" },
+    error: { text: "Couldn't save", className: "text-wax" },
+  };
+  const entry = map[status];
+  if (!entry) return null;
+  return (
+    <span className={`font-mono text-[9.5px] uppercase tracking-[0.08em] ${entry.className}`} role="status">
+      {entry.text}
+    </span>
+  );
+}
+
+export function Hud() {
+  const { profile, activeIdea, isCriterionDone, backingSumCents, salesSumCents, syncStatus, logout } = useGame();
+  const phaseDone = PLAYABLE_STEPS.filter((id) => isCriterionDone(activeIdea, id)).length;
+  const founder = profile.firstName || profile.handle || "Founder";
+
+  return (
+    <header className="flex flex-wrap items-center gap-x-4 gap-y-3 rounded-[20px] border-2 border-[hsl(25_34%_20%/0.1)] bg-[hsl(40_55%_97%)] px-4 py-3 sm:px-5">
+      <div className="flex items-center gap-2.5">
+        <LogoMark />
+        <p className="font-display text-[13px] font-extrabold leading-none tracking-[0.02em]">FIRST PROFIT</p>
+      </div>
+
+      <div className="flex items-center gap-2 rounded-[10px] border-2 border-sell bg-[hsl(14_78%_54%/0.09)] px-3 py-1.5">
+        <span className="flex h-5 w-5 items-center justify-center rounded-md bg-sell font-mono text-[10px] font-bold text-white">
+          1
+        </span>
+        <span className="text-[12.5px] font-semibold text-[hsl(14_78%_44%)]">Sell</span>
+        <span className="font-mono text-[10.5px] text-[hsl(25_20%_38%)]">{phaseDone}/5 criteria</span>
+      </div>
+
+      <div className="ml-auto flex items-center gap-3 sm:gap-4">
+        <div className="text-right">
+          <p className="font-mono text-[9.5px] uppercase tracking-[0.08em] text-[hsl(25_20%_38%)]">Sales</p>
+          <p className="font-mono text-[16px] font-bold leading-tight">${dollars(backingSumCents())}</p>
+        </div>
+        <div className="text-right">
+          <p className="font-mono text-[9.5px] uppercase tracking-[0.08em] text-[hsl(25_20%_38%)]">Profit</p>
+          <p className="font-mono text-[16px] font-bold leading-tight">
+            ${dollars(salesSumCents())} <span className="text-[10px] font-normal text-[hsl(25_20%_38%)]">of $1,000</span>
+          </p>
+        </div>
+        {/* Always present (handoff HUD element). Compact + truncated on mobile so
+            a long first name never forces horizontal scroll at 390px. */}
+        <span className="inline-block max-w-[4.5rem] truncate rounded-full bg-[hsl(14_78%_54%/0.12)] px-3 py-1.5 font-mono text-[10.5px] font-semibold uppercase tracking-[0.06em] text-[hsl(14_78%_44%)] sm:max-w-[12rem]">
+          {founder}
+        </span>
+        <div className="flex flex-col items-end gap-1">
+          <button
+            type="button"
+            onClick={() => void logout()}
+            className="inline-flex min-h-[44px] items-center rounded-full border-2 border-[hsl(25_34%_20%/0.15)] px-4 font-mono text-[11px] uppercase tracking-[0.06em] text-ink hover:border-[hsl(25_34%_20%/0.4)]"
+          >
+            Log out
+          </button>
+          <SaveIndicator status={syncStatus} />
+        </div>
+      </div>
+    </header>
+  );
 }
