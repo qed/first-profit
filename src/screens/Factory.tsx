@@ -28,6 +28,7 @@ import { Hud } from "../components/Hud";
 import { StepRunner } from "../components/StepRunner";
 import { Celebration } from "../components/Celebration";
 import { MockCheckout } from "../components/MockCheckout";
+import { useFocusTrap } from "../lib/useFocusTrap";
 import { YourSite } from "../components/rooms/YourSite";
 import { CheckoutBooth } from "../components/rooms/CheckoutBooth";
 import { SalesRoom } from "../components/rooms/SalesRoom";
@@ -83,6 +84,8 @@ function RoomDialog() {
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [open, dispatch]);
+
+  useFocusTrap(panelRef, open);
 
   if (!room) return null;
   const meta = ROOM_META[room];

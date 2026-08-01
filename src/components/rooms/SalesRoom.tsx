@@ -11,7 +11,7 @@
  * Validation: amount must be > 0 and within the mock cap ($1000 = 100000 cents,
  * matching the DB insert policy's amount bound). Cents are integers.
  */
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useGame } from "../../state/GameContext";
 import { LedgerList } from "./LedgerList";
 
@@ -33,12 +33,18 @@ export function SalesRoom() {
   const { ledger, dispatch } = useGame();
   const [name, setName] = useState("");
   const [amount, setAmount] = useState("");
+  // Synchronous in-flight guard: a fast double-click on "Log the sale" must not
+  // dispatch two distinct sale rows before the cleared inputs re-render. The ref
+  // flips before the dispatch; typing a new sale (onChange) re-arms it.
+  const submittingRef = useRef(false);
 
   const cents = parseAmountCents(amount);
   const disabled = name.trim() === "" || cents === null;
 
   const logSale = () => {
+    if (submittingRef.current) return;
     if (name.trim() === "" || cents === null) return;
+    submittingRef.current = true;
     dispatch({
       type: "ADD_LEDGER",
       id: crypto.randomUUID(),
@@ -49,6 +55,15 @@ export function SalesRoom() {
     });
     setName("");
     setAmount("");
+  };
+
+  const onNameChange = (value: string) => {
+    submittingRef.current = false;
+    setName(value);
+  };
+  const onAmountChange = (value: string) => {
+    submittingRef.current = false;
+    setAmount(value);
   };
 
   return (
@@ -64,7 +79,7 @@ export function SalesRoom() {
           <input
             aria-label="Customer name"
             value={name}
-            onChange={(e) => setName(e.target.value)}
+            onChange={(e) => onNameChange(e.target.value)}
             placeholder="Customer (not family)"
             className="w-full rounded-[10px] border-2 border-[hsl(25_34%_20%/0.15)] px-3 py-2.5 text-sm outline-none focus:border-sell"
           />
@@ -72,7 +87,7 @@ export function SalesRoom() {
             aria-label="Sale amount in dollars"
             inputMode="decimal"
             value={amount}
-            onChange={(e) => setAmount(e.target.value)}
+            onChange={(e) => onAmountChange(e.target.value)}
             placeholder="$12"
             className="w-full rounded-[10px] border-2 border-[hsl(25_34%_20%/0.15)] px-3 py-2.5 font-mono text-sm outline-none focus:border-sell"
           />

@@ -25,6 +25,7 @@ import { useEffect, useRef } from "react";
 import { useGame } from "../state/GameContext";
 import { parseTask, stepById } from "../data/path";
 import { getDraft, setDraft, getLastUserId } from "../lib/draftCache";
+import { useFocusTrap } from "../lib/useFocusTrap";
 
 /** Draft-cache name (within the user namespace) for a criterion field on an idea. */
 function fieldDraftName(ideaIndex: number, key: string): string {
@@ -50,6 +51,8 @@ export function StepRunner() {
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [open, dispatch]);
+
+  useFocusTrap(panelRef, open);
 
   const step = runnerStep ? stepById(runnerStep) : undefined;
   const total = step ? step.tasks.length : 0;

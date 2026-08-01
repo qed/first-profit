@@ -22,6 +22,7 @@
  */
 import { useEffect, useRef, useState } from "react";
 import { useGame } from "../state/GameContext";
+import { useFocusTrap } from "../lib/useFocusTrap";
 
 const AMOUNTS = [10, 25, 50] as const;
 
@@ -31,6 +32,11 @@ export function MockCheckout() {
   const [amount, setAmount] = useState<number>(25);
   const [payerName, setPayerName] = useState("");
   const [paid, setPaid] = useState(false);
+  const [processing, setProcessing] = useState(false);
+  // Synchronous in-flight guard: a fast double-click must not dispatch two
+  // ADD_LEDGER rows (each with a distinct uuid — the reducer only dedupes a
+  // retried SAME id). A ref flips before the first dispatch, in the same tick.
+  const submittingRef = useRef(false);
   const panelRef = useRef<HTMLDivElement>(null);
 
   const close = () => dispatch({ type: "CLOSE_CHECKOUT" });
@@ -41,6 +47,8 @@ export function MockCheckout() {
       setAmount(25);
       setPayerName("");
       setPaid(false);
+      setProcessing(false);
+      submittingRef.current = false;
     }
   }, [checkoutOpen]);
 
@@ -56,6 +64,8 @@ export function MockCheckout() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [checkoutOpen]);
 
+  useFocusTrap(panelRef, checkoutOpen);
+
   if (!checkoutOpen) return null;
 
   const firstName = profile.firstName || "Founder";
@@ -65,6 +75,9 @@ export function MockCheckout() {
   const backerLabel = payerName.trim() || "A backer";
 
   const pay = () => {
+    if (submittingRef.current) return;
+    submittingRef.current = true;
+    setProcessing(true);
     dispatch({
       type: "ADD_LEDGER",
       id: crypto.randomUUID(),
@@ -82,7 +95,7 @@ export function MockCheckout() {
         ref={panelRef}
         role="dialog"
         aria-modal="true"
-        aria-label="Mock Stripe checkout"
+        aria-labelledby={paid ? "fp-checkout-title-paid" : "fp-checkout-title-pay"}
         tabIndex={-1}
         className="fp-rise flex h-full w-full flex-col overflow-y-auto bg-white outline-none sm:h-auto sm:max-h-[calc(100dvh-2rem)] sm:w-full sm:max-w-[840px] sm:rounded-2xl sm:shadow-[0_24px_64px_rgba(0,0,0,.3)]"
         style={{ animation: "fp-rise .3s cubic-bezier(.22,1,.36,1) both" }}
@@ -114,7 +127,10 @@ export function MockCheckout() {
             >
               ✓
             </span>
-            <h2 className="mt-4 font-display text-[26px] font-extrabold text-[hsl(30_12%_12%)]">
+            <h2
+              id="fp-checkout-title-paid"
+              className="mt-4 font-display text-[26px] font-extrabold text-[hsl(30_12%_12%)]"
+            >
               {backerLabel} backed {firstName}.
             </h2>
             <p className="mt-2 text-sm text-[hsl(30_8%_34%)]">
@@ -178,7 +194,9 @@ export function MockCheckout() {
 
             {/* Right — card form */}
             <div className="p-7">
-              <p className="text-sm font-semibold text-[hsl(30_12%_12%)]">Pay with card</p>
+              <p id="fp-checkout-title-pay" className="text-sm font-semibold text-[hsl(30_12%_12%)]">
+                Pay with card
+              </p>
               <div className="mt-3.5 flex flex-col gap-2.5">
                 <input
                   aria-label="Name on card"
@@ -212,7 +230,8 @@ export function MockCheckout() {
                 <button
                   type="button"
                   onClick={pay}
-                  className="mt-1.5 min-h-[46px] rounded-lg bg-build px-5 text-[15px] font-semibold text-white hover:brightness-110"
+                  disabled={processing}
+                  className="mt-1.5 min-h-[46px] rounded-lg bg-build px-5 text-[15px] font-semibold text-white hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-60"
                 >
                   Pay ${amount}.00
                 </button>

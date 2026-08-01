@@ -136,6 +136,24 @@ describe("Sales Room — Log a sale", () => {
     expect(after.celebrate).toBe("1.2");
   });
 
+  it("a fast double-click logs the sale only once", async () => {
+    renderAll();
+    await waitFor(() => expect(api?.stage).toBe("landing"));
+    setupIdeaAtLastSaleTask();
+
+    act(() => {
+      fireEvent.change(input("Customer name"), { target: { value: "Ms. Okafor" } });
+      fireEvent.change(input("Sale amount in dollars"), { target: { value: "$12" } });
+    });
+    const logBtn = button((b) => b.textContent === "Log the sale");
+    // Two synchronous clicks before the cleared inputs re-render.
+    act(() => {
+      fireEvent.click(logBtn);
+      fireEvent.click(logBtn);
+    });
+    expect(getApi().ledger.filter((r) => r.kind === "sale")).toHaveLength(1);
+  });
+
   it("rejects an amount over the $1000 mock cap", async () => {
     renderAll();
     await waitFor(() => expect(api?.stage).toBe("landing"));
@@ -175,5 +193,21 @@ describe("Mock checkout — Pay", () => {
     await waitFor(() =>
       expect(Array.from(document.querySelectorAll("h2")).some((h) => /backed/.test(h.textContent || ""))).toBe(true),
     );
+  });
+
+  it("a fast double-click pays only once (no double-counted backing)", async () => {
+    renderAll();
+    await waitFor(() => expect(api?.stage).toBe("landing"));
+    act(() => getApi().dispatch({ type: "OPEN_CHECKOUT" }));
+
+    const payBtn = button((b) => Boolean(b.textContent?.startsWith("Pay $")));
+    act(() => {
+      fireEvent.click(payBtn);
+      fireEvent.click(payBtn);
+    });
+
+    const after = getApi();
+    expect(after.ledger.filter((r) => r.kind === "backing")).toHaveLength(1);
+    expect(after.backingSumCents()).toBe(2500);
   });
 });

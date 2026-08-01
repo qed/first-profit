@@ -16,6 +16,7 @@
 import { useEffect, useRef } from "react";
 import { useGame } from "../state/GameContext";
 import { stepById } from "../data/path";
+import { useFocusTrap } from "../lib/useFocusTrap";
 
 /** Sell-criterion id → room name, for the "New on The Path" unlock line. */
 const SELL_ROOMS: Record<string, string> = {
@@ -40,6 +41,8 @@ export function Celebration() {
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [open, dispatch]);
+
+  useFocusTrap(panelRef, open);
 
   if (!celebrate) return null;
 
