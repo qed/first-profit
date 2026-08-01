@@ -202,13 +202,25 @@ key ≠ double-submit guard; a guard with no callers is not a mechanism.
 
 ## Implementation Units
 
-- [ ] **Unit 0: [T120] Parent-principal RLS reach audit (BEFORE any parent session)**
-  **Requirements:** R20-analog. **Approach:** enumerate every `to authenticated` policy /
-  grant a parent session (which HAS a `parents` row) can reach across the shared project
-  (parents/children/deposits/families/CRM/path/fw/gauntlet); confirm cross-family
-  isolation and no CRM/funnel over-reach; record accepted exposure + the required
-  policies for the new tables Unit 1 adds. **Gate:** findings must be clean before Unit 1.
-  **Test:** documented reach table + a probe with a throwaway parent session.
+- [x] **Unit 0: [T120] Parent-principal RLS reach audit (DONE 2026-08-01 — CLEAN)**
+  **Result:** an FP parent session is RLS-indistinguishable from an existing funnel
+  parent; cross-family isolation HOLDS (parents/children/deposits/projects/provisioning
+  all scope on `auth.uid()=parent_id` / `child_id in own children` with WITH CHECK);
+  reaches NO CRM/staff data (not even its own trigger-created `families` row — staff-gated),
+  NO `path_/fw_` (service-role zero-policy), cannot fabricate a paid deposit or funnel
+  progress. No gate-blocking findings in the existing schema.
+  **LOCKED requirement for Unit 1:** `fp_parental_consent` AND the signup-token table MUST
+  be service-role-only (RLS on, ZERO policies, `revoke all from anon, authenticated`) —
+  a client-writable/readable consent record is a compliance failure; the SPA never needs
+  PostgREST access (verdict returns in JSON). Enforce with a `pg_policies` count=0 post-apply
+  assertion (per `funnel_released_aliases`/`path_storage` precedent). Prefer reusing
+  `funnel_resume_tokens` (already service-role-only) for step tokens.
+  **Handed to later units:** (a) the `on_parent_created` trigger creates a real `families`
+  row BEFORE Unit 2's `is_test` UPDATE — Unit 2 ordering + Unit 6 exclusion own the window;
+  (b) R28 needs the service-role deletion order `fp_ledger→fp_player_saves→fp_player_profiles→
+  children/auth.users` (Unit 6). **Unit 11 probes:** a throwaway FP parent session gets 0 rows
+  on another family's children/deposits/projects, on its own families row, on any path_* row,
+  and denied on fp_parental_consent.
 
 - [ ] **Unit 1: [T120] Consent + signup-state migration**
   **Requirements:** R15, R10, R16. **Files:** `supabase/migrations/<live-slot>_fp_signup.sql`.
