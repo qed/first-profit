@@ -68,8 +68,10 @@ function Modal({ children, onClose, label }: { children: React.ReactNode; onClos
  * criteria passed. State (runnerOpen/runnerStep/runnerIndex) is the reducer's.
  */
 function RunnerDialog() {
-  const { runnerOpen, runnerStep, runnerIndex, activeIdea, isTaskDone, dispatch } = useGame();
-  if (!runnerOpen || !runnerStep) return null;
+  const { runnerOpen, runnerStep, runnerIndex, activeIdea, isTaskDone, celebrate, dispatch } = useGame();
+  // Never stack under the celebration, even if a future path leaves both set:
+  // the celebration owns the screen while it is up.
+  if (!runnerOpen || !runnerStep || celebrate) return null;
   const step = stepById(runnerStep);
   if (!step) return null;
   const total = step.tasks.length;

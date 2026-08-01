@@ -133,6 +133,37 @@ describe("completing 1.1", () => {
   });
 });
 
+describe("celebration takes over from the runner (no dual modal / terminal trap)", () => {
+  it("completing a criterion's last task closes the runner and sets celebrate", () => {
+    const s = completeCriterion(withOneIdea(), 0, "1.1");
+    expect(s.celebrate).toBe("1.1");
+    // Runner must be closed so the celebration is the only fixed modal on screen.
+    expect(s.runnerOpen).toBe(false);
+  });
+
+  it("DISMISS_CELEBRATION re-opens the runner on the next step's first incomplete task", () => {
+    let s = completeCriterion(withOneIdea(), 0, "1.1");
+    s = reducer(s, { type: "DISMISS_CELEBRATION" });
+    expect(s.celebrate).toBeNull();
+    expect(s.runnerOpen).toBe(true);
+    expect(s.runnerStep).toBe("1.2");
+    expect(s.runnerIndex).toBe(0);
+  });
+
+  it("DISMISS_CELEBRATION on the FINAL criterion leaves the runner closed (back to floor)", () => {
+    let s = completeCriterion(withOneIdea(), 0, "1.1");
+    s = reducer(s, { type: "DISMISS_CELEBRATION" }); // now on 1.2
+    s = completeCriterion(s, 0, "1.2"); // finish the last playable criterion
+    expect(s.celebrate).toBe("1.2");
+    expect(s.runnerOpen).toBe(false);
+    expect(nextUpFor(s, 0)).toBeNull();
+    s = reducer(s, { type: "DISMISS_CELEBRATION" });
+    expect(s.celebrate).toBeNull();
+    // No next step → do NOT drop the user back into the runner on a done task.
+    expect(s.runnerOpen).toBe(false);
+  });
+});
+
 describe("ADD_LEDGER", () => {
   it("a sale adds a kind:'sale' row and auto-completes the last task of 1.2", () => {
     // Reach 1.2 with its first tasks done, last task pending.

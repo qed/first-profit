@@ -75,7 +75,9 @@ export function Hud() {
             ${dollars(salesSumCents())} <span className="text-[10px] font-normal text-[hsl(25_20%_38%)]">of $1,000</span>
           </p>
         </div>
-        <span className="hidden rounded-full bg-[hsl(14_78%_54%/0.12)] px-3 py-1.5 font-mono text-[10.5px] font-semibold uppercase tracking-[0.06em] text-[hsl(14_78%_44%)] sm:inline">
+        {/* Always present (handoff HUD element). Compact + truncated on mobile so
+            a long first name never forces horizontal scroll at 390px. */}
+        <span className="inline-block max-w-[4.5rem] truncate rounded-full bg-[hsl(14_78%_54%/0.12)] px-3 py-1.5 font-mono text-[10.5px] font-semibold uppercase tracking-[0.06em] text-[hsl(14_78%_44%)] sm:max-w-[12rem]">
           {founder}
         </span>
         <div className="flex flex-col items-end gap-1">

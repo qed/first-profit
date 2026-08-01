@@ -325,6 +325,10 @@ function markTaskDone(
     next = {
       ...next,
       celebrate: stepId,
+      // The celebration takes over the whole screen. Close the runner so the
+      // two fixed aria-modal dialogs never stack (and focus never lands on the
+      // hidden runner underneath). DISMISS_CELEBRATION decides what re-opens.
+      runnerOpen: false,
       runnerStep: advanced ?? next.runnerStep,
       runnerIndex: 0,
     };
@@ -429,8 +433,27 @@ export function reducer(state: GameState, action: Action): GameState {
       return next;
     }
 
-    case "DISMISS_CELEBRATION":
-      return { ...state, celebrate: null };
+    case "DISMISS_CELEBRATION": {
+      // Clear the celebration, then re-open the runner ONLY if the active idea
+      // still has an incomplete step to work. On the final criterion (nextUpFor
+      // null) leave the runner closed so dismissing returns to the floor rather
+      // than dropping the user back onto an already-done task.
+      const nextStep = nextUpFor(state, state.activeIdea);
+      if (!nextStep) {
+        return { ...state, celebrate: null, runnerOpen: false };
+      }
+      const step = stepById(nextStep);
+      const foundIndex = step
+        ? step.tasks.findIndex((_, i) => !isTaskDone(state, state.activeIdea, nextStep, i))
+        : -1;
+      return {
+        ...state,
+        celebrate: null,
+        runnerOpen: true,
+        runnerStep: nextStep,
+        runnerIndex: foundIndex >= 0 ? foundIndex : 0,
+      };
+    }
 
     case "OPEN_CHECKOUT":
       return { ...state, checkoutOpen: true };
