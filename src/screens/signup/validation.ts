@@ -86,14 +86,68 @@ export function isValidEmail(email: string): boolean {
   return EMAIL_RE.test(email.trim());
 }
 
-/** Slug a first name for a handle / provisioned-address local-part. */
+/**
+ * Non-decomposable Latin letters the backend transliterates explicitly (it must
+ * not silently drop them). Mirrors The120 `fw-provision-rules.foldToAscii` so the
+ * preview matches what the backend will mint. Kept in sync by hand — the backend
+ * is the source of truth.
+ */
+const LATIN_TRANSLITERATIONS: ReadonlyArray<readonly [RegExp, string]> = [
+  [/ß/g, "ss"],
+  [/æ/g, "ae"],
+  [/œ/g, "oe"],
+  [/ø/g, "o"],
+  [/ð/g, "d"],
+  [/đ/g, "d"],
+  [/þ/g, "th"],
+  [/ł/g, "l"],
+  [/ı/g, "i"],
+  [/ŋ/g, "n"],
+];
+
+/** Cap per name part, mirroring the backend FW_NAME_PART_MAX (64-octet safety). */
+const NAME_PART_MAX = 24;
+
+/**
+ * Slug a first name into the provisioned-address local part, aligned with the
+ * backend's FIRST-NAME-ONLY deriver (`deriveStudentLocalBaseFromFirstName` →
+ * `buildFwLocalBaseFromFirstName`, Slice B Unit 11): NFKC compose, lowercase,
+ * strip diacritics (NFD + remove combining marks), transliterate the
+ * non-decomposable Latin letters, drop elision marks, then level every remaining
+ * non-alphanumeric run to a single hyphen, trim, and cap at NAME_PART_MAX. So
+ * `Jose` → `jose`, `Ann-Marie` → `ann-marie`, `Weiß` → `weiss` — exactly the base
+ * the backend mints (before its collision suffix).
+ *
+ * RESIDUAL DIFFERENCE (preview only): the backend REFUSES a name with no
+ * address-safe characters after folding (empty / non-Latin script / a homoglyph)
+ * — those park server-side as underivable. This client preview instead best-effort
+ * folds and falls back to `student` (see derivedProvisionAddress), because it only
+ * shows a shape and never mints; the real address is always minted server-side.
+ */
 export function slugifyName(name: string): string {
-  return name.trim().toLowerCase().replace(/[^a-z0-9]/g, "");
+  let folded = name
+    .normalize("NFKC")
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/\p{M}+/gu, "");
+  for (const [pattern, replacement] of LATIN_TRANSLITERATIONS) {
+    folded = folded.replace(pattern, replacement);
+  }
+  folded = folded.replace(/['’ʼ`´]/g, ""); // O'Brien -> obrien
+  return folded
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, NAME_PART_MAX)
+    .replace(/-+$/g, "");
 }
 
 /**
  * The provisioned (path b) address preview. Format only — the real address is
- * minted server-side (Unit 5); this shows the parent the shape they will get.
+ * minted server-side (Unit 5), where it is also collision-suffixed (alex, alex2,
+ * ...), which this client cannot predict; the preview shows the un-suffixed base,
+ * so the copy phrases it as the address the child will get "or similar". Aligned
+ * with the backend's first-name-only slug so the base shown equals what the
+ * backend derives.
  */
 export function derivedProvisionAddress(firstName: string): string {
   return `${slugifyName(firstName) || "student"}@${PROVISION_DOMAIN}`;

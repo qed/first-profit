@@ -75,10 +75,16 @@ describe("field validators", () => {
     expect(isValidDob("3000-01-01")).toBe(false);
   });
 
-  it("derives the provisioned address from the first name", () => {
+  it("derives the provisioned address from the first name, aligned with the backend first-name-only slug", () => {
     expect(derivedProvisionAddress("Alex")).toBe("alex@the120.school");
     expect(derivedProvisionAddress("  ")).toBe("student@the120.school");
-    expect(derivedProvisionAddress("Ann-Marie")).toBe("annmarie@the120.school");
+    // Separators level to a single hyphen (matching the backend), NOT stripped.
+    expect(derivedProvisionAddress("Ann-Marie")).toBe("ann-marie@the120.school");
+    expect(derivedProvisionAddress("Mary  Kate")).toBe("mary-kate@the120.school");
+    // Diacritics fold rather than drop (backend foldToAscii parity).
+    expect(derivedProvisionAddress("José")).toBe("jose@the120.school");
+    expect(derivedProvisionAddress("Zoë")).toBe("zoe@the120.school");
+    expect(derivedProvisionAddress("Weiß")).toBe("weiss@the120.school");
   });
 });
 
