@@ -9,7 +9,7 @@ export default {
       colors: {
         paper: '#F7F2E8',
         parchment: '#FBF8F1',
-        ink: '#1A1712',
+        ink: 'hsl(30 12% 12%)',
         graphite: '#4A443A',
         clay: '#E4D9C4',
         ember: '#E0562A',

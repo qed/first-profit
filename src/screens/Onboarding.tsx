@@ -274,11 +274,14 @@ function MoneyBooth() {
         </div>
         {/* Slice A: the real mock checkout is Unit 11. This is a visual
             affordance only (disabled), never a broken link. */}
+        {/* Focusable (not native-disabled) so the aria-disabled state and its
+            explanation actually reach keyboard and screen-reader users; the
+            click is a no-op until the real mock checkout ships in Unit 11. */}
         <button
           type="button"
-          disabled
           aria-disabled="true"
           title="Opens once your floor is unlocked"
+          onClick={(e) => e.preventDefault()}
           className="mt-3.5 inline-flex min-h-[44px] cursor-default items-center rounded-full border border-[hsl(25_34%_20%/0.25)] bg-[hsl(40_55%_97%)] px-[18px] font-semibold text-[13px] text-[hsl(25_34%_20%)] opacity-70"
         >
           See your live checkout ↗
