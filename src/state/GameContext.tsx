@@ -1,287 +1,203 @@
+/**
+ * fpv2 GameContext provider (Unit 5 rewrite).
+ *
+ * Wraps the pure `gameCore` reducer in React and layers the auth/session
+ * lifecycle on top: login through The120's route, explicit + idle logout, an
+ * inactivity timeout, and account-scoped draft handling.
+ *
+ * Draft policy (Key Technical Decision: "logout revokes, not just hides — but
+ * idle and explicit logout differ"):
+ *  - different-user login → wipe ALL `fp:*` keys before hydrating.
+ *  - explicit logout      → wipe the current user's `fp:<uid>:*` keys.
+ *  - idle logout          → PRESERVE the same user's drafts (restore on re-login).
+ *
+ * Boot (Key Technical Decision: "No router / boot stage"): start at `boot`,
+ * resolve any persisted Supabase session on mount, then route to `landing`
+ * (no session) or `app` (session present). The real save-driven onboard/app
+ * decision is Unit 6 — see the marked HYDRATE seam below.
+ */
 import React, {
   createContext,
   useCallback,
   useContext,
+  useEffect,
   useMemo,
-  useState } from
-'react';
+  useReducer,
+  useRef,
+} from "react";
 import {
-  PHASES,
-  STEPS,
-  parseTask,
-  phaseById,
-  type ArtifactKey,
-  type PhaseId,
-  type RoomId,
-  type Step } from
-'../data/path';
-import { ROOMS } from '../data/rooms';
-import { WORKSHOPS } from '../data/workshops';
+  reducer,
+  initialState,
+  backingSumCents as backingSumCentsFn,
+  salesSumCents as salesSumCentsFn,
+  nextUpFor as nextUpForFn,
+  isTaskDone as isTaskDoneFn,
+  isCriterionDone as isCriterionDoneFn,
+  sellProgress as sellProgressFn,
+  isStepUnlocked as isStepUnlockedFn,
+  ideasEligibleFor as ideasEligibleForFn,
+  type GameState,
+  type Action,
+} from "./gameCore";
+import {
+  loginChild,
+  logout as authLogout,
+  getCurrentUserId,
+  type ChildProfile,
+} from "../lib/auth";
+import { wipeAllForUser, wipeAllFpKeys, getLastUserId, setLastUserId } from "../lib/draftCache";
 
-export interface Sale {
-  id: string;
-  customer: string;
-  product: string;
-  amount: number;
-  day: string;
-}
+/** ~45 minutes of no interaction triggers an idle logout. */
+const IDLE_TIMEOUT_MS = 45 * 60 * 1000;
 
-export interface Company {
-  founder: string;
-  name: string;
-  product: string;
-  price: number;
-  cost: number;
-  headline: string;
-  cta: string;
-  colorway: 'ember' | 'ocean' | 'moss' | 'plum';
-  delivery: 'email' | 'download' | 'handoff';
-  deliveryNote: string;
-}
+export interface GameApi extends GameState {
+  dispatch: React.Dispatch<Action>;
 
-interface GameState {
-  company: Company;
-  fields: Record<string, string>;
-  tasksDone: Record<string, boolean>;
-  artifacts: Record<ArtifactKey, boolean>;
-  workshopsDone: string[];
-  sales: Sale[];
-  xp: number;
-  outreach: number;
-  contacts: number;
-  nos: {reason: string;lesson: string;}[];
-  weeks: {revenue: number;costs: number;}[];
-}
+  // Bound selectors (current state pre-applied).
+  nextUpFor: (ideaIndex: number) => string | null;
+  isTaskDone: (ideaIndex: number, stepId: string, index: number) => boolean;
+  isCriterionDone: (ideaIndex: number, stepId: string) => boolean;
+  sellProgress: (ideaIndex: number) => { done: number; total: number };
+  isStepUnlocked: (ideaIndex: number, stepId: string) => boolean;
+  ideasEligibleFor: (stepId: string) => number[];
+  backingSumCents: () => number;
+  salesSumCents: () => number;
 
-interface GameApi extends GameState {
-  toggleTask: (stepId: string, index: number) => void;
-  setField: (key: string, value: string) => void;
-  updateCompany: (patch: Partial<Company>) => void;
-  buildArtifact: (key: ArtifactKey) => void;
-  completeWorkshop: (id: string) => void;
-  addSale: (sale: Omit<Sale, 'id'>) => void;
-  logNo: (reason: string, lesson: string) => void;
-  bumpOutreach: (n: number) => void;
-  bumpContacts: (n: number) => void;
-  addWeek: (revenue: number, costs: number) => void;
-  isTaskDone: (stepId: string, index: number) => boolean;
-  isStepDone: (stepId: string) => boolean;
-  stepProgress: (stepId: string) => {done: number;total: number;};
-  nextStep: Step | undefined;
-  currentPhase: PhaseId;
-  phaseProgress: (phase: PhaseId) => {done: number;total: number;};
-  roomProgress: (room: RoomId) => {done: number;total: number;};
-  isRoomUnlocked: (room: RoomId) => boolean;
-  revenue: number;
-  profit: number;
-  activeRoom: RoomId | null;
-  openRoom: (room: RoomId | null) => void;
-  guideOn: boolean;
-  setGuideOn: (v: boolean) => void;
+  // Auth / session actions.
+  login: (identifier: string, password: string) => Promise<boolean>;
+  logout: () => Promise<void>;
 }
 
 const GameContext = createContext<GameApi | null>(null);
 
-const initialCompany: Company = {
-  founder: 'Robin',
-  name: 'Loop & Lace',
-  product: 'Team-colour friendship bracelet',
-  price: 12,
-  cost: 3.5,
-  headline: 'Bracelets your whole team will actually wear.',
-  cta: 'Order yours',
-  colorway: 'ember',
-  delivery: 'handoff',
-  deliveryNote: 'Hand-delivered at Saturday practice, in a kraft envelope with a thank-you card.'
-};
+function isLoggedInStage(stage: GameState["stage"]): boolean {
+  return stage === "app" || stage === "onboard";
+}
 
-const taskKey = (stepId: string, index: number) => `${stepId}#${index}`;
+export function GameProvider({ children }: { children: React.ReactNode }) {
+  const [state, dispatch] = useReducer(reducer, undefined, initialState);
 
-export function GameProvider({ children }: {children: React.ReactNode;}) {
-  const [company, setCompany] = useState<Company>(initialCompany);
-  const [fields, setFields] = useState<Record<string, string>>({});
-  const [tasksDone, setTasksDone] = useState<Record<string, boolean>>({});
-  const [artifacts, setArtifacts] = useState<Record<ArtifactKey, boolean>>({
-    website: false,
-    checkout: false,
-    delivery: false,
-    ledger: false
-  });
-  const [workshopsDone, setWorkshopsDone] = useState<string[]>([]);
-  const [sales, setSales] = useState<Sale[]>([]);
-  const [nos, setNos] = useState<{reason: string;lesson: string;}[]>([]);
-  const [outreach, setOutreach] = useState(0);
-  const [contacts, setContacts] = useState(0);
-  const [weeks, setWeeks] = useState<{revenue: number;costs: number;}[]>([]);
-  const [activeRoom, setActiveRoom] = useState<RoomId | null>(null);
-  const [guideOn, setGuideOn] = useState(true);
+  // A ref mirror of the stage so long-lived listeners (idle timer, activity)
+  // read the live value without re-subscribing on every keystroke.
+  const stageRef = useRef(state.stage);
+  stageRef.current = state.stage;
 
-  const isTaskDone = useCallback(
-    (stepId: string, index: number) => {
-      const step = STEPS.find((s) => s.id === stepId);
-      const raw = step?.tasks[index];
-      if (raw) {
-        const { auto } = parseTask(raw);
-        if (auto && artifacts[auto]) return true;
+  // ── Boot: resolve any persisted session, then route. ────────────────────
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const userId = await getCurrentUserId();
+      if (cancelled) return;
+      if (!userId) {
+        dispatch({ type: "SET_STAGE", stage: "landing" });
+        return;
       }
-      return Boolean(tasksDone[taskKey(stepId, index)]);
-    },
-    [tasksDone, artifacts]
-  );
-
-  const isStepDone = useCallback(
-    (stepId: string) => {
-      const step = STEPS.find((s) => s.id === stepId);
-      if (!step) return false;
-      return step.tasks.every((_, i) => isTaskDone(stepId, i));
-    },
-    [isTaskDone]
-  );
-
-  const stepProgress = useCallback(
-    (stepId: string) => {
-      const step = STEPS.find((s) => s.id === stepId);
-      if (!step) return { done: 0, total: 0 };
-      const done = step.tasks.filter((_, i) => isTaskDone(stepId, i)).length;
-      return { done, total: step.tasks.length };
-    },
-    [isTaskDone]
-  );
-
-  const toggleTask = useCallback((stepId: string, index: number) => {
-    setTasksDone((prev) => ({
-      ...prev,
-      [taskKey(stepId, index)]: !prev[taskKey(stepId, index)]
-    }));
+      // A session exists. Unit 6 will fetch the save and decide onboard vs app
+      // from onboardingComplete.
+      // TODO(Unit 6): fetch fp_player_saves and HYDRATE (dispatch { type:
+      //   "HYDRATE", doc }); the reducer already routes to onboard/app from
+      //   doc.onboardingComplete. Until then a restored session defaults to app.
+      dispatch({ type: "SET_STAGE", stage: "app" });
+    })();
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
-  const setField = useCallback((key: string, value: string) => {
-    setFields((prev) => ({ ...prev, [key]: value }));
-  }, []);
+  // ── Login ────────────────────────────────────────────────────────────────
+  const login = useCallback(async (identifier: string, password: string): Promise<boolean> => {
+    const result = await loginChild(identifier, password);
+    if (!result.ok) return false;
 
-  const updateCompany = useCallback((patch: Partial<Company>) => {
-    setCompany((prev) => ({ ...prev, ...patch }));
-  }, []);
-
-  const buildArtifact = useCallback((key: ArtifactKey) => {
-    setArtifacts((prev) => prev[key] ? prev : { ...prev, [key]: true });
-  }, []);
-
-  const completeWorkshop = useCallback((id: string) => {
-    setWorkshopsDone((prev) => prev.includes(id) ? prev : [...prev, id]);
-  }, []);
-
-  const addSale = useCallback((sale: Omit<Sale, 'id'>) => {
-    setSales((prev) => [{ ...sale, id: `s${prev.length + 1}` }, ...prev]);
-  }, []);
-
-  const logNo = useCallback((reason: string, lesson: string) => {
-    setNos((prev) => [...prev, { reason, lesson }]);
-  }, []);
-
-  const bumpOutreach = useCallback((n: number) => setOutreach((v) => v + n), []);
-  const bumpContacts = useCallback((n: number) => setContacts((v) => v + n), []);
-  const addWeek = useCallback(
-    (revenue: number, costs: number) => setWeeks((prev) => [...prev, { revenue, costs }]),
-    []
-  );
-
-  const nextStep = useMemo(() => STEPS.find((s) => !isStepDone(s.id)), [isStepDone]);
-
-  const currentPhase = useMemo<PhaseId>(() => {
-    for (const phase of PHASES) {
-      const steps = STEPS.filter((s) => s.phase === phase.id);
-      if (!steps.every((s) => isStepDone(s.id))) return phase.id;
+    // Same-user vs different-user: wipe ALL fp:* drafts/outbox before hydrating
+    // when a different child logs in on this device.
+    const userId = await getCurrentUserId();
+    if (userId) {
+      const last = getLastUserId();
+      if (last && last !== userId) {
+        wipeAllFpKeys();
+      }
+      setLastUserId(userId);
     }
-    return 'scale';
-  }, [isStepDone]);
 
-  const phaseProgress = useCallback(
-    (phase: PhaseId) => {
-      const steps = STEPS.filter((s) => s.phase === phase);
-      return { done: steps.filter((s) => isStepDone(s.id)).length, total: steps.length };
-    },
-    [isStepDone]
+    const profile: ChildProfile = result.profile;
+    dispatch({ type: "SET_PROFILE", patch: { firstName: profile.firstName, handle: profile.handle } });
+
+    // TODO(Unit 6): fetch fp_player_saves for this profile and HYDRATE — the
+    //   reducer routes to onboard/app from doc.onboardingComplete, and the
+    //   sync layer restores same-user drafts/outbox from the account cache.
+    //   Until then: no save exists yet, so onboarding is incomplete → onboard.
+    dispatch({ type: "SET_STAGE", stage: "onboard" });
+    return true;
+  }, []);
+
+  // ── Logout (explicit + idle share a core, differ on draft handling). ──────
+  const runLogout = useCallback(async (scope: "idle" | "explicit") => {
+    const userId = await getCurrentUserId();
+    await authLogout(scope);
+    if (scope === "explicit" && userId) {
+      // Explicit logout purges this user's drafts + outbox. Idle logout does
+      // NOT — origin R6 keeps the same user's Step Runner input for re-login.
+      wipeAllForUser(userId);
+    }
+    dispatch({ type: "SET_PROFILE", patch: { firstName: "", handle: "", siteHeadline: "" } });
+    dispatch({ type: "SET_STAGE", stage: scope === "explicit" ? "landing" : "login" });
+  }, []);
+
+  const logout = useCallback(async () => {
+    await runLogout("explicit");
+  }, [runLogout]);
+
+  // ── Idle timeout: revoke after ~45 min of no interaction while logged in. ──
+  useEffect(() => {
+    if (!isLoggedInStage(state.stage)) return;
+
+    let timer: ReturnType<typeof setTimeout>;
+    const reset = () => {
+      clearTimeout(timer);
+      timer = setTimeout(() => {
+        if (isLoggedInStage(stageRef.current)) {
+          void runLogout("idle");
+        }
+      }, IDLE_TIMEOUT_MS);
+    };
+
+    const windowEvents: (keyof WindowEventMap)[] = ["mousedown", "keydown", "touchstart"];
+    for (const ev of windowEvents) window.addEventListener(ev, reset, { passive: true });
+    // `visibilitychange` fires on `document`, not `window`.
+    document.addEventListener("visibilitychange", reset);
+    reset();
+
+    return () => {
+      clearTimeout(timer);
+      for (const ev of windowEvents) window.removeEventListener(ev, reset);
+      document.removeEventListener("visibilitychange", reset);
+    };
+  }, [state.stage, runLogout]);
+
+  const value = useMemo<GameApi>(
+    () => ({
+      ...state,
+      dispatch,
+      nextUpFor: (ideaIndex) => nextUpForFn(state, ideaIndex),
+      isTaskDone: (ideaIndex, stepId, index) => isTaskDoneFn(state, ideaIndex, stepId, index),
+      isCriterionDone: (ideaIndex, stepId) => isCriterionDoneFn(state, ideaIndex, stepId),
+      sellProgress: (ideaIndex) => sellProgressFn(state, ideaIndex),
+      isStepUnlocked: (ideaIndex, stepId) => isStepUnlockedFn(state, ideaIndex, stepId),
+      ideasEligibleFor: (stepId) => ideasEligibleForFn(state, stepId),
+      backingSumCents: () => backingSumCentsFn(state),
+      salesSumCents: () => salesSumCentsFn(state),
+      login,
+      logout,
+    }),
+    [state, login, logout],
   );
-
-  const roomProgress = useCallback(
-    (room: RoomId) => {
-      const steps = STEPS.filter((s) => s.room === room);
-      return { done: steps.filter((s) => isStepDone(s.id)).length, total: steps.length };
-    },
-    [isStepDone]
-  );
-
-  const isRoomUnlocked = useCallback(
-    (room: RoomId) => {
-      const earliest = Math.min(
-        ...STEPS.filter((s) => s.room === room).map((s) => phaseById(s.phase).index)
-      );
-      return phaseById(currentPhase).index >= earliest;
-    },
-    [currentPhase]
-  );
-
-  const xp = useMemo(() => {
-    const stepXp = STEPS.reduce((sum, step) => {
-      const { done, total } = stepProgress(step.id);
-      return sum + Math.round(step.xp * done / total);
-    }, 0);
-    return stepXp + workshopsDone.length * 40;
-  }, [stepProgress, workshopsDone]);
-
-  const revenue = useMemo(() => sales.reduce((sum, s) => sum + s.amount, 0), [sales]);
-  const profit = useMemo(
-    () => sales.reduce((sum, s) => sum + (s.amount - company.cost), 0),
-    [sales, company.cost]
-  );
-
-  const value: GameApi = {
-    company,
-    fields,
-    tasksDone,
-    artifacts,
-    workshopsDone,
-    sales,
-    nos,
-    outreach,
-    contacts,
-    weeks,
-    xp,
-    toggleTask,
-    setField,
-    updateCompany,
-    buildArtifact,
-    completeWorkshop,
-    addSale,
-    logNo,
-    bumpOutreach,
-    bumpContacts,
-    addWeek,
-    isTaskDone,
-    isStepDone,
-    stepProgress,
-    nextStep,
-    currentPhase,
-    phaseProgress,
-    roomProgress,
-    isRoomUnlocked,
-    revenue,
-    profit,
-    activeRoom,
-    openRoom: setActiveRoom,
-    guideOn,
-    setGuideOn
-  };
 
   return <GameContext.Provider value={value}>{children}</GameContext.Provider>;
 }
 
 export function useGame(): GameApi {
   const ctx = useContext(GameContext);
-  if (!ctx) throw new Error('useGame must be used inside GameProvider');
+  if (!ctx) throw new Error("useGame must be used inside GameProvider");
   return ctx;
 }
-
-export const TOTAL_ROOMS = ROOMS.length;
-export const TOTAL_WORKSHOPS = WORKSHOPS.length;

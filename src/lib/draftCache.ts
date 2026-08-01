@@ -1,0 +1,117 @@
+/**
+ * Account-namespaced localStorage draft cache.
+ *
+ * Draft/outbox keys are namespaced per user: `fp:<userId>:<name>`. This keeps
+ * one child's Step Runner input (and, in Unit 6, the sync outbox) from leaking
+ * into another child's session on a shared Chromebook.
+ *
+ * Draft-handling policy (Key Technical Decision: "logout revokes, not just
+ * hides — but idle and explicit logout differ"):
+ *  - EXPLICIT logout and a DIFFERENT-user login purge `fp:*` keys.
+ *  - IDLE logout PRESERVES the same user's `fp:<uid>:*` keys, so an unsent
+ *    Step Runner draft restores on same-user re-login (origin R6).
+ *
+ * Drafts hold task text only (no PII). Corrupted JSON in a draft key is
+ * discarded, never thrown, so one bad key can never break hydration.
+ *
+ * Testable: every function takes an optional `Storage` instance; it defaults to
+ * `window.localStorage`, resolved lazily so importing this module never touches
+ * the DOM (keeps the node-environment vitest suite happy).
+ */
+
+/** Namespace prefix for every account-scoped key. */
+export const FP_PREFIX = "fp:";
+
+/**
+ * Where the "who logged in last" marker lives. Deliberately OUTSIDE the `fp:`
+ * namespace so `wipeAllFpKeys()` never clears it — we must still remember the
+ * previous user after wiping their drafts, to detect same-vs-different login.
+ */
+const LAST_USER_KEY = "firstprofit.lastUserId";
+
+function resolveStorage(storage?: Storage): Storage {
+  if (storage) return storage;
+  return window.localStorage;
+}
+
+function draftKey(userId: string, name: string): string {
+  return `${FP_PREFIX}${userId}:${name}`;
+}
+
+/** Every key in `storage` (a stable snapshot; safe to remove while iterating). */
+function allKeys(storage: Storage): string[] {
+  const keys: string[] = [];
+  for (let i = 0; i < storage.length; i++) {
+    const k = storage.key(i);
+    if (k !== null) keys.push(k);
+  }
+  return keys;
+}
+
+/** Store a JSON-serialized draft value under `fp:<userId>:<name>`. */
+export function setDraft(userId: string, name: string, value: unknown, storage?: Storage): void {
+  const s = resolveStorage(storage);
+  s.setItem(draftKey(userId, name), JSON.stringify(value));
+}
+
+/**
+ * Read a draft value. Returns `undefined` when absent OR when the stored JSON is
+ * corrupted (the corrupted key is dropped, never thrown).
+ */
+export function getDraft<T = unknown>(userId: string, name: string, storage?: Storage): T | undefined {
+  const s = resolveStorage(storage);
+  const key = draftKey(userId, name);
+  const raw = s.getItem(key);
+  if (raw === null) return undefined;
+  try {
+    return JSON.parse(raw) as T;
+  } catch {
+    // Corrupted JSON: discard the offending key so it can never poison a later
+    // hydrate/replay, and report absence.
+    s.removeItem(key);
+    return undefined;
+  }
+}
+
+/** List the draft names (the `<name>` segment) stored for a user. */
+export function listDraftNames(userId: string, storage?: Storage): string[] {
+  const s = resolveStorage(storage);
+  const scope = `${FP_PREFIX}${userId}:`;
+  return allKeys(s)
+    .filter((k) => k.startsWith(scope))
+    .map((k) => k.slice(scope.length));
+}
+
+/**
+ * Purge every `fp:<userId>:*` key for one user. Used by EXPLICIT logout — it
+ * clears both drafts and (Unit 6) outbox entries, which share the namespace.
+ */
+export function wipeAllForUser(userId: string, storage?: Storage): void {
+  const s = resolveStorage(storage);
+  const scope = `${FP_PREFIX}${userId}:`;
+  for (const k of allKeys(s)) {
+    if (k.startsWith(scope)) s.removeItem(k);
+  }
+}
+
+/**
+ * Purge EVERY `fp:*` key regardless of user. Used when a DIFFERENT user logs in
+ * on the same device, before hydrating their state, so no residual drafts or
+ * outbox entries from the prior child cross accounts.
+ */
+export function wipeAllFpKeys(storage?: Storage): void {
+  const s = resolveStorage(storage);
+  for (const k of allKeys(s)) {
+    if (k.startsWith(FP_PREFIX)) s.removeItem(k);
+  }
+}
+
+/** The user id that last logged in on this device, or `null` if none recorded. */
+export function getLastUserId(storage?: Storage): string | null {
+  return resolveStorage(storage).getItem(LAST_USER_KEY);
+}
+
+/** Record the user id that just logged in on this device. */
+export function setLastUserId(userId: string, storage?: Storage): void {
+  resolveStorage(storage).setItem(LAST_USER_KEY, userId);
+}

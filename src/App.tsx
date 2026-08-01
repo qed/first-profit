@@ -1,120 +1,169 @@
-import React, { useState } from 'react';
-import { AnimatePresence, motion } from 'framer-motion';
-import { ArrowRightIcon } from 'lucide-react';
-import { GameProvider, useGame } from './state/GameContext';
-import { Hud } from './components/Hud';
-import { FactoryFloor } from './components/FactoryFloor';
-import { NextStepCoach } from './components/NextStepCoach';
-import { RoomShell } from './components/RoomShell';
-import { IdeaPanel } from './components/rooms/IdeaPanel';
-import { MarketPanel } from './components/rooms/MarketPanel';
-import { BuildPanel } from './components/rooms/BuildPanel';
-import { WebsitePanel } from './components/rooms/WebsitePanel';
-import { CheckoutPanel } from './components/rooms/CheckoutPanel';
-import { ProductPanel } from './components/rooms/ProductPanel';
-import { WorkshopPanel } from './components/rooms/WorkshopPanel';
-import { CommandPanel } from './components/rooms/CommandPanel';
-import { PHASES, type RoomId } from './data/path';
+/**
+ * fpv2 stage router (Unit 5 rewrite).
+ *
+ * The app is a `stage` machine (no router): boot | landing | login | onboard |
+ * app. This unit ships the login screen and MINIMAL placeholders for the other
+ * stages so the whole flow is walkable end to end; the real surfaces arrive in
+ * later units:
+ *   - landing   → Unit 7
+ *   - onboard   → Unit 8
+ *   - app floor → Units 9-11
+ *
+ * The old single-company Factory / rooms are intentionally no longer imported
+ * (they consume the removed old GameContext API). Those files stay on disk for
+ * later units to evolve; excluding them from App's import tree keeps them out
+ * of the build.
+ */
+import { GameProvider, useGame } from "./state/GameContext";
+import { Login } from "./screens/Login";
 
-const PANELS: Record<RoomId, React.ComponentType> = {
-  idea: IdeaPanel,
-  market: MarketPanel,
-  build: BuildPanel,
-  website: WebsitePanel,
-  checkout: CheckoutPanel,
-  product: ProductPanel,
-  workshop: WorkshopPanel,
-  command: CommandPanel
-};
+function Boot() {
+  return (
+    <main className="flex min-h-screen w-full items-center justify-center bg-[hsl(40_30%_99%)] text-ink">
+      <div className="flex flex-col items-center gap-3">
+        <span className="flex h-9 items-end gap-[3px]" aria-hidden>
+          <span className="h-3 w-[5px] animate-pulse rounded-sm bg-sell" />
+          <span className="h-5 w-[5px] animate-pulse rounded-sm bg-build" />
+          <span className="h-7 w-[5px] animate-pulse rounded-sm bg-grow" />
+          <span className="h-9 w-[5px] animate-pulse rounded-sm bg-scale" />
+        </span>
+        <p className="font-mono text-[11px] uppercase tracking-[0.28em] text-ink/50">Loading</p>
+      </div>
+    </main>
+  );
+}
 
-function Factory() {
-  const { activeRoom, openRoom } = useGame();
-  const [walkTo, setWalkTo] = useState<RoomId | null>(null);
-  const [intro, setIntro] = useState(true);
-  const Panel = activeRoom ? PANELS[activeRoom] : null;
-
-  const arrive = (room: RoomId) => {
-    openRoom(room);
-    setWalkTo(null);
-  };
+/** Minimal placeholder landing (real one is Unit 7). Both CTAs route to login. */
+function Landing() {
+  const { dispatch } = useGame();
+  const toLogin = () => dispatch({ type: "SET_STAGE", stage: "login" });
 
   return (
-    <main className="flex h-full min-h-screen w-full flex-col gap-4 bg-paper p-4 sm:p-6">
-      <Hud />
-      <div className="min-h-[34rem] flex-1">
-        <FactoryFloor walkTo={walkTo} onArrived={arrive} onWalk={(room) => setWalkTo(room)} />
+    <main className="flex min-h-screen w-full flex-col items-center justify-center bg-[hsl(40_30%_99%)] px-4 py-8 text-ink">
+      <div className="w-full max-w-md text-center">
+        <p className="font-mono text-[11px] uppercase tracking-[0.28em] text-sell">
+          Home Study Edition
+        </p>
+        <h1 className="mt-3 font-display text-4xl font-black leading-tight sm:text-5xl">
+          First Profit
+        </h1>
+        <p className="mt-4 text-base leading-relaxed text-ink/60">
+          Your kid&rsquo;s first $1,000, earned for real.
+        </p>
+
+        <div className="mt-8 flex flex-col gap-3">
+          <button
+            type="button"
+            onClick={toLogin}
+            className="flex min-h-[52px] w-full items-center justify-center rounded-2xl bg-verified px-5 font-display text-lg font-bold text-white shadow-[0_6px_0_hsl(150_52%_26%)] transition active:translate-y-0.5 active:shadow-[0_3px_0_hsl(150_52%_26%)]"
+          >
+            Start Building →
+          </button>
+          <button
+            type="button"
+            onClick={toLogin}
+            className="flex min-h-[48px] w-full items-center justify-center rounded-2xl border-2 border-ink/15 bg-white px-5 font-display text-base font-bold text-ink hover:border-ink/30"
+          >
+            Log in
+          </button>
+        </div>
       </div>
+    </main>
+  );
+}
 
-      <NextStepCoach onGo={(room) => setWalkTo(room as RoomId)} />
+/** Minimal placeholder onboarding (real screens 2-5 are Unit 8). */
+function Onboard() {
+  const { dispatch } = useGame();
+  return (
+    <main className="flex min-h-screen w-full flex-col items-center justify-center bg-[hsl(38_46%_95%)] px-4 py-8 text-ink">
+      <div className="w-full max-w-md rounded-3xl border border-[hsl(40_14%_89%)] bg-white p-6 text-center shadow-card sm:p-8">
+        <p className="font-mono text-[11px] uppercase tracking-[0.28em] text-sell">The founder</p>
+        <h1 className="mt-2 font-display text-3xl font-black leading-tight">
+          Onboarding, coming in Unit 8.
+        </h1>
+        <p className="mt-3 text-sm leading-relaxed text-ink/60">
+          The founder profile, website reveal, money booth, and The Path arrive here.
+        </p>
+        <button
+          type="button"
+          onClick={() => dispatch({ type: "SET_STAGE", stage: "app" })}
+          className="mt-6 flex min-h-[52px] w-full items-center justify-center rounded-2xl bg-verified px-5 font-display text-lg font-bold text-white shadow-[0_6px_0_hsl(150_52%_26%)] transition active:translate-y-0.5 active:shadow-[0_3px_0_hsl(150_52%_26%)]"
+        >
+          Go to the floor →
+        </button>
+      </div>
+    </main>
+  );
+}
 
-      <AnimatePresence>
-        {Panel && activeRoom ?
-        <RoomShell roomId={activeRoom} onClose={() => openRoom(null)}>
-            <Panel />
-          </RoomShell> :
-        null}
-      </AnimatePresence>
+/** Minimal name + logout chip for the app placeholder (no dependency on old Hud). */
+function FounderChip() {
+  const { profile, logout } = useGame();
+  const label = profile.firstName || profile.handle || "Founder";
+  return (
+    <header className="flex items-center justify-between gap-4 rounded-3xl border border-[hsl(40_14%_89%)] bg-white px-4 py-3">
+      <div className="flex items-center gap-2">
+        <span className="flex h-7 items-end gap-[2px]" aria-hidden>
+          <span className="h-2.5 w-1 rounded-sm bg-sell" />
+          <span className="h-4 w-1 rounded-sm bg-build" />
+          <span className="h-5 w-1 rounded-sm bg-grow" />
+          <span className="h-7 w-1 rounded-sm bg-scale" />
+        </span>
+        <span className="font-mono text-xs uppercase tracking-wider text-ink/70">{label}</span>
+      </div>
+      <button
+        type="button"
+        onClick={() => void logout()}
+        className="inline-flex min-h-[44px] items-center rounded-full border-2 border-ink/15 px-4 font-mono text-xs uppercase tracking-wider text-ink hover:border-ink/30"
+      >
+        Log out
+      </button>
+    </header>
+  );
+}
 
-      <AnimatePresence>
-        {intro ?
-        <motion.div
-          className="fixed inset-0 z-[60] flex items-center justify-center bg-ink/60 p-4"
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          exit={{ opacity: 0 }}>
-          
-            <motion.div
-            initial={{ y: 18, scale: 0.97 }}
-            animate={{ y: 0, scale: 1 }}
-            className="max-h-[90dvh] w-full max-w-lg overflow-y-auto rounded-3xl border-2 border-ink/15 bg-parchment p-5 shadow-pod sm:p-7">
-            
-              <p className="font-mono text-[10px] uppercase tracking-[0.3em] text-ember">
-                First Profit · Home Study
-              </p>
-              <h1 className="mt-2 font-display text-2xl font-black leading-tight sm:text-3xl">
-                Welcome to the factory floor.
-              </h1>
-              <p className="mt-3 text-sm leading-relaxed text-graphite">
-                You are the founder. Walk your avatar into any pod to work on a real part of your
-                business — the idea, the selling, the build, the website, the checkout, the
-                delivery, the numbers. Twenty-five pass criteria stand between you and your first
-                $1,000.
-              </p>
-              <ol className="mt-4 grid grid-cols-5 gap-1.5">
-                {PHASES.map((phase) =>
-              <li key={phase.id} className="text-center">
-                    <span
-                  className="block rounded-lg py-1.5 font-mono text-[10px] font-bold uppercase tracking-wider text-white"
-                  style={{ backgroundColor: phase.color }}>
-                  
-                      {phase.name}
-                    </span>
-                  </li>
-              )}
-              </ol>
-              <p className="mt-4 rounded-xl bg-go/10 px-3.5 py-3 text-xs leading-relaxed text-go">
-                Stuck? Hit the big green <strong>Next Step</strong> button. It walks you to the
-                right pod and tells you exactly what to do next.
-              </p>
-              <button
-              type="button"
-              onClick={() => setIntro(false)}
-              className="mt-5 flex w-full items-center justify-center gap-2 rounded-2xl bg-ink px-5 py-4 font-display text-lg font-bold text-paper hover:bg-graphite">
-              
-                Start The Path <ArrowRightIcon className="h-5 w-5" />
-              </button>
-            </motion.div>
-          </motion.div> :
-        null}
-      </AnimatePresence>
-    </main>);
+/** Minimal placeholder floor (real one is Units 9-11). */
+function AppFloor() {
+  return (
+    <main className="flex min-h-screen w-full flex-col gap-4 bg-[hsl(38_40%_92%)] p-4 sm:p-6">
+      <FounderChip />
+      <div className="flex flex-1 items-center justify-center rounded-3xl border-2 border-dashed border-ink/15 bg-white/40 p-8 text-center">
+        <div className="max-w-sm">
+          <h1 className="font-display text-2xl font-black leading-tight">
+            Factory floor, coming in Unit 9.
+          </h1>
+          <p className="mt-3 text-sm leading-relaxed text-ink/60">
+            The Path, Company, and Products rows plus the Sell floor land here.
+          </p>
+        </div>
+      </div>
+    </main>
+  );
+}
 
+function StageRouter() {
+  const { stage } = useGame();
+  switch (stage) {
+    case "boot":
+      return <Boot />;
+    case "landing":
+      return <Landing />;
+    case "login":
+      return <Login />;
+    case "onboard":
+      return <Onboard />;
+    case "app":
+      return <AppFloor />;
+    default:
+      return <Boot />;
+  }
 }
 
 export function App() {
   return (
     <GameProvider>
-      <Factory />
-    </GameProvider>);
-
+      <StageRouter />
+    </GameProvider>
+  );
 }
