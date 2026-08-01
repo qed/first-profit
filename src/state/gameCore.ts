@@ -276,6 +276,7 @@ export type Action =
   | { type: "SET_STAGE"; stage: Stage }
   | { type: "SET_OB"; ob: number }
   | { type: "SET_PROFILE"; patch: Partial<Profile> }
+  | { type: "SET_ONBOARDING_COMPLETE"; value?: boolean }
   | { type: "CREATE_IDEA" }
   | { type: "SET_ACTIVE_IDEA"; ideaIndex: number }
   | { type: "SET_FIELD"; ideaIndex: number; key: string; value: string }
@@ -341,6 +342,11 @@ export function reducer(state: GameState, action: Action): GameState {
 
     case "SET_PROFILE":
       return { ...state, profile: { ...state.profile, ...action.patch } };
+
+    case "SET_ONBOARDING_COMPLETE":
+      // The only writer of `onboardingComplete`. Persisted via toSaveDoc so the
+      // NEXT login's HYDRATE routes straight to `app` (never back into onboard).
+      return { ...state, onboardingComplete: action.value ?? true };
 
     case "CREATE_IDEA": {
       if (state.ideas.length >= MAX_IDEAS) return state;

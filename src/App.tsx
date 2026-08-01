@@ -5,7 +5,6 @@
  * app. This unit ships the login screen and MINIMAL placeholders for the other
  * stages so the whole flow is walkable end to end; the real surfaces arrive in
  * later units:
- *   - onboard   → Unit 8
  *   - app floor → Units 9-11
  *
  * The old single-company Factory / rooms are intentionally no longer imported
@@ -16,6 +15,7 @@
 import { GameProvider, useGame } from "./state/GameContext";
 import { Login } from "./screens/Login";
 import { Landing } from "./screens/Landing";
+import { Onboarding } from "./screens/Onboarding";
 
 function Boot() {
   return (
@@ -28,31 +28,6 @@ function Boot() {
           <span className="h-9 w-[5px] animate-pulse rounded-sm bg-scale" />
         </span>
         <p className="font-mono text-[11px] uppercase tracking-[0.28em] text-ink/50">Loading</p>
-      </div>
-    </main>
-  );
-}
-
-/** Minimal placeholder onboarding (real screens 2-5 are Unit 8). */
-function Onboard() {
-  const { dispatch } = useGame();
-  return (
-    <main className="flex min-h-screen w-full flex-col items-center justify-center bg-[hsl(38_46%_95%)] px-4 py-8 text-ink">
-      <div className="w-full max-w-md rounded-3xl border border-[hsl(40_14%_89%)] bg-white p-6 text-center shadow-card sm:p-8">
-        <p className="font-mono text-[11px] uppercase tracking-[0.28em] text-sell">The founder</p>
-        <h1 className="mt-2 font-display text-3xl font-black leading-tight">
-          Onboarding, coming in Unit 8.
-        </h1>
-        <p className="mt-3 text-sm leading-relaxed text-ink/60">
-          The founder profile, website reveal, money booth, and The Path arrive here.
-        </p>
-        <button
-          type="button"
-          onClick={() => dispatch({ type: "SET_STAGE", stage: "app" })}
-          className="mt-6 flex min-h-[52px] w-full items-center justify-center rounded-2xl bg-verified px-5 font-display text-lg font-bold text-white shadow-[0_6px_0_hsl(150_52%_26%)] transition active:translate-y-0.5 active:shadow-[0_3px_0_hsl(150_52%_26%)]"
-        >
-          Go to the floor →
-        </button>
       </div>
     </main>
   );
@@ -115,7 +90,7 @@ function StageRouter() {
     case "login":
       return <Login />;
     case "onboard":
-      return <Onboard />;
+      return <Onboarding />;
     case "app":
       return <AppFloor />;
     default:
