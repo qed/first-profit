@@ -120,6 +120,40 @@ export const CONSENT_META = {
   method: DEFAULT_CONSENT_POLICY.method,
 } as const;
 
+/**
+ * Build a RenderedConsentPolicy from the backend's fetched policy (Unit 9). The
+ * server owns the binding fields (namespace / version / hash / method / text);
+ * the TITLE is presentational only (not part of the hashed/echoed text), so it is
+ * filled from the local constant. Returns null if any binding field is missing,
+ * so the caller falls back to the aligned default rather than a half-formed
+ * policy.
+ */
+export function renderedFromFetched(fetched: {
+  namespace: string;
+  version: string;
+  hash: string;
+  method: string;
+  text: string;
+}): RenderedConsentPolicy | null {
+  if (
+    !fetched.namespace ||
+    !fetched.version ||
+    !fetched.hash ||
+    !fetched.method ||
+    !fetched.text
+  ) {
+    return null;
+  }
+  return {
+    namespace: fetched.namespace,
+    version: fetched.version,
+    hash: fetched.hash,
+    method: fetched.method,
+    title: CONSENT_POLICY_TITLE,
+    text: fetched.text,
+  };
+}
+
 /** Derive the buildSubmission ConsentMeta from any rendered policy (Unit 9 seam). */
 export function consentMetaFor(policy: RenderedConsentPolicy) {
   return {
