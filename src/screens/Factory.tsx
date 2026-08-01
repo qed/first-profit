@@ -19,18 +19,27 @@
  * (create idea → do tasks → pass criterion → unlock 1.2) works and nothing is
  * broken, but visually plain. See the per-dialog notes for where Units 10/11 plug in.
  */
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useGame } from "../state/GameContext";
 import { firstIncompleteTaskIndex, ideaOneLiner, roomEntryFor } from "../state/floorSelectors";
+import type { RoomId } from "../data/path";
 import { FactoryFloor, type FloorView, type WalkIntent } from "../components/FactoryFloor";
 import { Hud } from "../components/Hud";
 import { StepRunner } from "../components/StepRunner";
 import { Celebration } from "../components/Celebration";
+import { MockCheckout } from "../components/MockCheckout";
+import { YourSite } from "../components/rooms/YourSite";
+import { CheckoutBooth } from "../components/rooms/CheckoutBooth";
+import { SalesRoom } from "../components/rooms/SalesRoom";
+import { IdeaRoom } from "../components/rooms/IdeaRoom";
 
-/** Room-id → display name for the placeholder room dialog. */
-const ROOM_NAMES: Record<string, string> = {
-  website: "Your Site",
-  checkout: "The Checkout Booth",
+/** Room-id → dialog chrome (sign / name / tagline) + body. Only these four fpv2
+ *  rooms have real surfaces in Slice A; any other RoomId is inert (no dialog). */
+const ROOM_META: Partial<Record<RoomId, { sign: string; name: string; tagline: string; Body: () => React.JSX.Element }>> = {
+  website: { sign: "🌐", name: "Your Site", tagline: "Live already. Make it yours.", Body: YourSite },
+  checkout: { sign: "💳", name: "The Checkout Booth", tagline: "Take real money. Backers get store credit.", Body: CheckoutBooth },
+  market: { sign: "🛒", name: "The Sales Room", tagline: "Strangers, asks, yeses and nos.", Body: SalesRoom },
+  idea: { sign: "💡", name: "The Idea Room", tagline: "Pick one thing to sell. Say it in a sentence.", Body: IdeaRoom },
 };
 
 function Modal({ children, onClose, label }: { children: React.ReactNode; onClose?: () => void; label: string }) {
@@ -53,27 +62,69 @@ function Modal({ children, onClose, label }: { children: React.ReactNode; onClos
   );
 }
 
-/** Unit 11 replaces this with the real Your Site / Checkout Booth rooms + mock checkout. */
+/**
+ * The room dialog (handoff §Rooms): Your Site / Checkout Booth / Sales Room / Idea
+ * Room. One shared shell (full-screen below sm, floating from sm — the overlay
+ * breakpoint, matching StepRunner/RoomShell), aria-modal, Escape-to-close, focus
+ * on open; the body is the room-specific component. Reduced-motion zeroes fp-rise
+ * in src/index.css.
+ */
 function RoomDialog() {
   const { room, dispatch } = useGame();
+  const panelRef = useRef<HTMLDivElement>(null);
+  const open = Boolean(room && ROOM_META[room]);
+
+  useEffect(() => {
+    if (!open) return;
+    panelRef.current?.focus();
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") dispatch({ type: "CLOSE_ROOM" });
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [open, dispatch]);
+
   if (!room) return null;
-  const name = ROOM_NAMES[room] ?? room;
+  const meta = ROOM_META[room];
+  if (!meta) return null;
+  const { sign, name, tagline, Body } = meta;
+  const close = () => dispatch({ type: "CLOSE_ROOM" });
+
   return (
-    <Modal label={name} onClose={() => dispatch({ type: "CLOSE_ROOM" })}>
-      <div className="px-6 py-8">
-        <h2 className="font-display text-2xl font-black text-[hsl(25_34%_20%)]">{name}</h2>
-        <p className="mt-3 text-sm leading-[1.6] text-[hsl(25_20%_38%)]">
-          This room opens fully in the next build. It is live and connected to your page.
-        </p>
-        <button
-          type="button"
-          onClick={() => dispatch({ type: "CLOSE_ROOM" })}
-          className="mt-6 inline-flex min-h-[48px] items-center justify-center rounded-2xl border-2 border-[hsl(25_34%_20%/0.15)] px-5 font-display text-base font-bold text-[hsl(25_34%_20%)]"
-        >
-          Back to the Floor
-        </button>
+    <div className="fixed inset-0 z-[55] flex bg-[hsl(25_34%_20%/0.55)] sm:items-center sm:justify-center sm:p-4">
+      <div
+        ref={panelRef}
+        role="dialog"
+        aria-modal="true"
+        aria-label={name}
+        tabIndex={-1}
+        className="fp-rise flex h-full w-full flex-col overflow-y-auto bg-[hsl(40_55%_97%)] outline-none sm:h-auto sm:max-h-[calc(100dvh-2rem)] sm:w-full sm:max-w-[620px] sm:rounded-3xl sm:border-2 sm:border-[hsl(25_34%_20%/0.15)] sm:shadow-[0_8px_0_rgba(120,80,40,.1)]"
+        style={{ animation: "fp-rise .3s cubic-bezier(.22,1,.36,1) both" }}
+      >
+        <header className="flex items-center justify-between gap-4 border-b-2 border-[hsl(25_34%_20%/0.1)] px-5 py-4 sm:px-6">
+          <div className="flex min-w-0 items-center gap-2.5">
+            <span className="text-[22px]" aria-hidden>
+              {sign}
+            </span>
+            <div className="min-w-0">
+              <h2 className="truncate font-display text-[19px] font-black text-[hsl(25_34%_20%)]">{name}</h2>
+              <p className="truncate text-xs text-[hsl(25_20%_38%)]">{tagline}</p>
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={close}
+            aria-label="Back to the floor"
+            className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border-2 border-[hsl(25_34%_20%/0.15)] bg-[hsl(40_55%_97%)] text-sm text-[hsl(25_34%_20%)] hover:border-[hsl(25_34%_20%/0.4)]"
+          >
+            ✕
+          </button>
+        </header>
+        <div className="px-5 pb-7 pt-5 sm:px-6">
+          <Body />
+        </div>
       </div>
-    </Modal>
+    </div>
   );
 }
 
@@ -178,6 +229,7 @@ export function Factory() {
       <StepRunner />
       <Celebration />
       <RoomDialog />
+      <MockCheckout />
       <PickerDialog />
     </main>
   );

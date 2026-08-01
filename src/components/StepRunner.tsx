@@ -76,6 +76,16 @@ export function StepRunner() {
 
   if (!open || !step || !runnerStep) return null;
 
+  // The criterion's companion room dialog (handoff §Rooms). Only 1.1 (idea) and
+  // 1.2 (market) have a built dialog in Slice A; opening it closes the runner so
+  // the two fixed overlays never stack (mirrors the prototype's openTaskRoom).
+  const ROOM_DIALOG_NAMES: Record<string, string> = { idea: "The Idea Room", market: "The Sales Room" };
+  const roomDialogName = ROOM_DIALOG_NAMES[step.room];
+  const openRoomDialog = () => {
+    dispatch({ type: "CLOSE_RUNNER" });
+    dispatch({ type: "OPEN_ROOM", room: step.room });
+  };
+
   const critNum = Number(runnerStep.split(".")[1]) || 1;
   const taskLabel = parseTask(step.tasks[idx]).label;
   const alreadyDone = isTaskDone(activeIdea, runnerStep, idx);
@@ -244,6 +254,16 @@ export function StepRunner() {
               Back to the Floor
             </button>
           </div>
+
+          {roomDialogName ? (
+            <button
+              type="button"
+              onClick={openRoomDialog}
+              className="mt-3 block w-full text-center text-[12px] text-[hsl(25_20%_38%)] underline decoration-[hsl(25_20%_38%/0.4)] underline-offset-2 hover:text-[hsl(25_34%_20%)]"
+            >
+              Everything you need for this task is inside {roomDialogName} →
+            </button>
+          ) : null}
         </div>
       </div>
     </div>
