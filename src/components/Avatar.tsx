@@ -1,4 +1,3 @@
-import React from 'react';
 import { motion, useReducedMotion } from 'framer-motion';
 
 /** The bobbing founder figure with name tag, without any positioning. */

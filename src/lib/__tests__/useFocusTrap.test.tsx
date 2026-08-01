@@ -4,15 +4,15 @@
 // focusable element wraps to the first, and Shift+Tab off the first wraps to the
 // last, so a keyboard user cannot tab out of an aria-modal dialog.
 import { describe, it, expect, afterEach } from "vitest";
-import React, { useRef } from "react";
+import { useRef } from "react";
 import { render, fireEvent, cleanup } from "@testing-library/react";
 import { useFocusTrap } from "../useFocusTrap";
 
 function Dialog({ active }: { active: boolean }) {
   const ref = useRef<HTMLDivElement>(null);
+  useFocusTrap(ref, active);
   return (
     <div ref={ref} tabIndex={-1} data-testid="panel">
-      {useFocusTrap(ref, active)}
       <button data-testid="first">first</button>
       <button data-testid="mid">mid</button>
       <button data-testid="last">last</button>
