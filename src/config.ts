@@ -14,6 +14,31 @@ export interface AppConfig {
   t120ApiUrl: string;
 }
 
+/**
+ * The Start Building CTA cutover flag (Slice B Unit 10, Plan Revision 11 — "no
+ * half-live window"). DEFAULTS OFF: with the flag unset the Landing CTA routes to
+ * `login` (Slice A behavior), so merging or deploying this branch does NOT cut
+ * over to signup on its own. Flip `VITE_ENABLE_SIGNUP=true` in the deployment
+ * environment ONLY after the [T120] signup backend (through Unit 11 / T120 live)
+ * is verified live; that flip is the deliberate, reversible go-live step and it
+ * repoints the CTA to `signup`. Read via `isSignupEnabled` (separate from the
+ * required-var validation so a missing flag is simply "off", never a boot error).
+ */
+export const SIGNUP_FLAG_VAR = "VITE_ENABLE_SIGNUP";
+
+/**
+ * Whether the Start Building CTA should route to the `signup` stage. Reads
+ * `VITE_ENABLE_SIGNUP` (defaults `env` to `import.meta.env`); true only for the
+ * explicit opt-in strings "true"/"1". Intentionally does NOT run the required-var
+ * validation: the flag is orthogonal to Supabase/T120 config, so an env missing
+ * the flag returns false rather than throwing.
+ */
+export function isSignupEnabled(env?: EnvLike): boolean {
+  const source: EnvLike = env ?? (import.meta.env as unknown as EnvLike);
+  const raw = source[SIGNUP_FLAG_VAR];
+  return raw === "true" || raw === "1";
+}
+
 type EnvLike = Record<string, string | undefined>;
 
 const REQUIRED_VARS = [

@@ -63,15 +63,47 @@ import {
   savePendingSignup,
 } from "./signup/pendingStore";
 
-/** The signup step cursor. `done` is the local email-verify WAIT screen. */
-type Step = "parent" | "age" | "credential" | "consent" | "done";
+/**
+ * The signup step cursor.
+ *   parent/age/credential/consent = the four input screens.
+ *   done     = the local email-verify WAIT screen ("Check your email").
+ *   existing = the "you already have an account, sign in" interruption (a
+ *              returning parent the backend flagged `existing_account`, Unit 10).
+ */
+type Step = "parent" | "age" | "credential" | "consent" | "done" | "existing";
 
+/** The four input screens the parent walks (the age step, credential, etc.). */
 const STEP_ORDER: Step[] = ["parent", "age", "credential", "consent"];
-const TOTAL_STEPS = STEP_ORDER.length;
+
+/**
+ * The ONE coherent signup progress bar (Unit 10). It spans the WHOLE signup
+ * journey as five segments, filling left-to-right in the phase palette:
+ *   1 Your account · 2 Your child · 3 How they log in · 4 Your consent ·
+ *   5 Confirm your email.
+ * The four input screens fill segments 1..4; submitting consent advances the bar
+ * to segment 5 (the email round-trip: the WAIT screen, the return-from-link
+ * reprompt, and the "account created" confirmation all sit on the final segment,
+ * matching the house style where the current step is lit). This is deliberately a
+ * SEPARATE track from the child's five-PHASE onboarding bar (sell..scale) in
+ * `Onboarding.tsx`: signup is the logged-OUT parent setup and ENDS at "account
+ * created -> entering the game"; path a then logs the child in and the game's
+ * `onboard` stage renders the child's own founder onboarding (screens 2-5) with
+ * its own bar. We do NOT span one bar across the two sessions or re-render the
+ * onboarding screens here.
+ */
+const SIGNUP_SEGMENTS = 5;
+const CONFIRM_EMAIL_SEGMENT = 5;
 
 /** Result of the injected START stub. Unit 9 returns the real backend outcome:
- *  `attemptId` is the handle the verify-return carries to the child-mint call. */
-export type SubmitResult = { ok: boolean; attemptId?: string | null };
+ *  `attemptId` is the handle the verify-return carries to the child-mint call.
+ *  `existingAccount` (Unit 10) is the backend's deliberate returning-parent
+ *  signal: the container routes it to the sign-in interruption, NOT a generic
+ *  error. */
+export type SubmitResult = {
+  ok: boolean;
+  attemptId?: string | null;
+  existingAccount?: boolean;
+};
 
 /** What the injected verify-return handler reports back to the container. */
 export type CompleteVerificationResult = {
@@ -110,6 +142,12 @@ export interface SignupProps {
   /** Route out of signup (back to landing). App wires this to SET_STAGE. */
   onExit?: () => void;
   /**
+   * Route a RETURNING parent to the login stage (Unit 10). Fired from the
+   * "you already have an account" interruption when START reports
+   * `existingAccount`. App wires this to `SET_STAGE login`.
+   */
+  onGoToLogin?: () => void;
+  /**
    * The rendered consent policy the parent attests to. App fetches it from the
    * backend (text + version + hash) and injects it, so what is displayed and what
    * is echoed on submit are exactly what the server records. Defaults to the
@@ -144,7 +182,7 @@ function SignupShell({ filled, children }: { filled: number; children: React.Rea
       <div className="w-full max-w-[560px]">
         <div className="mb-4 flex items-center justify-between gap-4">
           <LogoMark />
-          <SignupProgress step={filled} total={TOTAL_STEPS} />
+          <SignupProgress step={filled} total={SIGNUP_SEGMENTS} />
         </div>
         <div className="rounded-3xl border-2 border-[hsl(25_34%_20%/0.15)] bg-[hsl(40_55%_97%)] p-6 shadow-[0_2px_0_rgba(120,80,40,0.12),0_8px_24px_rgba(120,80,40,0.14)] sm:p-8">
           {children}
@@ -157,21 +195,24 @@ function SignupShell({ filled, children }: { filled: number; children: React.Rea
 export function Signup({
   onSubmitSignup = mockSubmit,
   onExit,
+  onGoToLogin,
   policy = DEFAULT_CONSENT_POLICY,
   verifyToken,
   onCompleteVerification,
 }: SignupProps) {
   // Verify-return takes over the whole container: the parent is returning from
-  // the email link, not walking the form. Rendered inside the shared shell.
+  // the email link, not walking the form. It owns its OWN shell so the progress
+  // bar can sit on the final "confirm email" segment.
   if (verifyToken) {
-    return (
-      <SignupShell filled={TOTAL_STEPS}>
-        <VerifyReturn token={verifyToken} onComplete={onCompleteVerification} onExit={onExit} />
-      </SignupShell>
-    );
+    return <VerifyReturn token={verifyToken} onComplete={onCompleteVerification} onExit={onExit} />;
   }
   return (
-    <SignupStepFlow onSubmitSignup={onSubmitSignup} onExit={onExit} policy={policy} />
+    <SignupStepFlow
+      onSubmitSignup={onSubmitSignup}
+      onExit={onExit}
+      onGoToLogin={onGoToLogin}
+      policy={policy}
+    />
   );
 }
 
@@ -180,10 +221,12 @@ export function Signup({
 function SignupStepFlow({
   onSubmitSignup,
   onExit,
+  onGoToLogin,
   policy,
 }: {
   onSubmitSignup: (submission: SignupSubmission) => Promise<SubmitResult>;
   onExit?: () => void;
+  onGoToLogin?: () => void;
   policy: RenderedConsentPolicy;
 }) {
   const [step, setStep] = useState<Step>("parent");
@@ -213,6 +256,13 @@ function SignupStepFlow({
     try {
       const submission = buildSubmission(data, consentMetaFor(policy));
       const result = await onSubmitSignup(submission);
+      if (!result.ok && result.existingAccount) {
+        // A returning parent (R10 signal): route to the sign-in interruption, NOT
+        // a generic error. Copy is deliberately non-enumerating (mirrors the
+        // plan's accepted enumeration tradeoff; it never re-confirms the email).
+        setStep("existing");
+        return;
+      }
       if (result.ok) {
         // Persist what the verify-return needs to finish the flow across the
         // email link's fresh page load. NO PASSWORD is persisted (FIX 2) —
@@ -248,7 +298,16 @@ function SignupStepFlow({
     }
   };
 
-  const filled = step === "done" ? TOTAL_STEPS : STEP_ORDER.indexOf(step) + 1;
+  // Progress across the coherent 5-segment bar: the four input screens light
+  // segments 1..4; the email-verify WAIT screen ("done") advances to segment 5
+  // (Confirm your email). The existing-account interruption keeps the bar at the
+  // input steps it completed (4) rather than pretending it advanced.
+  const filled =
+    step === "done"
+      ? CONFIRM_EMAIL_SEGMENT
+      : step === "existing"
+        ? STEP_ORDER.length
+        : STEP_ORDER.indexOf(step) + 1;
 
   return (
     <>
@@ -305,15 +364,33 @@ function SignupStepFlow({
             <h2 className="mt-2 font-display text-[26px] font-black leading-[1.15] text-[hsl(25_34%_20%)]">
               Check your email.
             </h2>
-            <p className="mt-2 text-sm leading-[1.6] text-[hsl(25_20%_38%)]">
+            <p className="mt-2 break-words text-sm leading-[1.6] text-[hsl(25_20%_38%)]">
               We sent a confirmation link to <b className="text-[hsl(25_34%_20%)]">{data.parentEmail}</b>.
               Open it on this device to finish setting up your child's account.
             </p>
           </div>
         )}
+        {step === "existing" && (
+          <div className="text-center">
+            <p className="font-mono text-[11px] uppercase tracking-[0.14em] text-[hsl(25_20%_38%)]">
+              One account per family
+            </p>
+            <h2 className="mt-2 font-display text-[26px] font-black leading-[1.15] text-[hsl(25_34%_20%)]">
+              You may already have an account.
+            </h2>
+            <p className="mt-2 break-words text-sm leading-[1.6] text-[hsl(25_20%_38%)]">
+              Sign in to pick up where you left off. If you cannot get in, use the password reset on
+              the sign-in screen.
+            </p>
+            <div className="mt-5">
+              <GreenCta onClick={() => onGoToLogin?.()}>Go to sign in →</GreenCta>
+            </div>
+            <BackLink onClick={() => setStep("parent")} />
+          </div>
+        )}
       </SignupShell>
 
-      {step !== "done" ? (
+      {STEP_ORDER.includes(step) ? (
         <p className="mt-4 text-center font-mono text-[11px] uppercase tracking-wider text-[hsl(30_6%_52%)]">
           A grown-up sets up every account
         </p>
@@ -416,49 +493,56 @@ function VerifyReturn({
   // The confirmation screen (path b, or a login-failed path a). The copy differs
   // by path (FIX 5): path a's credential is the parent-set password (NOT emailed);
   // path b's is a provisioned address that arrives by a setup email.
+  // The confirmation screen (path b, or a login-failed path a). The copy differs
+  // by path (FIX 5): path a's credential is the parent-set password (NOT emailed);
+  // path b's is a provisioned address that arrives by a setup email.
   if (confirmed) {
     return (
-      <div className="text-center">
-        <p className="font-mono text-[11px] uppercase tracking-[0.14em] text-verified">
-          Account created
-        </p>
-        <h2 className="mt-2 font-display text-[26px] font-black leading-[1.15] text-[hsl(25_34%_20%)]">
-          You are all set.
-        </h2>
-        {isPathA ? (
-          <p className="mt-2 break-words text-sm leading-[1.6] text-[hsl(25_20%_38%)]">
-            <b className="text-[hsl(25_34%_20%)]">{pending?.child.firstName}</b> can log in with the
-            first name you chose and the password you set. Nothing else is emailed. If the sign-in
-            does not take right away, try again in a moment.
+      <SignupShell filled={CONFIRM_EMAIL_SEGMENT}>
+        <div className="text-center">
+          <p className="font-mono text-[11px] uppercase tracking-[0.14em] text-verified">
+            Account created
           </p>
-        ) : (
-          <p className="mt-2 text-sm leading-[1.6] text-[hsl(25_20%_38%)]">
-            We are provisioning your child's school sign-in address and will email it to you. Once it
-            arrives, your child can log in with that address and start playing.
-          </p>
-        )}
-      </div>
+          <h2 className="mt-2 font-display text-[26px] font-black leading-[1.15] text-[hsl(25_34%_20%)]">
+            You are all set.
+          </h2>
+          {isPathA ? (
+            <p className="mt-2 break-words text-sm leading-[1.6] text-[hsl(25_20%_38%)]">
+              <b className="text-[hsl(25_34%_20%)]">{pending?.child.firstName}</b> can log in with the
+              first name you chose and the password you set. Nothing else is emailed. If the sign-in
+              does not take right away, try again in a moment.
+            </p>
+          ) : (
+            <p className="mt-2 break-words text-sm leading-[1.6] text-[hsl(25_20%_38%)]">
+              We are provisioning your child's school sign-in address and will email it to you. Once it
+              arrives, your child can log in with that address and start playing.
+            </p>
+          )}
+        </div>
+      </SignupShell>
     );
   }
 
   // Different device / cleared storage: we have no attempt to finish here.
   if (!canFinish) {
     return (
-      <div className="text-center">
-        <p className="font-mono text-[11px] uppercase tracking-[0.14em] text-[hsl(25_20%_38%)]">
-          One more step
-        </p>
-        <h2 className="mt-2 font-display text-[26px] font-black leading-[1.15] text-[hsl(25_34%_20%)]">
-          Finish on the device you started on.
-        </h2>
-        <p className="mt-2 text-sm leading-[1.6] text-[hsl(25_20%_38%)]">
-          Your email is confirmed, but the rest of your signup lives in the browser where you began.
-          Open this link there to finish, or start again.
-        </p>
-        <div className="mt-5">
-          <GreenCta onClick={() => onExit?.()}>Start again →</GreenCta>
+      <SignupShell filled={CONFIRM_EMAIL_SEGMENT}>
+        <div className="text-center">
+          <p className="font-mono text-[11px] uppercase tracking-[0.14em] text-[hsl(25_20%_38%)]">
+            One more step
+          </p>
+          <h2 className="mt-2 font-display text-[26px] font-black leading-[1.15] text-[hsl(25_34%_20%)]">
+            Finish on the device you started on.
+          </h2>
+          <p className="mt-2 break-words text-sm leading-[1.6] text-[hsl(25_20%_38%)]">
+            Your email is confirmed, but the rest of your signup lives in the browser where you began.
+            Open this link there to finish, or start again.
+          </p>
+          <div className="mt-5">
+            <GreenCta onClick={() => onExit?.()}>Start again →</GreenCta>
+          </div>
         </div>
-      </div>
+      </SignupShell>
     );
   }
 
@@ -467,7 +551,7 @@ function VerifyReturn({
   if (!pending) return null;
 
   return (
-    <>
+    <SignupShell filled={CONFIRM_EMAIL_SEGMENT}>
       <p className="font-mono text-[11px] uppercase tracking-[0.14em]" style={{ color: "hsl(150 52% 32%)" }}>
         Almost done
       </p>
@@ -558,6 +642,6 @@ function VerifyReturn({
         {busy ? "Finishing..." : "Finish setup →"}
       </GreenCta>
       <BackLink onClick={() => onExit?.()} />
-    </>
+    </SignupShell>
   );
 }

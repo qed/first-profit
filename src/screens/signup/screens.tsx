@@ -209,7 +209,7 @@ export function SignupIntro({ data, onChange, onNext, onBack }: SignupIntroProps
   const canContinue = canContinueParent(data);
   return (
     <>
-      <StepKicker text="Step 1 of 4 · Your grown-up account" color="hsl(14 78% 44%)" />
+      <StepKicker text="Step 1 of 5 · Your grown-up account" color="hsl(14 78% 44%)" />
       <h1 className="mt-2 font-display text-[28px] font-extrabold leading-[1.15] text-[hsl(25_34%_20%)]">
         Create your child's account.
       </h1>
@@ -283,7 +283,7 @@ export function AgeJurisdiction({ data, onChange, onNext, onBack }: AgeJurisdict
     !isDobConsistentWithBand(data.dob, data.ageBand);
   return (
     <>
-      <StepKicker text="Step 2 of 4 · Your child" color="hsl(217 74% 46%)" />
+      <StepKicker text="Step 2 of 5 · Your child" color="hsl(217 74% 46%)" />
       <h2 className="mt-2 font-display text-[26px] font-black leading-[1.15] text-[hsl(25_34%_20%)]">
         A little about your founder.
       </h2>
@@ -384,7 +384,7 @@ export function ChildCredential({ data, onChange, onNext, onBack }: ChildCredent
 
   return (
     <>
-      <StepKicker text="Step 3 of 4 · How they log in" color="hsl(265 52% 48%)" />
+      <StepKicker text="Step 3 of 5 · How they log in" color="hsl(265 52% 48%)" />
       <h2 className="mt-2 font-display text-[26px] font-black leading-[1.15] text-[hsl(25_34%_20%)]">
         How will your child sign in?
       </h2>
@@ -513,7 +513,7 @@ export function ConsentScreen({
   const canSubmit = canContinueConsent(data) && !submitting;
   return (
     <>
-      <StepKicker text="Step 4 of 4 · Your consent" color="hsl(150 52% 32%)" />
+      <StepKicker text="Step 4 of 5 · Your consent" color="hsl(150 52% 32%)" />
       <h2 className="mt-2 font-display text-[26px] font-black leading-[1.15] text-[hsl(25_34%_20%)]">
         Your permission to begin.
       </h2>

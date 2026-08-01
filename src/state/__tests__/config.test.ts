@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from "vitest";
-import { getConfig, resetConfigForTesting } from "../../config";
+import { getConfig, isSignupEnabled, resetConfigForTesting } from "../../config";
 
 const FULL_ENV = {
   VITE_SUPABASE_URL: "https://example.supabase.co",
@@ -65,5 +65,25 @@ describe("getConfig", () => {
   it("does not let one injected env leak into a later call", () => {
     getConfig(FULL_ENV);
     expect(() => getConfig({})).toThrowError(/VITE_SUPABASE_URL/);
+  });
+});
+
+describe("isSignupEnabled (Start Building cutover flag, Rev 11)", () => {
+  it("defaults OFF when the flag is unset (no half-live window)", () => {
+    // An env WITHOUT the flag (and even missing the required vars) is simply
+    // "off", never a throw: the flag is orthogonal to the required-var check.
+    expect(isSignupEnabled({})).toBe(false);
+    expect(isSignupEnabled(FULL_ENV)).toBe(false);
+  });
+
+  it('is ON only for the explicit opt-in strings "true"/"1"', () => {
+    expect(isSignupEnabled({ VITE_ENABLE_SIGNUP: "true" })).toBe(true);
+    expect(isSignupEnabled({ VITE_ENABLE_SIGNUP: "1" })).toBe(true);
+  });
+
+  it("treats any other value as off", () => {
+    expect(isSignupEnabled({ VITE_ENABLE_SIGNUP: "false" })).toBe(false);
+    expect(isSignupEnabled({ VITE_ENABLE_SIGNUP: "yes" })).toBe(false);
+    expect(isSignupEnabled({ VITE_ENABLE_SIGNUP: "" })).toBe(false);
   });
 });

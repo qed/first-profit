@@ -103,10 +103,11 @@ function StageRouter() {
       credentialChoice: submission.child.credentialChoice,
     });
     if (result.ok) return { ok: true, attemptId: result.attemptId };
-    // A returning parent (existing_account) and a generic refusal both surface as
-    // the container's generic error here (not a crash); Unit 10 can route an
-    // existing account to login.
-    return { ok: false };
+    // A returning parent (the backend's deliberate R10 `existing_account` signal)
+    // is surfaced so the container routes them to the sign-in interruption; every
+    // other refusal stays a generic error. Non-enumerating: we only forward the
+    // flag the backend already chose to return (the accepted enumeration tradeoff).
+    return { ok: false, existingAccount: result.existingAccount };
   }, []);
 
   // Verify-return: verify the email + adopt the parent session, RECORD CONSENT,
@@ -128,6 +129,10 @@ function StageRouter() {
       onExit={() => {
         setVerifyToken(null);
         dispatch({ type: "SET_STAGE", stage: "landing" });
+      }}
+      onGoToLogin={() => {
+        setVerifyToken(null);
+        dispatch({ type: "SET_STAGE", stage: "login" });
       }}
       onSubmitSignup={handleStart}
       onCompleteVerification={handleCompleteVerification}

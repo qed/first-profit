@@ -51,7 +51,7 @@ describe("SignupIntro (screen 1)", () => {
         )}
       />,
     );
-    expect(screen.getByText("Step 1 of 4 · Your grown-up account")).toBeTruthy();
+    expect(screen.getByText("Step 1 of 5 · Your grown-up account")).toBeTruthy();
     const cta = screen.getByRole("button", { name: /Continue/ }) as HTMLButtonElement;
     expect(cta.disabled).toBe(true);
 

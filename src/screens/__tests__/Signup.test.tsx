@@ -70,7 +70,7 @@ describe("Signup container", () => {
     fillCredentialPathA();
 
     // Consent step: attest, then submit.
-    expect(screen.getByText("Step 4 of 4 · Your consent")).toBeTruthy();
+    expect(screen.getByText("Step 4 of 5 · Your consent")).toBeTruthy();
     fireEvent.click(screen.getByRole("checkbox"));
     fireEvent.click(screen.getByRole("button", { name: /Create my child's account/ }));
 
@@ -116,9 +116,9 @@ describe("Signup container", () => {
     render(<Signup onSubmitSignup={vi.fn(async (_s: SignupSubmission) => ({ ok: true }))} onExit={onExit} />);
     // Step 2 back returns to step 1 (does not exit).
     fillParent();
-    expect(screen.getByText("Step 2 of 4 · Your child")).toBeTruthy();
+    expect(screen.getByText("Step 2 of 5 · Your child")).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: /Back/ }));
-    expect(screen.getByText("Step 1 of 4 · Your grown-up account")).toBeTruthy();
+    expect(screen.getByText("Step 1 of 5 · Your grown-up account")).toBeTruthy();
     expect(onExit).not.toHaveBeenCalled();
     // Step 1 back exits to landing.
     fireEvent.click(screen.getByRole("button", { name: /Back/ }));
@@ -292,5 +292,102 @@ describe("Signup verify-return", () => {
     expect(screen.getByText("Finish on the device you started on.")).toBeTruthy();
     expect(screen.queryByLabelText("Your password")).toBeNull();
     expect(onCompleteVerification).not.toHaveBeenCalled();
+  });
+});
+
+// ── Unit 10: assembled flow, the one coherent progress bar, existing-account ───
+
+describe("Signup assembled flow + progress bar (Unit 10)", () => {
+  beforeEach(() => window.localStorage.clear());
+
+  it("the single progress bar advances across the input segments (1..4 of 5)", () => {
+    render(<Signup onSubmitSignup={vi.fn(async () => ({ ok: true }))} onExit={vi.fn()} />);
+    expect(screen.getByRole("img", { name: "Step 1 of 5" })).toBeTruthy();
+    fillParent();
+    expect(screen.getByRole("img", { name: "Step 2 of 5" })).toBeTruthy();
+    fillAge();
+    expect(screen.getByRole("img", { name: "Step 3 of 5" })).toBeTruthy();
+    fillCredentialPathA();
+    expect(screen.getByRole("img", { name: "Step 4 of 5" })).toBeTruthy();
+  });
+
+  it("submitting consent advances the bar to the fifth segment on the email-wait screen", async () => {
+    render(<Signup onSubmitSignup={vi.fn(async () => ({ ok: true, attemptId: "a1" }))} onExit={vi.fn()} />);
+    fillParent();
+    fillAge();
+    fillCredentialPathA();
+    fireEvent.click(screen.getByRole("checkbox"));
+    fireEvent.click(screen.getByRole("button", { name: /Create my child's account/ }));
+    await waitFor(() => expect(screen.getByText("Check your email.")).toBeTruthy());
+    expect(screen.getByRole("img", { name: "Step 5 of 5" })).toBeTruthy();
+  });
+
+  it("path a: a full walk from the form through the email return mints and enters the game (playing)", async () => {
+    const start = vi.fn(async () => ({ ok: true, attemptId: "a1" }));
+    const finish = vi.fn(async (_r: CompleteVerificationRequest) => ({
+      ok: true,
+      outcome: "playing" as const,
+    }));
+    const { rerender } = render(<Signup onSubmitSignup={start} onExit={vi.fn()} />);
+    fillParent();
+    fillAge();
+    fillCredentialPathA();
+    fireEvent.click(screen.getByRole("checkbox"));
+    fireEvent.click(screen.getByRole("button", { name: /Create my child's account/ }));
+    await waitFor(() => expect(screen.getByText("Check your email.")).toBeTruthy());
+    // The email link reloads the SPA into the verify-return (App sets verifyToken);
+    // it reads the pending blob START persisted and finishes the mint.
+    rerender(<Signup verifyToken="tok" onCompleteVerification={finish} onExit={vi.fn()} />);
+    expect(screen.getByText("Confirm your password.")).toBeTruthy();
+    fireEvent.change(screen.getByLabelText("Your password"), { target: { value: "parentpass" } });
+    fireEvent.change(screen.getByLabelText("Alex's password"), { target: { value: "kidpassword" } });
+    fireEvent.click(screen.getByRole("button", { name: /Finish setup/ }));
+    await waitFor(() => expect(finish).toHaveBeenCalledTimes(1));
+    expect(finish.mock.calls[0][0].child.credentialChoice).toBe("existing_credential");
+    // playing = the game took over; the container cleared the pending blob.
+    await waitFor(() => expect(loadPendingSignup()).toBeNull());
+  });
+
+  it("path b: a full walk through the email return resolves to the setup-email confirmation", async () => {
+    const start = vi.fn(async () => ({ ok: true, attemptId: "b1" }));
+    const finish = vi.fn(async (_r: CompleteVerificationRequest) => ({
+      ok: true,
+      outcome: "confirmation" as const,
+    }));
+    const { rerender } = render(<Signup onSubmitSignup={start} onExit={vi.fn()} />);
+    fillParent();
+    fillAge();
+    fireEvent.change(screen.getByPlaceholderText("Alex"), { target: { value: "Robin" } });
+    fireEvent.click(screen.getByRole("radio", { name: /Give them a school email/ }));
+    fireEvent.click(screen.getByRole("button", { name: /Continue/ }));
+    fireEvent.click(screen.getByRole("checkbox"));
+    fireEvent.click(screen.getByRole("button", { name: /Create my child's account/ }));
+    await waitFor(() => expect(screen.getByText("Check your email.")).toBeTruthy());
+    rerender(<Signup verifyToken="tok" onCompleteVerification={finish} onExit={vi.fn()} />);
+    // Path b reprompts ONLY the parent password (no child-password field).
+    expect(screen.queryByLabelText("Robin's password")).toBeNull();
+    fireEvent.change(screen.getByLabelText("Your password"), { target: { value: "parentpass" } });
+    fireEvent.click(screen.getByRole("button", { name: /Finish setup/ }));
+    await waitFor(() => expect(screen.getByText("You are all set.")).toBeTruthy());
+    expect(screen.getByText(/school sign-in address/i)).toBeTruthy();
+    expect(finish.mock.calls[0][0].child.password).toBeUndefined();
+  });
+
+  it("existing_account routes to the sign-in interruption (not a generic error) and fires onGoToLogin", async () => {
+    const start = vi.fn(async () => ({ ok: false, existingAccount: true }));
+    const onGoToLogin = vi.fn();
+    render(<Signup onSubmitSignup={start} onGoToLogin={onGoToLogin} onExit={vi.fn()} />);
+    fillParent();
+    fillAge();
+    fillCredentialPathA();
+    fireEvent.click(screen.getByRole("checkbox"));
+    fireEvent.click(screen.getByRole("button", { name: /Create my child's account/ }));
+    await waitFor(() => expect(screen.getByText("You may already have an account.")).toBeTruthy());
+    // Non-enumerating: the returning parent gets a sign-in CTA, NOT the generic
+    // "something went wrong" alert.
+    expect(screen.queryByRole("alert")).toBeNull();
+    expect(screen.queryByText(/Something went wrong/i)).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: /Go to sign in/ }));
+    expect(onGoToLogin).toHaveBeenCalledTimes(1);
   });
 });
