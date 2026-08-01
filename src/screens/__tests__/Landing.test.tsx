@@ -24,9 +24,16 @@ afterEach(() => {
 describe("Landing Start Building CTA cutover", () => {
   it("routes to login when the signup flag is OFF (default, no half-live window)", () => {
     render(<Landing signupEnabled={false} />);
-    fireEvent.click(screen.getAllByRole("button", { name: /Start Building/i })[0]);
-    expect(dispatch).toHaveBeenCalledWith({ type: "SET_STAGE", stage: "login" });
-    expect(dispatch).not.toHaveBeenCalledWith({ type: "SET_STAGE", stage: "signup" });
+    // Every CTA on the page honors the flag, not just the first — a regression
+    // gating only CTA #1 while #2/#3 leak to signup must fail this test.
+    const ctas = screen.getAllByRole("button", { name: /Start Building/i });
+    expect(ctas.length).toBeGreaterThan(1);
+    for (const cta of ctas) {
+      dispatch.mockClear();
+      fireEvent.click(cta);
+      expect(dispatch).toHaveBeenCalledWith({ type: "SET_STAGE", stage: "login" });
+      expect(dispatch).not.toHaveBeenCalledWith({ type: "SET_STAGE", stage: "signup" });
+    }
   });
 
   it("routes to signup when the flag is ON (post go-live cutover)", () => {

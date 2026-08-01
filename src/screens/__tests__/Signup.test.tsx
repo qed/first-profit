@@ -205,6 +205,9 @@ describe("Signup verify-return", () => {
     );
     render(<Signup verifyToken="tok-123" onCompleteVerification={onCompleteVerification} onExit={vi.fn()} />);
 
+    // After the email reload the whole-journey bar resumes at the final segment.
+    expect(screen.getByRole("img", { name: "Step 5 of 5" })).toBeTruthy();
+
     // Neither password is carried across the reload (different tab / fresh load):
     // both fields are empty and the CTA is disabled until BOTH are entered.
     expect(screen.getByText("Confirm your password.")).toBeTruthy();

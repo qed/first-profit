@@ -180,7 +180,7 @@ function PasswordField({
   );
 }
 
-/** The 4-segment signup progress bar (mirrors the onboarding ProgressBar). */
+/** The signup progress bar (total-driven; mirrors the onboarding ProgressBar). */
 export function SignupProgress({ step, total }: { step: number; total: number }) {
   return (
     <div className="flex gap-1.5" aria-label={`Step ${step} of ${total}`} role="img">
