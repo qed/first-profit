@@ -52,6 +52,7 @@ import {
   resolveProfileId,
   resetProfileIdCache,
   loadSave,
+  loadLedger,
   createSyncEngine,
   type SyncEngine,
   type SyncStatus,
@@ -166,7 +167,10 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
           startEngine(userId);
           return;
         }
-        const { doc, revision } = await loadSave(profileId);
+        const [{ doc, revision }, ledger] = await Promise.all([
+          loadSave(profileId),
+          loadLedger(profileId),
+        ]);
         revisionRef.current = revision;
         if (doc && (doc.onboardingComplete || doc.ideas.length > 0)) {
           dispatch({ type: "HYDRATE", doc });
@@ -174,6 +178,17 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
           dispatch({ type: "SET_STAGE", stage: "onboard" });
         }
         startEngine(userId);
+        // Fill the session ledger from the server. HYDRATE always clears it to []
+        // so a session boundary starts empty; SET_LEDGER now repopulates it from
+        // fp_ledger so Sales/backing totals + LedgerList survive a reload/re-login.
+        // Seed the engine's "known ledger ids" from these rows FIRST so the
+        // reducer-change subscription treats them as already-persisted and never
+        // re-inserts the just-loaded rows (the insert path is also idempotent by
+        // id via 23505-as-success, but this avoids the needless round-trips).
+        if (ledger.length > 0) {
+          for (const row of ledger) knownLedgerIdsRef.current.add(row.id);
+          dispatch({ type: "SET_LEDGER", ledger });
+        }
       } catch {
         // Any load failure: stay logged in, start fresh at onboarding.
         revisionRef.current = 0;

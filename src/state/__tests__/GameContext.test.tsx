@@ -48,11 +48,13 @@ const engines: FakeEngine[] = [];
 const syncMock = {
   resolveProfileId: vi.fn(),
   loadSave: vi.fn(),
+  loadLedger: vi.fn(),
 };
 vi.mock("../../lib/sync", () => ({
   resolveProfileId: (...a: unknown[]) => syncMock.resolveProfileId(...a),
   resetProfileIdCache: vi.fn(),
   loadSave: (...a: unknown[]) => syncMock.loadSave(...a),
+  loadLedger: (...a: unknown[]) => syncMock.loadLedger(...a),
   createSyncEngine: () => {
     const engine: FakeEngine = {
       start: vi.fn().mockResolvedValue(undefined),
@@ -96,6 +98,7 @@ beforeEach(() => {
   draftMock.setLastUserId.mockReset();
   syncMock.resolveProfileId.mockReset().mockResolvedValue("profile-1");
   syncMock.loadSave.mockReset().mockResolvedValue({ doc: null, revision: 0 });
+  syncMock.loadLedger.mockReset().mockResolvedValue([]);
 });
 
 afterEach(() => {
@@ -139,6 +142,40 @@ describe("GameProvider boot", () => {
     syncMock.loadSave.mockRejectedValue(new Error("load blew up"));
     renderProvider();
     await waitFor(() => expect(api?.stage).toBe("onboard"));
+  });
+
+  it("loads existing fp_ledger rows into state and does NOT re-insert them", async () => {
+    authMock.getCurrentUserId.mockResolvedValue("user-A");
+    syncMock.loadSave.mockResolvedValue({
+      doc: {
+        docVersion: 1,
+        ideas: [{ fields: {}, done: {} }],
+        activeIdea: 0,
+        siteHeadline: "",
+        onboardingComplete: true,
+      },
+      revision: 3,
+    });
+    syncMock.loadLedger.mockResolvedValue([
+      { id: "s1", kind: "sale", payer: "Mom", amountCents: 1500, createdAt: "2026-07-31T00:00:00.000Z" },
+      { id: "b1", kind: "backing", payer: "Dad", amountCents: 2500, createdAt: "2026-07-31T00:01:00.000Z" },
+    ]);
+    renderProvider();
+
+    await waitFor(() => expect(api?.stage).toBe("app"));
+    // Server rows survive the session boundary: totals + list are populated.
+    await waitFor(() => expect(api?.ledger).toHaveLength(2));
+    expect(api?.salesSumCents()).toBe(1500);
+    expect(api?.backingSumCents()).toBe(2500);
+
+    // The just-loaded rows must NOT be forwarded to the engine for (re-)insert:
+    // knownLedgerIdsRef was seeded from them before SET_LEDGER dispatched.
+    expect(engines).toHaveLength(1);
+    const forwardedIds = engines[0].notifyLedger.mock.calls.map(
+      ([r]) => (r as { id: string }).id,
+    );
+    expect(forwardedIds).not.toContain("s1");
+    expect(forwardedIds).not.toContain("b1");
   });
 });
 

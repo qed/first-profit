@@ -185,6 +185,10 @@ export function StepRunner() {
           </h3>
           <p className="mt-2.5 text-[14.5px] leading-[1.65] text-[hsl(25_20%_38%)]">{step.brief}</p>
 
+          {/* maxLength caps (2000 single-line / 4000 textarea) keep the aggregate
+              save doc well under the server's 256KiB cap even at MAX_IDEAS=5, so a
+              large paste can't trigger a terminal save failure that kills all future
+              saves. */}
           {field && fieldKey ? (
             <div className="mt-[18px]">
               <label
@@ -197,6 +201,7 @@ export function StepRunner() {
                 <textarea
                   id="fp-runner-field"
                   rows={4}
+                  maxLength={4000}
                   value={reducerValue}
                   onChange={(e) => onFieldChange(e.target.value)}
                   placeholder={field.placeholder}
@@ -205,6 +210,7 @@ export function StepRunner() {
               ) : (
                 <input
                   id="fp-runner-field"
+                  maxLength={2000}
                   value={reducerValue}
                   onChange={(e) => onFieldChange(e.target.value)}
                   placeholder={field.placeholder}

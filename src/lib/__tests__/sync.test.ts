@@ -23,6 +23,8 @@ function makeFrom() {
       const resolve = () => handlers.select?.() ?? { data: null, error: null };
       const chain: Record<string, unknown> = {
         eq: () => chain,
+        order: () => chain,
+        limit: () => chain,
         maybeSingle: () => Promise.resolve(resolve()),
         then: (onF: (v: unknown) => unknown, onR?: (e: unknown) => unknown) =>
           Promise.resolve(resolve()).then(onF, onR),
@@ -62,6 +64,8 @@ import {
   resolveProfileId,
   resetProfileIdCache,
   loadSave,
+  loadLedger,
+  LEDGER_LOAD_LIMIT,
   saveSnapshot,
   insertLedger,
   classifyWriteError,
@@ -185,6 +189,57 @@ describe("loadSave", () => {
   });
 });
 
+// ── loadLedger (server read-back) ────────────────────────────────────────────
+describe("loadLedger", () => {
+  it("maps DB snake_case rows to the app LedgerEntry shape, newest-first as returned", async () => {
+    handlers.select = () => ({
+      data: [
+        { id: "s1", kind: "sale", payer: "Mom", amount_cents: 1500, created_at: "2026-07-31T00:02:00.000Z" },
+        { id: "b1", kind: "backing", payer: "Dad", amount_cents: 2500, created_at: "2026-07-31T00:01:00.000Z" },
+      ],
+      error: null,
+    });
+    const rows = await loadLedger(PROFILE);
+    expect(rows).toEqual([
+      { id: "s1", kind: "sale", payer: "Mom", amountCents: 1500, createdAt: "2026-07-31T00:02:00.000Z" },
+      { id: "b1", kind: "backing", payer: "Dad", amountCents: 2500, createdAt: "2026-07-31T00:01:00.000Z" },
+    ]);
+  });
+
+  it("skips malformed rows and returns [] on error", async () => {
+    handlers.select = () => ({
+      data: [
+        { id: "ok", kind: "sale", payer: "Mom", amount_cents: 500, created_at: "2026-07-31T00:00:00.000Z" },
+        { id: "bad-amount", kind: "sale", payer: "Mom", amount_cents: "500", created_at: "2026-07-31T00:00:00.000Z" },
+        { id: 7, kind: "sale", payer: "Mom", amount_cents: 500, created_at: "2026-07-31T00:00:00.000Z" },
+        { id: "bad-kind", kind: "refund", payer: "Mom", amount_cents: 500, created_at: "2026-07-31T00:00:00.000Z" },
+      ],
+      error: null,
+    });
+    const rows = await loadLedger(PROFILE);
+    expect(rows.map((r) => r.id)).toEqual(["ok"]);
+
+    handlers.select = () => ({ data: null, error: { code: "PGRST301" } });
+    expect(await loadLedger(PROFILE)).toEqual([]);
+  });
+
+  it("caps the read at LEDGER_LOAD_LIMIT (guards PostgREST truncation)", async () => {
+    // The server would truncate at its own ceiling; the client cap is the .limit()
+    // passed on the query. Assert the constant the query pins to is a sane bound.
+    expect(LEDGER_LOAD_LIMIT).toBe(200);
+    const many = Array.from({ length: LEDGER_LOAD_LIMIT }, (_, i) => ({
+      id: `id-${i}`,
+      kind: "sale",
+      payer: "P",
+      amount_cents: 100,
+      created_at: "2026-07-31T00:00:00.000Z",
+    }));
+    handlers.select = () => ({ data: many, error: null });
+    const rows = await loadLedger(PROFILE);
+    expect(rows).toHaveLength(LEDGER_LOAD_LIMIT);
+  });
+});
+
 // ── saveSnapshot (CAS) ───────────────────────────────────────────────────────
 describe("saveSnapshot", () => {
   it("writes revision base+1 and reports the new revision on success", async () => {
@@ -280,9 +335,17 @@ describe("classifyWriteError", () => {
       expect.objectContaining({ reason: "retryable", needsReauth: true }),
     );
   });
-  it("maps an unknown/network error to plain retryable", () => {
+  it("maps a codeless (network/offline) error to plain retryable", () => {
     expect(classifyWriteError(new Error("boom"))).toEqual(
       expect.objectContaining({ reason: "retryable", needsReauth: false }),
+    );
+  });
+
+  it("maps an UNRECOGNIZED postgres error code to terminal (never wedge the queue)", () => {
+    // A DB error carrying a code we don't list recurs identically on replay; if it
+    // were retryable it would jam the outbox FIRST forever. Default it to terminal.
+    expect(classifyWriteError({ code: "22P02", message: "invalid input syntax" })).toEqual(
+      expect.objectContaining({ reason: "terminal" }),
     );
   });
 });
@@ -315,6 +378,49 @@ describe("outbox", () => {
     expect(outbox.ledger).toHaveLength(1);
     expect(outbox.ledger[0].row.id).toBe("led-1");
     expect(outbox.snapshot).toBeNull(); // unknown-v snapshot discarded
+  });
+
+  it("DROPS a versioned-but-malformed ledger entry (poison-pill) before it can jam the queue", () => {
+    const s = fakeStorage();
+    // A current-version entry whose amountCents is a non-numeric string would
+    // provoke a non-terminal Postgres error, be retried, and wedge the queue.
+    s.setItem(
+      `fp:${USER}:outbox`,
+      JSON.stringify({
+        ledger: [
+          { v: OUTBOX_VERSION, row: { ...row, id: "poison", amountCents: "not-a-number" } },
+          { v: OUTBOX_VERSION, row: { ...row, id: "bad-kind", kind: "refund" } },
+          { v: OUTBOX_VERSION, row: { ...row, id: "bad-payer", payer: 42 } },
+          { v: OUTBOX_VERSION, row },
+        ],
+        snapshot: null,
+      }),
+    );
+    const outbox = readOutbox(USER, s);
+    expect(outbox.ledger.map((e) => e.row.id)).toEqual(["led-1"]); // only the valid row survives
+  });
+
+  it("DISCARDS a parked snapshot whose doc fails the SaveDoc shape/version gate", () => {
+    const s = fakeStorage();
+    // Current `v`, but the doc's docVersion is wrong: an unvalidated PATCH of this
+    // would bump the revision and make the next loadSave reject a good save.
+    s.setItem(
+      `fp:${USER}:outbox`,
+      JSON.stringify({
+        ledger: [],
+        snapshot: { v: OUTBOX_VERSION, baseRevision: 3, doc: { docVersion: 999, ideas: [] } },
+      }),
+    );
+    expect(readOutbox(USER, s).snapshot).toBeNull();
+  });
+
+  it("KEEPS a parked snapshot whose doc passes the gate (validated, normalized)", () => {
+    const s = fakeStorage();
+    parkSnapshot(USER, 3, docWith({ onboardingComplete: true }), s);
+    const parked = readOutbox(USER, s).snapshot;
+    expect(parked).not.toBeNull();
+    expect(parked?.baseRevision).toBe(3);
+    expect(parked?.doc.onboardingComplete).toBe(true);
   });
 });
 

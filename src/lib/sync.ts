@@ -35,7 +35,7 @@
  */
 import { getConfig } from "../config";
 import { getSupabase } from "./supabase";
-import { fromSaveDoc, DOC_VERSION, type SaveDoc } from "../state/gameCore";
+import { fromSaveDoc, DOC_VERSION, type SaveDoc, type LedgerEntry } from "../state/gameCore";
 import { getDraft, setDraft } from "./draftCache";
 
 // ── Shared types ───────────────────────────────────────────────────────────
@@ -111,7 +111,15 @@ export function classifyWriteError(error: unknown): WriteFailure {
   const code = pgCode(error);
   if (isAuthError(code)) return { ok: false, reason: "retryable", needsReauth: true, error };
   if (TERMINAL_CODES.has(code)) return { ok: false, reason: "terminal", error };
-  return { ok: false, reason: "retryable", needsReauth: false, error };
+  // No code at all → a thrown network/offline error (fetch reject, timeout):
+  // genuinely transient, so retryable.
+  if (code === "") return { ok: false, reason: "retryable", needsReauth: false, error };
+  // A DB error carrying a code we do NOT recognize recurs identically on every
+  // replay just like a listed check-constraint violation would. Defaulting it to
+  // retryable would wedge the entire outbox behind one poison entry forever
+  // (replayOutbox keeps a retryable entry FIRST and stops the drain). Default an
+  // unknown DB code to TERMINAL so a single malformed write cannot jam the queue.
+  return { ok: false, reason: "terminal", error };
 }
 
 /**
@@ -207,6 +215,66 @@ export async function loadSave(profileId: string): Promise<LoadedSave> {
   }
 }
 
+// ── Ledger read-back ─────────────────────────────────────────────────────────
+
+/**
+ * Cap on rows read back from fp_ledger in a single load. Bounds one PostgREST
+ * response so a long history can neither exceed PostgREST's default row ceiling
+ * (a silently-truncated response) nor balloon memory. 200 rows is far above any
+ * realistic Slice A history (a handful of sales/backings per idea).
+ */
+export const LEDGER_LOAD_LIMIT = 200;
+
+/** A raw fp_ledger row as returned by the ranged read-back select. */
+interface LedgerDbRow {
+  id?: unknown;
+  kind?: unknown;
+  payer?: unknown;
+  amount_cents?: unknown;
+  created_at?: unknown;
+}
+
+/**
+ * Load the caller's own ledger rows. The "read own" RLS policy already scopes
+ * the SELECT to the caller's profile; the explicit `.eq('profile_id', …)` is
+ * duplicated to hit the (profile_id, created_at) index (RLS perf guidance).
+ * Newest-first and capped at LEDGER_LOAD_LIMIT so the response is bounded and
+ * never silently truncated. Maps DB snake_case rows → the app LedgerEntry shape;
+ * a malformed row is skipped defensively, and any failure returns [].
+ */
+export async function loadLedger(profileId: string): Promise<LedgerEntry[]> {
+  try {
+    const { data, error } = (await getSupabase()
+      .from("fp_ledger")
+      .select("id, kind, payer, amount_cents, created_at")
+      .eq("profile_id", profileId)
+      .order("created_at", { ascending: false })
+      .limit(LEDGER_LOAD_LIMIT)) as { data: LedgerDbRow[] | null; error: PgError | null };
+    if (error || !data) return [];
+    const rows: LedgerEntry[] = [];
+    for (const r of data) {
+      if (
+        typeof r.id === "string" &&
+        (r.kind === "sale" || r.kind === "backing") &&
+        typeof r.payer === "string" &&
+        typeof r.amount_cents === "number" &&
+        typeof r.created_at === "string"
+      ) {
+        rows.push({
+          id: r.id,
+          kind: r.kind,
+          payer: r.payer,
+          amountCents: r.amount_cents,
+          createdAt: r.created_at,
+        });
+      }
+    }
+    return rows;
+  } catch {
+    return [];
+  }
+}
+
 // ── Snapshot write (CAS) ─────────────────────────────────────────────────────
 
 /**
@@ -299,24 +367,50 @@ function emptyOutbox(): Outbox {
  * OUTBOX_VERSION — a long-lived tab or an older build must never feed a
  * stale-shape entry to a newer writer.
  */
+/**
+ * Runtime shape-check for a queued ledger insert row. A versioned-but-malformed
+ * entry (e.g. `amountCents` a non-numeric string from a corrupted write or an
+ * older buggy build) would otherwise trigger a Postgres error whose code is not
+ * TERMINAL, be classified retryable, and jam the queue FIRST forever. Validate
+ * the leaf types here and DROP anything that fails before it is ever queued.
+ */
+function isValidLedgerRow(row: unknown): row is LedgerInsertRow {
+  return (
+    isRecord(row) &&
+    typeof row.id === "string" &&
+    (row.kind === "sale" || row.kind === "backing") &&
+    typeof row.payer === "string" &&
+    typeof row.amountCents === "number" &&
+    Number.isFinite(row.amountCents)
+  );
+}
+
 export function readOutbox(userId: string, storage?: Storage): Outbox {
   const raw = getDraft<unknown>(userId, OUTBOX_NAME, storage);
   if (!isRecord(raw)) return emptyOutbox();
   const ledger: OutboxLedgerEntry[] = Array.isArray(raw.ledger)
     ? raw.ledger.filter(
         (e): e is OutboxLedgerEntry =>
-          isRecord(e) && e.v === OUTBOX_VERSION && isRecord(e.row) && typeof e.row.id === "string",
+          isRecord(e) && e.v === OUTBOX_VERSION && isValidLedgerRow(e.row),
       )
     : [];
+  // A parked snapshot's `doc` must pass the SAME shape + docVersion gate as a
+  // freshly loaded save (fromSaveDoc). An unvalidated doc PATCHed to the server
+  // (JSONB accepts anything, and the revision still bumps) would make the next
+  // loadSave reject it and start fresh — silently overwriting then discarding a
+  // good save. Discard a malformed parked snapshot instead, mirroring loadSave.
   const snapRaw = raw.snapshot;
-  const snapshot: OutboxSnapshotEntry | null =
-    isRecord(snapRaw) && snapRaw.v === OUTBOX_VERSION && isRecord(snapRaw.doc)
-      ? {
-          v: OUTBOX_VERSION,
-          baseRevision: typeof snapRaw.baseRevision === "number" ? snapRaw.baseRevision : 0,
-          doc: snapRaw.doc as unknown as SaveDoc,
-        }
-      : null;
+  let snapshot: OutboxSnapshotEntry | null = null;
+  if (isRecord(snapRaw) && snapRaw.v === OUTBOX_VERSION && isRecord(snapRaw.doc)) {
+    const parsed = fromSaveDoc(snapRaw.doc);
+    if (parsed.ok) {
+      snapshot = {
+        v: OUTBOX_VERSION,
+        baseRevision: typeof snapRaw.baseRevision === "number" ? snapRaw.baseRevision : 0,
+        doc: parsed.doc,
+      };
+    }
+  }
   return { ledger, snapshot };
 }
 
@@ -733,15 +827,24 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine {
 
   async function start(): Promise<void> {
     stopped = false;
+    // Capture the session generation at entry. start() is async and called
+    // fire-and-forget; if stop() runs mid-start it bumps the generation and
+    // removes listeners that were not wired yet. Re-check isCurrent(gen) after
+    // EVERY await and before wiring any listener/subscription or running replay,
+    // so a torn-down session never leaks listeners or acts on a stale user.
+    const gen = generation;
     profileId = await resolveProfileId();
+    if (!isCurrent(gen)) return;
 
     const supabase = getSupabase();
     try {
       const { data } = await supabase.auth.getSession();
+      if (!isCurrent(gen)) return;
       accessToken = data.session?.access_token ?? null;
     } catch {
       accessToken = null;
     }
+    if (!isCurrent(gen)) return;
     // Keep the keepalive token fresh across background refreshes.
     const { data: sub } = supabase.auth.onAuthStateChange((_event, session) => {
       accessToken = session?.access_token ?? null;
@@ -759,6 +862,7 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine {
     // Replay anything left from a prior session/offline stretch.
     if (profileId) {
       const result = await replayOutbox(userId, profileId, storage);
+      if (!isCurrent(gen)) return;
       if (result.reauthNeeded) deps.onReauthNeeded();
     }
   }

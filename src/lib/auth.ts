@@ -121,19 +121,3 @@ export async function getCurrentUserId(): Promise<string | null> {
   const { data } = await supabase.auth.getSession();
   return data.session?.user?.id ?? null;
 }
-
-/**
- * Subscribe to auth-state changes; the callback receives the current user id
- * (or `null` when signed out). Returns an unsubscribe function.
- *
- * TODO(Unit 6): the provider will subscribe here to react to background token
- * refresh/expiry (e.g. surface the login stage on an expired session during
- * play). Kept now as the wired seam so Unit 6 imports rather than re-adds it.
- */
-export function onAuthChange(cb: (userId: string | null) => void): () => void {
-  const supabase = getSupabase();
-  const { data } = supabase.auth.onAuthStateChange((_event, session) => {
-    cb(session?.user?.id ?? null);
-  });
-  return () => data.subscription.unsubscribe();
-}

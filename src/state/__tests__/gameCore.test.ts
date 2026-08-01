@@ -406,7 +406,7 @@ describe("field + misc reducer actions", () => {
     expect(s.ideas[0].fields.oneLiner).toBe("Friendship bracelets");
   });
 
-  it("SET_PROFILE patches, SET_STAGE / SET_OB set, avatar + checkout + room toggle", () => {
+  it("SET_PROFILE patches, SET_STAGE / SET_OB set, checkout + room toggle", () => {
     let s = initialState();
     s = reducer(s, { type: "SET_PROFILE", patch: { firstName: "Cedric" } });
     s = reducer(s, { type: "SET_PROFILE", patch: { handle: "cedric" } });
@@ -415,8 +415,6 @@ describe("field + misc reducer actions", () => {
     expect(s.stage).toBe("app");
     s = reducer(s, { type: "SET_OB", ob: 4 });
     expect(s.ob).toBe(4);
-    s = reducer(s, { type: "SET_AVATAR", x: 20, y: 30 });
-    expect(s.avatar).toEqual({ x: 20, y: 30 });
     s = reducer(s, { type: "OPEN_CHECKOUT" });
     expect(s.checkoutOpen).toBe(true);
     s = reducer(s, { type: "CLOSE_CHECKOUT" });
@@ -512,7 +510,6 @@ describe("RESET_SESSION (shared-device state clear)", () => {
     expect(reset.celebrate).toBeNull();
     expect(reset.room).toBeNull();
     expect(reset.checkoutOpen).toBe(false);
-    expect(reset.avatar).toEqual(initialState().avatar);
 
     // Caller-controlled fields are preserved for the provider to overwrite.
     expect(reset.stage).toBe("app");
@@ -540,6 +537,48 @@ describe("HYDRATE resets the session ledger", () => {
     const doc = toSaveDoc(withOneIdea());
     const hydrated = reducer(s, { type: "HYDRATE", doc });
     expect(hydrated.ledger).toEqual([]);
+  });
+});
+
+describe("SET_LEDGER (server read-back fill)", () => {
+  it("replaces the whole session ledger and drives the sum selectors", () => {
+    let s = withOneIdea();
+    const rows = [
+      { id: "s1", kind: "sale" as const, payer: "A", amountCents: 1500, createdAt: "2026-07-31T00:00:00.000Z" },
+      { id: "b1", kind: "backing" as const, payer: "B", amountCents: 2500, createdAt: "2026-07-31T00:01:00.000Z" },
+    ];
+    s = reducer(s, { type: "SET_LEDGER", ledger: rows });
+    expect(s.ledger).toEqual(rows);
+    expect(salesSumCents(s)).toBe(1500);
+    expect(backingSumCents(s)).toBe(2500);
+
+    // REPLACES (not appends): a later fill with fewer rows wins outright.
+    s = reducer(s, { type: "SET_LEDGER", ledger: [] });
+    expect(s.ledger).toEqual([]);
+    expect(salesSumCents(s)).toBe(0);
+  });
+});
+
+describe("fromSaveDoc leaf coercion", () => {
+  it("keeps only string field values and boolean done flags (same docVersion)", () => {
+    const parsed = fromSaveDoc({
+      docVersion: DOC_VERSION,
+      ideas: [
+        {
+          fields: { oneLiner: "keep", num: 42, nil: null, nested: { x: 1 } },
+          done: { "1.1#0": true, "1.1#1": "yes", "1.1#2": 1, "1.1#3": null },
+        },
+      ],
+      activeIdea: 0,
+      siteHeadline: "",
+      onboardingComplete: false,
+    });
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    // Wrong-typed leaves are dropped, so nothing malformed can reach .trim()/a
+    // controlled input.
+    expect(parsed.doc.ideas[0].fields).toEqual({ oneLiner: "keep" });
+    expect(parsed.doc.ideas[0].done).toEqual({ "1.1#0": true });
   });
 });
 

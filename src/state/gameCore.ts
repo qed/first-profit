@@ -70,7 +70,6 @@ export interface GameState {
   room: RoomId | null;
   /** Mock-checkout overlay visibility. */
   checkoutOpen: boolean;
-  avatar: { x: number; y: number };
   /** True once onboarding screens 2..5 are complete (persisted in the save doc). */
   onboardingComplete: boolean;
   docVersion: number;
@@ -91,7 +90,6 @@ export function initialState(): GameState {
     celebrate: null,
     room: null,
     checkoutOpen: false,
-    avatar: { x: 50, y: 94 },
     onboardingComplete: false,
     docVersion: DOC_VERSION,
   };
@@ -132,13 +130,25 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
 }
 
-// Shallow shape-coercion only: leaf values are trusted for v1 (the docVersion
-// guard in fromSaveDoc is the real cross-version compatibility gate).
+// Shape-coercion with leaf-type filtering: a malformed persisted doc (or a
+// hand-edited one) must never let a non-string field or non-boolean done flag
+// reach .trim()/a controlled input. Keep only string field values and boolean
+// done values; silently drop the rest.
 function coerceIdea(value: unknown): Idea {
   if (!isRecord(value)) return { fields: {}, done: {} };
-  const fields = isRecord(value.fields) ? (value.fields as Record<string, string>) : {};
-  const done = isRecord(value.done) ? (value.done as Record<string, boolean>) : {};
-  return { fields: { ...fields }, done: { ...done } };
+  const fields: Record<string, string> = {};
+  if (isRecord(value.fields)) {
+    for (const [key, leaf] of Object.entries(value.fields)) {
+      if (typeof leaf === "string") fields[key] = leaf;
+    }
+  }
+  const done: Record<string, boolean> = {};
+  if (isRecord(value.done)) {
+    for (const [key, leaf] of Object.entries(value.done)) {
+      if (typeof leaf === "boolean") done[key] = leaf;
+    }
+  }
+  return { fields, done };
 }
 
 /**
@@ -287,10 +297,10 @@ export type Action =
   | { type: "CLOSE_ROOM" }
   | { type: "SET_PICK_FOR"; pickFor: string | null }
   | ({ type: "ADD_LEDGER" } & LedgerEntry)
+  | { type: "SET_LEDGER"; ledger: LedgerEntry[] }
   | { type: "DISMISS_CELEBRATION" }
   | { type: "OPEN_CHECKOUT" }
   | { type: "CLOSE_CHECKOUT" }
-  | { type: "SET_AVATAR"; x: number; y: number }
   | { type: "RESET_SESSION" }
   | { type: "HYDRATE"; doc: SaveDoc };
 
@@ -433,6 +443,11 @@ export function reducer(state: GameState, action: Action): GameState {
       return next;
     }
 
+    case "SET_LEDGER":
+      // Replace the whole session ledger (used to fill from the server after a
+      // HYDRATE clears it to []). Server rows are authoritative on load.
+      return { ...state, ledger: action.ledger };
+
     case "DISMISS_CELEBRATION": {
       // Clear the celebration, then re-open the runner ONLY if the active idea
       // still has an incomplete step to work. On the final criterion (nextUpFor
@@ -460,9 +475,6 @@ export function reducer(state: GameState, action: Action): GameState {
 
     case "CLOSE_CHECKOUT":
       return { ...state, checkoutOpen: false };
-
-    case "SET_AVATAR":
-      return { ...state, avatar: { x: action.x, y: action.y } };
 
     case "RESET_SESSION": {
       // Clear all per-account business/financial + UI state so no previous
