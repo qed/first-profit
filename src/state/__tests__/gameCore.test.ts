@@ -430,6 +430,32 @@ describe("field + misc reducer actions", () => {
   });
 });
 
+describe("signup stage (Slice B Unit 7)", () => {
+  it("boot and landing can route INTO signup via SET_STAGE", () => {
+    const fromBoot = reducer(initialState(), { type: "SET_STAGE", stage: "signup" });
+    expect(fromBoot.stage).toBe("signup");
+    const landing = reducer(initialState(), { type: "SET_STAGE", stage: "landing" });
+    const fromLanding = reducer(landing, { type: "SET_STAGE", stage: "signup" });
+    expect(fromLanding.stage).toBe("signup");
+  });
+
+  it("signup can route on to login or onboard/app as the flow needs", () => {
+    const signup = reducer(initialState(), { type: "SET_STAGE", stage: "signup" });
+    expect(reducer(signup, { type: "SET_STAGE", stage: "login" }).stage).toBe("login");
+    expect(reducer(signup, { type: "SET_STAGE", stage: "onboard" }).stage).toBe("onboard");
+    expect(reducer(signup, { type: "SET_STAGE", stage: "app" }).stage).toBe("app");
+  });
+
+  it("SET_STAGE to signup touches nothing but the stage", () => {
+    const s = withOneIdea();
+    const after = reducer(s, { type: "SET_STAGE", stage: "signup" });
+    expect(after.stage).toBe("signup");
+    expect(after.ideas).toBe(s.ideas);
+    expect(after.profile).toBe(s.profile);
+    expect(after.ledger).toBe(s.ledger);
+  });
+});
+
 describe("selectors: pips and progress", () => {
   it("stepPips reflects per-task completion", () => {
     let s = withOneIdea();
