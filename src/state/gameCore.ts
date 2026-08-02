@@ -100,8 +100,6 @@ export interface GameState {
   celebrate: string | null;
   /** Open room dialog, or null. */
   room: RoomId | null;
-  /** Mock-checkout overlay visibility. */
-  checkoutOpen: boolean;
   /** The chosen payment provider (durable, in the save doc), or null. */
   chosenProvider: ChosenProvider | null;
   /** True once onboarding screens 2..5 are complete (persisted in the save doc). */
@@ -123,7 +121,6 @@ export function initialState(): GameState {
     runnerIndex: 0,
     celebrate: null,
     room: null,
-    checkoutOpen: false,
     chosenProvider: null,
     onboardingComplete: false,
     docVersion: DOC_VERSION,
@@ -380,8 +377,6 @@ export type Action =
   | ({ type: "ADD_LEDGER"; mock?: boolean } & LedgerEntry)
   | { type: "SET_LEDGER"; ledger: LedgerEntry[] }
   | { type: "DISMISS_CELEBRATION" }
-  | { type: "OPEN_CHECKOUT" }
-  | { type: "CLOSE_CHECKOUT" }
   | { type: "SET_PROVIDER"; providerId: ProviderId; chosenAt: number }
   | { type: "RESET_SESSION" }
   | { type: "HYDRATE"; doc: SaveDoc };
@@ -565,12 +560,6 @@ export function reducer(state: GameState, action: Action): GameState {
         runnerIndex: foundIndex >= 0 ? foundIndex : 0,
       };
     }
-
-    case "OPEN_CHECKOUT":
-      return { ...state, checkoutOpen: true };
-
-    case "CLOSE_CHECKOUT":
-      return { ...state, checkoutOpen: false };
 
     case "SET_PROVIDER":
       // Record (or switch to) the chosen provider. The choice is durable (rides

@@ -1,15 +1,13 @@
 // @vitest-environment jsdom
 //
-// Unit 11 room dialogs + mock checkout (jsdom). Proves the two load-bearing
-// ledger writes go through ADD_LEDGER with a caller-minted id/timestamp and land
-// in the reducer state (the sync layer, mocked here, is what stamps source='mock'
-// on persistence — covered by sync tests):
-//   - The Sales Room "Log a sale" form appends a {kind:'sale'} row and completes
-//     1.2's last task for the active idea (firing the 1.2 celebration when it is
-//     the last remaining task).
-//   - The mock checkout "Pay" appends a ledger row that feeds the HUD Sales
-//     stat. (PP2 Unit 3 retired the `backing` kind; the row is now a `sale`
-//     until the overlay itself is retired in Unit 4.)
+// Room dialogs (jsdom). Two surfaces:
+//   - The Sales Room "Log a sale" form appends a {kind:'sale'} row through
+//     ADD_LEDGER with a caller-minted id/timestamp and completes 1.2's last task
+//     for the active idea (firing the 1.2 celebration when it is the last task).
+//   - The Checkout Booth provider-choice lesson (PP2 Unit 4, replacing the retired
+//     mock Stripe overlay): with no provider chosen it shows the 3-provider
+//     comparison; choosing dispatches SET_PROVIDER; once chosen it shows the
+//     chosen-provider summary with a "Compare providers again" re-entry.
 import { describe, it, expect, vi, beforeEach, afterEach, beforeAll } from "vitest";
 import React from "react";
 import { render, act, fireEvent, waitFor, cleanup } from "@testing-library/react";
@@ -41,7 +39,7 @@ vi.mock("../../../lib/sync", () => ({
 
 import { GameProvider, useGame, type GameApi } from "../../../state/GameContext";
 import { SalesRoom } from "../SalesRoom";
-import { MockCheckout } from "../../MockCheckout";
+import { CheckoutBooth } from "../CheckoutBooth";
 import { stepById, type Step } from "../../../data/path";
 
 let api: GameApi | null = null;
@@ -73,7 +71,13 @@ function step(id: string): Step {
 
 function renderAll() {
   return render(
-    React.createElement(GameProvider, null, React.createElement(Probe), React.createElement(SalesRoom), React.createElement(MockCheckout)),
+    React.createElement(GameProvider, null, React.createElement(Probe), React.createElement(SalesRoom)),
+  );
+}
+
+function renderBooth() {
+  return render(
+    React.createElement(GameProvider, null, React.createElement(Probe), React.createElement(CheckoutBooth)),
   );
 }
 
@@ -171,75 +175,80 @@ describe("Sales Room — Log a sale", () => {
   });
 });
 
-describe("Mock checkout — Pay", () => {
-  it("appends a ledger row that feeds the Sales stat", async () => {
-    renderAll();
+describe("Checkout Booth — provider choice", () => {
+  it("with no provider chosen, shows the 3-provider comparison as the booth body", async () => {
+    renderBooth();
     await waitFor(() => expect(api?.stage).toBe("landing"));
-    act(() => getApi().dispatch({ type: "OPEN_CHECKOUT" }));
 
-    // Default amount is $25.
-    const payBtn = button((b) => Boolean(b.textContent?.startsWith("Pay $")));
-    expect(payBtn.textContent).toBe("Pay $25.00");
-    act(() => fireEvent.click(payBtn));
+    // No provider chosen yet (reachable on first booth entry, R24.3).
+    expect(getApi().chosenProvider).toBeNull();
 
-    const after = getApi();
-    // PP2 Unit 3: the overlay now logs a `sale` row (the `backing` kind is gone).
-    const rows = after.ledger.filter((r) => r.kind === "sale");
-    expect(rows).toHaveLength(1);
-    expect(rows[0]).toMatchObject({ kind: "sale", amountCents: 2500 });
-    expect(rows[0].id).toBeTruthy();
-    expect(rows[0].createdAt).toBeTruthy();
-    // HUD Sales stat = sum of ledger rows (no fee snapshot -> counts at gross).
-    expect(after.grossSalesSumCents()).toBe(2500);
-    expect(after.salesSumCents()).toBe(2500);
-    // Success state rendered.
-    await waitFor(() =>
-      expect(Array.from(document.querySelectorAll("h2")).some((h) => /backed/.test(h.textContent || ""))).toBe(true),
+    // One "Choose <name>" action per provider, in PROVIDER_IDS order.
+    const chooseButtons = Array.from(document.querySelectorAll("button")).filter((b) =>
+      /^Choose /.test(b.textContent || ""),
     );
+    expect(chooseButtons.map((b) => b.textContent)).toEqual([
+      "Choose First Profit Pay",
+      "Choose Replit",
+      "Choose Shopify",
+    ]);
+
+    // First Profit Pay is present + pickable, framed AS A PROVIDER (not "the course").
+    expect(button((b) => b.textContent === "Choose First Profit Pay")).toBeTruthy();
+    expect(document.body.textContent).not.toMatch(/the course/i);
+    // Its 50% fee copy is shown (sourced from providers.ts).
+    expect(document.body.textContent).toMatch(/50% of every sale/);
+    // The real options' fee copy is shown too.
+    expect(document.body.textContent).toMatch(/2\.9% \+ 30c per sale/);
   });
 
-  it("at real in-game state, Pay does NOT complete 1.2 or fire the first-sale celebration", async () => {
-    // Regression guard (PP2 U3): the Checkout Booth is reachable in normal play,
-    // so at real state (1.1 done, 1.2 unlocked-but-open, an active idea) the mock
-    // "Invest in me -> Pay" must NOT complete the REAL first sale. The mock row is
-    // flagged mock:true so ADD_LEDGER skips 1.2's auto-completion + celebration.
-    renderAll();
+  it("choosing a provider dispatches SET_PROVIDER with the id and shows the summary", async () => {
+    renderBooth();
     await waitFor(() => expect(api?.stage).toBe("landing"));
-    setupIdeaAtLastSaleTask();
-    // Preconditions: 1.2 unlocked, not complete, no celebration pending.
-    expect(getApi().isStepUnlocked(0, "1.2")).toBe(true);
-    expect(getApi().isCriterionDone(0, "1.2")).toBe(false);
-    expect(getApi().celebrate).toBeNull();
 
-    act(() => getApi().dispatch({ type: "OPEN_CHECKOUT" }));
-    act(() => fireEvent.click(button((b) => Boolean(b.textContent?.startsWith("Pay $")))));
+    act(() => fireEvent.click(button((b) => b.textContent === "Choose Replit")));
 
     const after = getApi();
-    // Cosmetic success preserved: the row lands and feeds the HUD Sales stat.
-    expect(after.ledger.filter((r) => r.kind === "sale")).toHaveLength(1);
-    expect(after.salesSumCents()).toBe(2500);
-    // But the real first sale did NOT complete and no celebration fired.
-    expect(after.isCriterionDone(0, "1.2")).toBe(false);
-    expect(after.celebrate).toBeNull();
-    // Success stamp still renders (mock is purely cosmetic).
-    await waitFor(() =>
-      expect(Array.from(document.querySelectorAll("h2")).some((h) => /backed/.test(h.textContent || ""))).toBe(true),
-    );
+    expect(after.chosenProvider?.providerId).toBe("replit");
+    expect(typeof after.chosenProvider?.chosenAt).toBe("number");
+
+    // The booth now shows the chosen-provider summary, not the comparison.
+    await waitFor(() => expect(document.body.textContent).toMatch(/You chose this/));
+    expect(document.body.textContent).toMatch(/Replit/);
+    // The comparison's "Choose" actions are gone once a provider is chosen.
+    expect(
+      Array.from(document.querySelectorAll("button")).some((b) => /^Choose /.test(b.textContent || "")),
+    ).toBe(false);
   });
 
-  it("a fast double-click pays only once (no double-counted row)", async () => {
-    renderAll();
+  it("First Profit Pay is pickable and labeled as a provider (not the course)", async () => {
+    renderBooth();
     await waitFor(() => expect(api?.stage).toBe("landing"));
-    act(() => getApi().dispatch({ type: "OPEN_CHECKOUT" }));
 
-    const payBtn = button((b) => Boolean(b.textContent?.startsWith("Pay $")));
-    act(() => {
-      fireEvent.click(payBtn);
-      fireEvent.click(payBtn);
-    });
+    act(() => fireEvent.click(button((b) => b.textContent === "Choose First Profit Pay")));
 
     const after = getApi();
-    expect(after.ledger.filter((r) => r.kind === "sale")).toHaveLength(1);
-    expect(after.grossSalesSumCents()).toBe(2500);
+    expect(after.chosenProvider?.providerId).toBe("first_profit_pay");
+    await waitFor(() => expect(document.body.textContent).toMatch(/First Profit Pay/));
+    expect(document.body.textContent).toMatch(/You chose this/);
+  });
+
+  it("with a provider already chosen, the summary offers a 'Compare providers again' re-entry", async () => {
+    renderBooth();
+    await waitFor(() => expect(api?.stage).toBe("landing"));
+    act(() => getApi().dispatch({ type: "SET_PROVIDER", providerId: "shopify", chosenAt: 1 }));
+
+    // Summary state: name + fee + the "compare again" entry, no comparison cards.
+    await waitFor(() => expect(document.body.textContent).toMatch(/You chose this/));
+    expect(document.body.textContent).toMatch(/Shopify/);
+    const compareAgain = button((b) => b.textContent === "Compare providers again");
+
+    // Re-opening surfaces the comparison again (all three Choose actions return).
+    act(() => fireEvent.click(compareAgain));
+    await waitFor(() =>
+      expect(
+        Array.from(document.querySelectorAll("button")).filter((b) => /^Choose /.test(b.textContent || "")),
+      ).toHaveLength(3),
+    );
   });
 });

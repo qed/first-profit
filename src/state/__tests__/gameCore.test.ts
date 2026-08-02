@@ -474,7 +474,7 @@ describe("field + misc reducer actions", () => {
     expect(s.ideas[0].fields.oneLiner).toBe("Friendship bracelets");
   });
 
-  it("SET_PROFILE patches, SET_STAGE / SET_OB set, checkout + room toggle", () => {
+  it("SET_PROFILE patches, SET_STAGE / SET_OB set, room toggle", () => {
     let s = initialState();
     s = reducer(s, { type: "SET_PROFILE", patch: { firstName: "Cedric" } });
     s = reducer(s, { type: "SET_PROFILE", patch: { handle: "cedric" } });
@@ -483,10 +483,6 @@ describe("field + misc reducer actions", () => {
     expect(s.stage).toBe("app");
     s = reducer(s, { type: "SET_OB", ob: 4 });
     expect(s.ob).toBe(4);
-    s = reducer(s, { type: "OPEN_CHECKOUT" });
-    expect(s.checkoutOpen).toBe(true);
-    s = reducer(s, { type: "CLOSE_CHECKOUT" });
-    expect(s.checkoutOpen).toBe(false);
     s = reducer(s, { type: "OPEN_ROOM", room: "idea" });
     expect(s.room).toBe("idea");
     s = reducer(s, { type: "CLOSE_ROOM" });
@@ -630,7 +626,6 @@ describe("RESET_SESSION (shared-device state clear)", () => {
     s = reducer(s, { type: "SET_FIELD", ideaIndex: 0, key: "oneLiner", value: "Bracelets" });
     s = reducer(s, { type: "OPEN_ROOM", room: "market" });
     s = reducer(s, { type: "OPEN_RUNNER", stepId: "1.1", index: 2 });
-    s = reducer(s, { type: "OPEN_CHECKOUT" });
     s = reducer(s, {
       type: "ADD_LEDGER",
       id: "l1",
@@ -652,7 +647,6 @@ describe("RESET_SESSION (shared-device state clear)", () => {
     expect(reset.runnerIndex).toBe(0);
     expect(reset.celebrate).toBeNull();
     expect(reset.room).toBeNull();
-    expect(reset.checkoutOpen).toBe(false);
 
     // Caller-controlled fields are preserved for the provider to overwrite.
     expect(reset.stage).toBe("app");
