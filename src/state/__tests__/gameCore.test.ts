@@ -510,6 +510,95 @@ describe("ADD_LEDGER", () => {
   });
 });
 
+describe("ADD_LEDGER partial snapshot keeps gross = fee + net (no provider)", () => {
+  // PP2 whole-branch review. The un-modeled else-branch used to default
+  // feeCents/netCents INDEPENDENTLY, so a PARTIAL snapshot (exactly one of
+  // feeCents/netCents supplied) with NO chosenProvider (and not mock) produced an
+  // incoherent row (gross != fee + net) that the fp_ledger coherence CHECK would
+  // reject and the outbox would terminally drop. The fix derives the omitted half
+  // from gross. `withOneIdea()` leaves 1.2 locked, so the sale simply lands as
+  // ledger[0] with no completion machinery in the way.
+  it("only feeCents supplied -> netCents derived as gross - fee (coherent)", () => {
+    const s = reducer(withOneIdea(), {
+      type: "ADD_LEDGER",
+      id: "partial-fee",
+      kind: "sale",
+      payer: "Nadia",
+      amountCents: 2000,
+      grossCents: 2000,
+      feeCents: 88, // netCents OMITTED, no chosenProvider
+      createdAt: "2026-08-02T00:00:00.000Z",
+    });
+    const row = s.ledger[0];
+    expect(row.feeCents).toBe(88);
+    expect(row.netCents).toBe(1912);
+    expect(row.grossCents).toBe(2000);
+    // gross = fee + net.
+    expect(2000).toBe(88 + 1912);
+    expect(row.grossCents).toBe((row.feeCents ?? 0) + (row.netCents ?? 0));
+    expect(row.providerId).toBeNull();
+  });
+
+  it("only netCents supplied -> feeCents derived as gross - net (coherent)", () => {
+    const s = reducer(withOneIdea(), {
+      type: "ADD_LEDGER",
+      id: "partial-net",
+      kind: "sale",
+      payer: "Helen",
+      amountCents: 2000,
+      grossCents: 2000,
+      netCents: 1912, // feeCents OMITTED, no chosenProvider
+      createdAt: "2026-08-02T00:01:00.000Z",
+    });
+    const row = s.ledger[0];
+    expect(row.feeCents).toBe(88);
+    expect(row.netCents).toBe(1912);
+    expect(row.grossCents).toBe((row.feeCents ?? 0) + (row.netCents ?? 0));
+    expect(row.providerId).toBeNull();
+  });
+
+  it("NEITHER fee nor net (un-modeled default) stays fee 0, net = gross, coherent", () => {
+    const s = reducer(withOneIdea(), {
+      type: "ADD_LEDGER",
+      id: "neither",
+      kind: "sale",
+      payer: "Drew",
+      amountCents: 2000,
+      grossCents: 2000, // no fee, no net, no provider
+      createdAt: "2026-08-02T00:02:00.000Z",
+    });
+    const row = s.ledger[0];
+    expect(row.feeCents).toBe(0);
+    expect(row.netCents).toBe(2000);
+    expect(row.grossCents).toBe((row.feeCents ?? 0) + (row.netCents ?? 0));
+    expect(row.providerId).toBeNull();
+  });
+
+  it("FULL snapshot (both halves) is honored VERBATIM even when it isn't a recompute, no provider", () => {
+    // Both feeCents AND netCents supplied is a trusted full snapshot: the reducer
+    // takes it as-is and never derives from gross, even with no chosenProvider and
+    // even when the numbers don't reconcile to gross (existing behavior).
+    const s = reducer(withOneIdea(), {
+      type: "ADD_LEDGER",
+      id: "full-verbatim",
+      kind: "sale",
+      payer: "Sam",
+      amountCents: 2000,
+      grossCents: 2000,
+      feeCents: 100, // deliberately NOT gross - net (100 + 100 != 2000)
+      netCents: 100,
+      createdAt: "2026-08-02T00:03:00.000Z",
+    });
+    const row = s.ledger[0];
+    expect(row.feeCents).toBe(100);
+    expect(row.netCents).toBe(100);
+    // Not re-derived from gross: proves the full-snapshot path is untouched.
+    expect(row.netCents).not.toBe(1900);
+    expect(row.feeCents).not.toBe(1900);
+    expect(row.providerId).toBeNull();
+  });
+});
+
 describe("idea eligibility (room click)", () => {
   it("one eligible idea -> auto-select set of size 1", () => {
     const s = withOneIdea();
