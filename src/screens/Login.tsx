@@ -111,6 +111,16 @@ export function Login() {
               {loading ? "Logging in..." : "Log in"}
             </button>
           </form>
+
+          <p className="mt-5 border-t border-[hsl(40_14%_89%)] pt-4 text-center text-sm leading-relaxed text-ink/70">
+            New to First Profit?{" "}
+            <a
+              href="https://the120.school/start?src=fplogin"
+              className="inline-flex min-h-[44px] items-center font-bold text-sell underline decoration-2 underline-offset-2 hover:text-sell/80"
+            >
+              Create an account
+            </a>
+          </p>
         </div>
 
         <p className="mt-4 text-center font-mono text-[11px] uppercase tracking-wider text-ink/50">
