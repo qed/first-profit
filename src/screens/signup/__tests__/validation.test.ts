@@ -15,7 +15,6 @@ import {
   canContinueCredential,
   canContinueParent,
   computeAge,
-  derivedProvisionAddress,
   emptySignupData,
   isDobConsistentWithBand,
   isValidDob,
@@ -52,7 +51,6 @@ function base(): SignupData {
     parentEmail: "sam@example.com",
     parentPassword: "a".repeat(PARENT_PASSWORD_MIN),
     childFirstName: "Alex",
-    credentialChoice: "existing_credential",
     childPassword: "a".repeat(CHILD_PASSWORD_MIN),
     ageBand: "13_to_15",
     dob: BASE_DOB,
@@ -75,17 +73,6 @@ describe("field validators", () => {
     expect(isValidDob("3000-01-01")).toBe(false);
   });
 
-  it("derives the provisioned address from the first name, aligned with the backend first-name-only slug", () => {
-    expect(derivedProvisionAddress("Alex")).toBe("alex@the120.school");
-    expect(derivedProvisionAddress("  ")).toBe("student@the120.school");
-    // Separators level to a single hyphen (matching the backend), NOT stripped.
-    expect(derivedProvisionAddress("Ann-Marie")).toBe("ann-marie@the120.school");
-    expect(derivedProvisionAddress("Mary  Kate")).toBe("mary-kate@the120.school");
-    // Diacritics fold rather than drop (backend foldToAscii parity).
-    expect(derivedProvisionAddress("José")).toBe("jose@the120.school");
-    expect(derivedProvisionAddress("Zoë")).toBe("zoe@the120.school");
-    expect(derivedProvisionAddress("Weiß")).toBe("weiss@the120.school");
-  });
 });
 
 describe("per-step gates", () => {
@@ -103,17 +90,12 @@ describe("per-step gates", () => {
     expect(canContinueAge({ ...base(), jurisdiction: "   " })).toBe(false);
   });
 
-  it("path a requires child password >= 10; path b does not", () => {
+  it("gates the credential step on a first name AND a child password >= 10 (single path)", () => {
     expect(canContinueCredential(base())).toBe(true);
     expect(canContinueCredential({ ...base(), childPassword: "short" })).toBe(false);
-    // Path b: no password needed, but still needs a first name.
-    const provision: SignupData = {
-      ...base(),
-      credentialChoice: "provision_workspace",
-      childPassword: "",
-    };
-    expect(canContinueCredential(provision)).toBe(true);
-    expect(canContinueCredential({ ...provision, childFirstName: "" })).toBe(false);
+    expect(canContinueCredential({ ...base(), childPassword: "" })).toBe(false);
+    expect(canContinueCredential({ ...base(), childFirstName: "" })).toBe(false);
+    expect(canContinueCredential({ ...base(), childFirstName: "   " })).toBe(false);
   });
 
   it("gates consent on the attestation checkbox", () => {
@@ -192,33 +174,22 @@ describe("DOB / age-band consistency (COPPA under-protection guard)", () => {
 });
 
 describe("buildSubmission (backend-contract shape)", () => {
-  it("path a carries a child password and a null provision address", () => {
+  it("carries the parent-set first name + password, no credential choice or provision address", () => {
     const sub = buildSubmission(base(), CONSENT_META);
     expect(sub.parent).toEqual({
       name: "Sam Rivera",
       email: "sam@example.com",
       password: "a".repeat(PARENT_PASSWORD_MIN),
     });
-    expect(sub.child.credentialChoice).toBe("existing_credential");
-    expect(sub.child.password).toBe("a".repeat(CHILD_PASSWORD_MIN));
-    expect(sub.child.provisionAddress).toBeNull();
-    expect(sub.child.ageBand).toBe("13_to_15");
-    expect(sub.child.dob).toBe(BASE_DOB);
+    // Single path (U15): the child sub-shape is exactly firstName + password +
+    // ageBand + dob — no credentialChoice, no provisionAddress.
+    expect(sub.child).toEqual({
+      firstName: "Alex",
+      password: "a".repeat(CHILD_PASSWORD_MIN),
+      ageBand: "13_to_15",
+      dob: BASE_DOB,
+    });
     expect(sub.jurisdiction).toBe("California, US");
-  });
-
-  it("path b carries a provision address and a null password", () => {
-    const provision: SignupData = {
-      ...base(),
-      credentialChoice: "provision_workspace",
-      childPassword: "",
-      ageBand: "under_13",
-    };
-    const sub = buildSubmission(provision, CONSENT_META);
-    expect(sub.child.credentialChoice).toBe("provision_workspace");
-    expect(sub.child.password).toBeNull();
-    expect(sub.child.provisionAddress).toBe("alex@the120.school");
-    expect(sub.child.ageBand).toBe("under_13");
   });
 
   it("echoes the consent namespace / version / hash / method", () => {
@@ -228,26 +199,6 @@ describe("buildSubmission (backend-contract shape)", () => {
     expect(sub.consent.policyVersion).toBe(CONSENT_META.policyVersion);
     expect(sub.consent.policyHash).toBe(CONSENT_META.policyHash);
     expect(sub.consent.method).toBe("email_plus_attestation");
-  });
-
-  it("nulls a STALE childPassword on the provision path (pins the Unit 9 contract)", () => {
-    // The parent typed a password on path a, then switched to provision: the
-    // stale value must NOT leak. A regression to `password: d.childPassword` fails.
-    const stale: SignupData = {
-      ...base(),
-      credentialChoice: "provision_workspace",
-      childPassword: "leftoverpass",
-    };
-    const sub = buildSubmission(stale, CONSENT_META);
-    expect(sub.child.password).toBeNull();
-    expect(sub.child.provisionAddress).toBe("alex@the120.school");
-  });
-
-  it("nulls the provision address on path a even with a first name that would derive one", () => {
-    const sub = buildSubmission({ ...base(), childFirstName: "Robin" }, CONSENT_META);
-    // derivedProvisionAddress("Robin") would be robin@the120.school — must stay null.
-    expect(sub.child.provisionAddress).toBeNull();
-    expect(sub.child.password).toBe("a".repeat(CHILD_PASSWORD_MIN));
   });
 
   it("refuses to emit a null ageBand (re-checks the age gate at submit)", () => {

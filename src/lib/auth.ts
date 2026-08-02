@@ -106,7 +106,6 @@ export async function loginChild(identifier: string, password: string): Promise<
 
 /** The child age bands, mirroring the backend `child_age_band` enum. */
 export type SignupAgeBand = "under_13" | "13_to_15" | "16_plus";
-export type SignupCredentialChoice = "existing_credential" | "provision_workspace";
 
 export interface StartSignupInput {
   parentName: string;
@@ -117,7 +116,6 @@ export interface StartSignupInput {
   /** ISO yyyy-mm-dd; optional (the age band is the required signal). */
   childDob?: string;
   jurisdiction: string;
-  credentialChoice: SignupCredentialChoice;
 }
 
 export type StartSignupResult =
@@ -151,7 +149,6 @@ export async function startSignup(input: StartSignupInput): Promise<StartSignupR
       childFirstName: input.childFirstName,
       childAgeBand: input.childAgeBand,
       jurisdiction: input.jurisdiction,
-      credentialChoice: input.credentialChoice,
     };
     if (input.childDob) body.childDob = input.childDob;
 
@@ -241,17 +238,20 @@ export async function verifySignup(input: VerifySignupInput): Promise<VerifySign
 export interface CreateSignupChildInput {
   attemptId: string;
   childFirstName: string;
-  credentialChoice: SignupCredentialChoice;
-  /** Path (a) only; omitted on the provision path (its credential is the
-   *  provisioned Workspace account, not a parent-set password). */
-  childPassword?: string;
+  /** The parent-set child password (single path, U15; always required). */
+  childPassword: string;
 }
 
-export type CreateSignupChildResult = { ok: true; childId: string } | { ok: false };
+// `username` is the globally-unique fp_username the mint claimed (U12) — the
+// child's login key, surfaced so the confirmation can show it to the parent.
+export type CreateSignupChildResult =
+  | { ok: true; childId: string; username: string }
+  | { ok: false };
 
 interface CreateChildResponseBody {
   ok?: unknown;
   childId?: unknown;
+  username?: unknown;
 }
 
 /**
@@ -259,7 +259,8 @@ interface CreateChildResponseBody {
  * that session's access token as `Authorization: Bearer`, which RLS-authorizes
  * the child-row insert. Requires verifySignup to have run first (so a parent
  * session exists); with no session, or any non-2xx / malformed body, returns a
- * flat `{ ok: false }`.
+ * flat `{ ok: false }`. On success it surfaces the generated `fp_username` the
+ * child logs in with (U15), which may be empty on an idempotent replay.
  */
 export async function createSignupChild(
   input: CreateSignupChildInput,
@@ -274,12 +275,8 @@ export async function createSignupChild(
     const body: Record<string, unknown> = {
       attemptId: input.attemptId,
       childFirstName: input.childFirstName,
-      credentialChoice: input.credentialChoice,
+      childPassword: input.childPassword,
     };
-    // Path (a) sends the parent-set child password; path (b) sends none.
-    if (input.credentialChoice === "existing_credential" && input.childPassword) {
-      body.childPassword = input.childPassword;
-    }
 
     const res = await fetch(`${t120ApiUrl.replace(/\/$/, "")}/api/fp/signup/child`, {
       method: "POST",
@@ -294,7 +291,7 @@ export async function createSignupChild(
     const parsed = (await res.json()) as CreateChildResponseBody;
     const childId = asString(parsed.childId);
     if (parsed.ok !== true || !childId) return { ok: false };
-    return { ok: true, childId };
+    return { ok: true, childId, username: asString(parsed.username) };
   } catch {
     return { ok: false };
   }

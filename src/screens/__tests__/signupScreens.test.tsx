@@ -1,10 +1,11 @@
 // @vitest-environment jsdom
 /**
- * Signup screens (Slice B Unit 8) — proves each screen renders, surfaces its
- * validation, and navigates from PROPS / local state ALONE (no game context, no
- * real API). Covers the path a/b toggle swapping inputs, the consent gate
- * blocking continue until attested, age/DOB/jurisdiction being required, and the
- * child password min-length surfaced.
+ * Signup screens (Slice B Unit 8; single path since U15) — proves each screen
+ * renders, surfaces its validation, and navigates from PROPS / local state ALONE
+ * (no game context, no real API). Covers the single credential step (first name +
+ * a password, no login-method choice), the consent gate blocking continue until
+ * attested, age/DOB/jurisdiction being required, and the child password
+ * min-length surfaced.
  */
 import { useState } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -109,8 +110,8 @@ describe("AgeJurisdiction (screen 2)", () => {
   });
 });
 
-describe("ChildCredential (screen 3) path a/b toggle", () => {
-  it("path a shows a password field and surfaces the min-length rule", () => {
+describe("ChildCredential (screen 3) single username+password path", () => {
+  it("shows a first name + password field and surfaces the min-length rule", () => {
     render(
       <Harness
         initial={{ childFirstName: "Alex" }}
@@ -134,7 +135,7 @@ describe("ChildCredential (screen 3) path a/b toggle", () => {
     expect(cta().disabled).toBe(false);
   });
 
-  it("path b hides the password and previews the derived @the120.school address", () => {
+  it("has no login-method choice and no school-email / provision-address option", () => {
     render(
       <Harness
         initial={{ childFirstName: "Alex" }}
@@ -143,13 +144,13 @@ describe("ChildCredential (screen 3) path a/b toggle", () => {
         )}
       />,
     );
-    fireEvent.click(screen.getByRole("radio", { name: /Give them a school email/ }));
-    expect(screen.queryByLabelText("Password for your child")).toBeNull();
-    expect(screen.getByText("alex@the120.school")).toBeTruthy();
-    // No password needed on path b, so continue is enabled with just a name.
-    expect((screen.getByRole("button", { name: /Continue/ }) as HTMLButtonElement).disabled).toBe(
-      false,
-    );
+    // The radiogroup, the "school email" radio, and the @the120.school preview are gone.
+    expect(screen.queryByRole("radiogroup", { name: /Login method/i })).toBeNull();
+    expect(screen.queryByRole("radio")).toBeNull();
+    expect(screen.queryByText(/school email/i)).toBeNull();
+    expect(screen.queryByText(/the120\.school/i)).toBeNull();
+    // The password field is always present (no path branch hides it).
+    expect(screen.getByLabelText("Password for your child")).toBeTruthy();
   });
 });
 
@@ -266,25 +267,6 @@ describe("single-select groups expose radiogroup semantics (a11y)", () => {
     ).toBe("false");
   });
 
-  it("login method is a radiogroup of radios", () => {
-    render(
-      <Harness
-        initial={{ childFirstName: "Alex" }}
-        render={(data, patch) => (
-          <ChildCredential data={data} onChange={patch} onNext={vi.fn()} onBack={vi.fn()} />
-        )}
-      />,
-    );
-    expect(screen.getByRole("radiogroup", { name: "Login method" })).toBeTruthy();
-    const radios = screen.getAllByRole("radio");
-    expect(radios.length).toBe(2);
-    // Default choice (set a password now) is checked; provision is not.
-    expect(
-      (screen.getByRole("radio", { name: /Set a password now/ }) as HTMLElement).getAttribute(
-        "aria-checked",
-      ),
-    ).toBe("true");
-  });
 });
 
 describe("no em dashes across the signup screens", () => {

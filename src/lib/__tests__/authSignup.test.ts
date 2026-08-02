@@ -52,7 +52,6 @@ const START_INPUT = {
   childAgeBand: "13_to_15" as const,
   childDob: "2011-05-04",
   jurisdiction: "California, US",
-  credentialChoice: "existing_credential" as const,
 };
 
 beforeEach(() => {
@@ -81,7 +80,6 @@ describe("startSignup", () => {
       childFirstName: "Alex",
       childAgeBand: "13_to_15",
       jurisdiction: "California, US",
-      credentialChoice: "existing_credential",
       childDob: "2011-05-04",
     });
   });
@@ -168,43 +166,41 @@ describe("verifySignup", () => {
 });
 
 describe("createSignupChild", () => {
-  it("sends the parent Bearer token + exact body, returns { ok, childId } (path a)", async () => {
+  it("sends the parent Bearer token + exact body, returns { ok, childId, username }", async () => {
     getSession.mockResolvedValue({ data: { session: { access_token: "parent-access" } } });
-    fetchMock().mockResolvedValue(jsonResponse(200, { ok: true, status: "child_created", childId: "child-1" }));
+    fetchMock().mockResolvedValue(
+      jsonResponse(200, { ok: true, status: "child_created", childId: "child-1", username: "alex" }),
+    );
 
     const result = await createSignupChild({
       attemptId: "attempt-1",
       childFirstName: "Alex",
-      credentialChoice: "existing_credential",
       childPassword: "kidpassword",
     });
 
-    expect(result).toEqual({ ok: true, childId: "child-1" });
+    // The generated fp_username is surfaced (U15) so the confirmation can show it.
+    expect(result).toEqual({ ok: true, childId: "child-1", username: "alex" });
     const [url, init] = fetchMock().mock.calls[0];
     expect(url).toBe("https://api.test/api/fp/signup/child");
     expect(init.headers.Authorization).toBe("Bearer parent-access");
+    // Single-path body (U15): no credentialChoice; childPassword always sent.
     expect(JSON.parse(init.body as string)).toEqual({
       attemptId: "attempt-1",
       childFirstName: "Alex",
-      credentialChoice: "existing_credential",
       childPassword: "kidpassword",
     });
   });
 
-  it("path b omits the child password", async () => {
+  it("a success with no username in the body surfaces an empty username (idempotent replay)", async () => {
     getSession.mockResolvedValue({ data: { session: { access_token: "parent-access" } } });
     fetchMock().mockResolvedValue(jsonResponse(200, { ok: true, childId: "child-2" }));
 
-    await createSignupChild({
+    const result = await createSignupChild({
       attemptId: "a",
       childFirstName: "Robin",
-      credentialChoice: "provision_workspace",
-      childPassword: "ignored",
+      childPassword: "kidpassword",
     });
-
-    const body = JSON.parse(fetchMock().mock.calls[0][1].body as string);
-    expect("childPassword" in body).toBe(false);
-    expect(body.credentialChoice).toBe("provision_workspace");
+    expect(result).toEqual({ ok: true, childId: "child-2", username: "" });
   });
 
   it("no adopted session -> { ok:false } and never fetches", async () => {
@@ -212,7 +208,6 @@ describe("createSignupChild", () => {
     const result = await createSignupChild({
       attemptId: "a",
       childFirstName: "Alex",
-      credentialChoice: "existing_credential",
       childPassword: "kidpassword",
     });
     expect(result).toEqual({ ok: false });
@@ -226,7 +221,6 @@ describe("createSignupChild", () => {
       await createSignupChild({
         attemptId: "a",
         childFirstName: "Alex",
-        credentialChoice: "existing_credential",
         childPassword: "kidpassword",
       }),
     ).toEqual({ ok: false });
@@ -239,7 +233,6 @@ describe("createSignupChild", () => {
       await createSignupChild({
         attemptId: "a",
         childFirstName: "Alex",
-        credentialChoice: "existing_credential",
         childPassword: "kidpassword",
       }),
     ).toEqual({ ok: false });

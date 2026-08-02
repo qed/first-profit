@@ -11,9 +11,15 @@
  *   2. recordSignupConsent → writes the consent row (parent Bearer). MUST run
  *      after the session exists and before the mint. A failure aborts (a mint
  *      would only fail consent_required anyway).
- *   3. createSignupChild   → mints the child under the parent Bearer.
- *   4. path a: log the child in and hand off to the game (playing); on a rare
- *      login race, fall back to the confirmation. path b: confirmation.
+ *   3. createSignupChild   → mints the child under the parent Bearer AND returns
+ *      the generated fp_username (U15) the child logs in with.
+ *   4. log the child in with that USERNAME (U13 — login is username-only, NOT the
+ *      first name) and hand off to the game (playing); on a rare login race, fall
+ *      back to the confirmation, which reveals the username to the parent.
+ *
+ * (Slice B U15) There is no longer a credential-path branch: every child is minted
+ * the one username+password way, so the child password is always present and the
+ * login always runs.
  *
  * Every step is a flat result that never throws; any failure collapses to a flat
  * `{ ok: false }` for the UI.
@@ -60,25 +66,21 @@ export async function finishSignup(
   });
   if (!consent.ok) return { ok: false };
 
-  // 3. Mint the child under the parent Bearer (path a carries the re-prompted
-  //    child password; path b carries none).
+  // 3. Mint the child under the parent Bearer. Single path (U15): the re-prompted
+  //    child password is always sent. The mint returns the generated fp_username.
   const minted = await deps.createSignupChild({
     attemptId: req.attemptId,
     childFirstName: req.child.firstName,
-    credentialChoice: req.child.credentialChoice,
-    childPassword:
-      req.child.credentialChoice === "existing_credential" ? req.child.password : undefined,
+    childPassword: req.child.password,
   });
   if (!minted.ok) return { ok: false };
 
-  // 4. Path a: adopt the CHILD session and hand off to the game.
-  if (req.child.credentialChoice === "existing_credential") {
-    const ok = await deps.loginChildIntoGame(req.child.firstName, req.child.password ?? "");
-    if (ok) return { ok: true, outcome: "playing" };
-    // The child login didn't take (a rare handle race): the account exists, so
-    // show the confirmation; the child can log in later.
-    return { ok: true, outcome: "confirmation" };
-  }
-  // Path b: the provisioned mailbox is not ready yet, so DON'T attempt a login.
-  return { ok: true, outcome: "confirmation" };
+  // 4. Adopt the CHILD session and hand off to the game. The login identifier is
+  //    the generated USERNAME (U13 — login is username-only), NOT the first name.
+  const ok = await deps.loginChildIntoGame(minted.username, req.child.password);
+  if (ok) return { ok: true, outcome: "playing", username: minted.username };
+  // The child login didn't take (a rare handle race, or an empty replay username):
+  // the account exists, so show the confirmation — which reveals the username so
+  // the parent can sign the child in later.
+  return { ok: true, outcome: "confirmation", username: minted.username };
 }

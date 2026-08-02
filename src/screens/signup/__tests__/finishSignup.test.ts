@@ -3,13 +3,16 @@ import { finishSignup, type FinishSignupDeps } from "../finishSignup";
 import type { CompleteVerificationRequest } from "../../Signup";
 
 /**
- * The verify-return SEQUENCE (Slice B Unit 9 review, FIX 4a). This test FAILS if
- * the consent-record POST is absent between verify and the child mint: it asserts
- * recordSignupConsent is called with the echoed version + hash BEFORE
- * createSignupChild, and that a consent failure aborts before any mint.
+ * The verify-return SEQUENCE (Slice B Unit 9 review, FIX 4a; single path since
+ * U15). This test FAILS if the consent-record POST is absent between verify and
+ * the child mint: it asserts recordSignupConsent is called with the echoed
+ * version + hash BEFORE createSignupChild, and that a consent failure aborts
+ * before any mint. It also pins the U15 contract: the child logs in with the
+ * generated USERNAME the mint returns (not the first name), and that username is
+ * threaded up to the container for the confirmation.
  */
 
-const REQ_A: CompleteVerificationRequest = {
+const REQ: CompleteVerificationRequest = {
   token: "tok-1",
   parentEmail: "sam@example.com",
   parentPassword: "parentpass",
@@ -22,16 +25,10 @@ const REQ_A: CompleteVerificationRequest = {
   },
   child: {
     firstName: "Alex",
-    credentialChoice: "existing_credential",
     ageBand: "13_to_15",
     dob: "2011-05-04",
     password: "kidpassword",
   },
-};
-
-const REQ_B: CompleteVerificationRequest = {
-  ...REQ_A,
-  child: { firstName: "Robin", credentialChoice: "provision_workspace", ageBand: "16_plus" },
 };
 
 /** A deps set that records the ORDER of the backend calls into `order`. */
@@ -48,7 +45,7 @@ function makeDeps(overrides: Partial<FinishSignupDeps> = {}) {
     }),
     createSignupChild: vi.fn(async () => {
       order.push("child");
-      return { ok: true, childId: "child-1" } as const;
+      return { ok: true, childId: "child-1", username: "alex" } as const;
     }),
     loginChildIntoGame: vi.fn(async () => {
       order.push("login");
@@ -62,9 +59,10 @@ function makeDeps(overrides: Partial<FinishSignupDeps> = {}) {
 describe("finishSignup — verify → consent → child ordering (FIX 1/4a)", () => {
   it("records consent (with the echoed version+hash) BETWEEN verify and the child mint", async () => {
     const { deps, order } = makeDeps();
-    const res = await finishSignup(deps, REQ_A);
+    const res = await finishSignup(deps, REQ);
 
-    expect(res).toEqual({ ok: true, outcome: "playing" });
+    // The generated username is threaded up for the confirmation.
+    expect(res).toEqual({ ok: true, outcome: "playing", username: "alex" });
     // The load-bearing order: consent lands after verify and before the mint.
     expect(order).toEqual(["verify", "consent", "child", "login"]);
     expect(order.indexOf("consent")).toBeGreaterThan(order.indexOf("verify"));
@@ -80,13 +78,14 @@ describe("finishSignup — verify → consent → child ordering (FIX 1/4a)", ()
       childDob: "2011-05-04",
       jurisdiction: "California, US",
     });
-    // Path a mints with the re-prompted child password.
+    // Single-path mint (U15): no credentialChoice; the child password is always sent.
     expect(deps.createSignupChild).toHaveBeenCalledWith({
       attemptId: "attempt-1",
       childFirstName: "Alex",
-      credentialChoice: "existing_credential",
       childPassword: "kidpassword",
     });
+    // The child login uses the generated USERNAME (U13), NOT the first name.
+    expect(deps.loginChildIntoGame).toHaveBeenCalledWith("alex", "kidpassword");
   });
 
   it("a consent failure ABORTS before the child mint (fail-closed)", async () => {
@@ -96,7 +95,7 @@ describe("finishSignup — verify → consent → child ordering (FIX 1/4a)", ()
         return { ok: false };
       }),
     });
-    const res = await finishSignup(deps, REQ_A);
+    const res = await finishSignup(deps, REQ);
     expect(res).toEqual({ ok: false });
     expect(order).toEqual(["verify", "consent"]);
     expect(deps.createSignupChild).not.toHaveBeenCalled();
@@ -109,7 +108,7 @@ describe("finishSignup — verify → consent → child ordering (FIX 1/4a)", ()
         return { ok: false } as const;
       }),
     });
-    const res = await finishSignup(deps, REQ_A);
+    const res = await finishSignup(deps, REQ);
     expect(res).toEqual({ ok: false });
     expect(order).toEqual(["verify"]);
     expect(deps.recordSignupConsent).not.toHaveBeenCalled();
@@ -120,32 +119,14 @@ describe("finishSignup — verify → consent → child ordering (FIX 1/4a)", ()
     const { deps } = makeDeps({
       createSignupChild: vi.fn(async () => ({ ok: false }) as const),
     });
-    const res = await finishSignup(deps, REQ_A);
+    const res = await finishSignup(deps, REQ);
     expect(res).toEqual({ ok: false });
     expect(deps.loginChildIntoGame).not.toHaveBeenCalled();
   });
 
-  it("path a: a rare child-login race falls back to the confirmation outcome", async () => {
+  it("a rare child-login race falls back to the confirmation outcome, still carrying the username", async () => {
     const { deps } = makeDeps({ loginChildIntoGame: vi.fn(async () => false) });
-    const res = await finishSignup(deps, REQ_A);
-    expect(res).toEqual({ ok: true, outcome: "confirmation" });
-  });
-
-  it("path b: records consent, mints, and resolves to confirmation WITHOUT a login or child password", async () => {
-    const { deps, order } = makeDeps();
-    const res = await finishSignup(deps, REQ_B);
-    expect(res).toEqual({ ok: true, outcome: "confirmation" });
-    expect(order).toEqual(["verify", "consent", "child"]);
-    expect(deps.loginChildIntoGame).not.toHaveBeenCalled();
-    expect(deps.createSignupChild).toHaveBeenCalledWith({
-      attemptId: "attempt-1",
-      childFirstName: "Robin",
-      credentialChoice: "provision_workspace",
-      childPassword: undefined,
-    });
-    // Consent still carries no DOB for a band-only child.
-    expect(deps.recordSignupConsent).toHaveBeenCalledWith(
-      expect.objectContaining({ childAgeBand: "16_plus", childDob: undefined }),
-    );
+    const res = await finishSignup(deps, REQ);
+    expect(res).toEqual({ ok: true, outcome: "confirmation", username: "alex" });
   });
 });

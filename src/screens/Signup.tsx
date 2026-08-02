@@ -48,7 +48,6 @@ import {
   emptySignupData,
   isChildPasswordValid,
   type AgeBand,
-  type CredentialChoice,
   type SignupData,
   type SignupSubmission,
 } from "./signup/validation";
@@ -109,8 +108,12 @@ export type SubmitResult = {
 export type CompleteVerificationResult = {
   ok: boolean;
   /** `playing` = the child was logged in and the game took over (this container
-   *  will unmount); `confirmation` = show the "watch for the setup email" screen. */
+   *  will unmount); `confirmation` = show the "you are all set" screen. */
   outcome?: "playing" | "confirmation";
+  /** The generated fp_username (U15) the child logs in with — shown on the
+   *  confirmation so the parent learns the login key (the recap email also states
+   *  it). May be empty when the mint could not surface it. */
+  username?: string;
 };
 
 export interface CompleteVerificationRequest {
@@ -123,12 +126,12 @@ export interface CompleteVerificationRequest {
   consent: { echoedVersion: string; echoedHash: string; method: string };
   child: {
     firstName: string;
-    credentialChoice: CredentialChoice;
     ageBand: AgeBand;
     /** ISO yyyy-mm-dd; optional. */
     dob?: string;
-    /** Path a only — RE-PROMPTED on the verify-return screen, never persisted. */
-    password?: string;
+    /** The parent-set child password — RE-PROMPTED on the verify-return screen,
+     *  never persisted (single path, U15; always present). */
+    password: string;
   };
 }
 
@@ -275,7 +278,6 @@ function SignupStepFlow({
           createdAt: Date.now(),
           child: {
             firstName: submission.child.firstName,
-            credentialChoice: submission.child.credentialChoice,
             ageBand: submission.child.ageBand,
             dob: submission.child.dob || undefined,
           },
@@ -419,15 +421,15 @@ function VerifyReturn({
   const pendingRef = useRef(loadPendingSignup());
   const pending = pendingRef.current;
   const canFinish = Boolean(pending && pending.attemptId && onComplete);
-  // Path a's child credential is a parent-set password (never persisted, FIX 2):
-  // re-prompt it here, next to the parent password. Path b has none.
-  const isPathA = pending?.child.credentialChoice === "existing_credential";
 
   const [password, setPassword] = useState("");
   const [childPassword, setChildPassword] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(false);
   const [confirmed, setConfirmed] = useState(false);
+  // The generated login username the mint returns — shown on the confirmation so
+  // the parent learns the child's login key (single path, U15).
+  const [username, setUsername] = useState("");
   const busyRef = useRef(false);
   const mountedRef = useRef(true);
   const [show, setShow] = useState(false);
@@ -440,10 +442,9 @@ function VerifyReturn({
     };
   }, []);
 
-  // Both credentials must be present before the finish CTA enables. Path a also
-  // needs the re-prompted child password; path b needs only the parent password.
-  const childPasswordReady = !isPathA || childPassword.length > 0;
-  const canSubmit = password.length > 0 && childPasswordReady;
+  // Both credentials must be present before the finish CTA enables (single path,
+  // U15): the parent password AND the re-prompted child password.
+  const canSubmit = password.length > 0 && childPassword.length > 0;
 
   const finish = async () => {
     if (busyRef.current) return;
@@ -466,15 +467,16 @@ function VerifyReturn({
         },
         child: {
           firstName: pending.child.firstName,
-          credentialChoice: pending.child.credentialChoice,
           ageBand: pending.child.ageBand,
           dob: pending.child.dob,
-          password: isPathA ? childPassword : undefined,
+          password: childPassword,
         },
       });
       if (!mountedRef.current) return;
-      if (res.ok && res.outcome === "confirmation") setConfirmed(true);
-      else if (!res.ok) setError(true);
+      if (res.ok && res.outcome === "confirmation") {
+        setUsername(res.username ?? "");
+        setConfirmed(true);
+      } else if (!res.ok) setError(true);
     } catch {
       if (mountedRef.current) setError(true);
     } finally {
@@ -490,13 +492,12 @@ function VerifyReturn({
     }
   };
 
-  // The confirmation screen (path b, or a login-failed path a). The copy differs
-  // by path (FIX 5): path a's credential is the parent-set password (NOT emailed);
-  // path b's is a provisioned address that arrives by a setup email.
-  // The confirmation screen (path b, or a login-failed path a). The copy differs
-  // by path (FIX 5): path a's credential is the parent-set password (NOT emailed);
-  // path b's is a provisioned address that arrives by a setup email.
+  // The confirmation screen (a login-failed mint, or a lost-response replay). Its
+  // JOB (U15) is to reveal the child's generated login USERNAME to the parent —
+  // this is how they learn it in-app (the recap email also states it, U14). When
+  // the mint could not surface a username, degrade to a graceful fallback line.
   if (confirmed) {
+    const origin = typeof window !== "undefined" ? window.location.origin : "";
     return (
       <SignupShell filled={CONFIRM_EMAIL_SEGMENT}>
         <div className="text-center">
@@ -506,16 +507,37 @@ function VerifyReturn({
           <h2 className="mt-2 font-display text-[26px] font-black leading-[1.15] text-[hsl(25_34%_20%)]">
             You are all set.
           </h2>
-          {isPathA ? (
-            <p className="mt-2 break-words text-sm leading-[1.6] text-[hsl(25_20%_38%)]">
-              <b className="text-[hsl(25_34%_20%)]">{pending?.child.firstName}</b> can log in with the
-              first name you chose and the password you set. Nothing else is emailed. If the sign-in
-              does not take right away, try again in a moment.
-            </p>
+          {username ? (
+            <>
+              <p className="mt-2 break-words text-sm leading-[1.6] text-[hsl(25_20%_38%)]">
+                <b className="text-[hsl(25_34%_20%)]">{pending?.child.firstName}</b> logs in
+                {origin ? (
+                  <> at <b className="text-[hsl(25_34%_20%)]">{origin}</b></>
+                ) : null}{" "}
+                with the username below and the password you set.
+              </p>
+              <div className="mt-4 rounded-xl border-2 border-[hsl(25_34%_20%/0.15)] bg-white px-4 py-3.5">
+                <p className="font-mono text-[10px] uppercase tracking-[0.08em] text-[hsl(25_20%_38%)]">
+                  Username
+                </p>
+                <p className="mt-1 break-all font-display text-[20px] font-black text-[hsl(25_34%_20%)]">
+                  {username}
+                </p>
+              </div>
+              <p className="mt-3 break-words text-[12.5px] leading-[1.5] text-[hsl(25_20%_38%)]">
+                We also emailed this to you. If the sign-in does not take right away, try again in a
+                moment.
+              </p>
+            </>
           ) : (
             <p className="mt-2 break-words text-sm leading-[1.6] text-[hsl(25_20%_38%)]">
-              We are provisioning your child's school sign-in address and will email it to you. Once it
-              arrives, your child can log in with that address and start playing.
+              <b className="text-[hsl(25_34%_20%)]">{pending?.child.firstName}</b> can log in with the
+              username you were emailed and the password you set. Check your inbox for the exact
+              username, then sign in
+              {origin ? (
+                <> at <b className="text-[hsl(25_34%_20%)]">{origin}</b></>
+              ) : null}
+              .
             </p>
           )}
         </div>
@@ -560,14 +582,8 @@ function VerifyReturn({
       </h2>
       <p className="mt-2 break-words text-sm leading-[1.6] text-[hsl(25_20%_38%)]">
         Your email is verified. Enter the password you chose for <b className="text-[hsl(25_34%_20%)]">{pending.parentEmail}</b>
-        {isPathA ? (
-          <>
-            {" "}and the password you set for <b className="text-[hsl(25_34%_20%)]">{pending.child.firstName}</b> to finish
-            setting up their account.
-          </>
-        ) : (
-          <> to finish setting up <b className="text-[hsl(25_34%_20%)]">{pending.child.firstName}</b>.</>
-        )}
+        {" "}and the password you set for <b className="text-[hsl(25_34%_20%)]">{pending.child.firstName}</b> to finish
+        setting up their account.
       </p>
 
       <div className="mt-6">
@@ -596,38 +612,36 @@ function VerifyReturn({
         </span>
       </div>
 
-      {isPathA ? (
-        <div className="mt-4">
-          <label htmlFor="fp-verify-child-password" className="mb-1.5 block font-mono text-[11px] uppercase tracking-[0.08em] text-[hsl(25_20%_38%)]">
-            {pending.child.firstName}'s password
-          </label>
-          <span className="relative block">
-            <input
-              id="fp-verify-child-password"
-              type={showChild ? "text" : "password"}
-              value={childPassword}
-              autoComplete="new-password"
-              autoCapitalize="none"
-              autoCorrect="off"
-              onChange={(e) => setChildPassword(e.target.value)}
-              className={`${REPROMPT_INPUT_CLS} pr-16`}
-            />
-            <button
-              type="button"
-              onClick={() => setShowChild((s) => !s)}
-              aria-pressed={showChild}
-              className="absolute right-1 top-1/2 flex min-h-[44px] -translate-y-1/2 items-center rounded-lg px-3 font-mono text-[11px] uppercase tracking-wider text-[hsl(25_20%_38%)] hover:text-ink"
-            >
-              {showChild ? "Hide" : "Show"}
-            </button>
-          </span>
-          {childPassword.length > 0 && !isChildPasswordValid(childPassword) ? (
-            <p className="mt-1.5 text-[13px] leading-snug text-[hsl(25_20%_38%)]">
-              Use at least 10 characters (the same password you set earlier).
-            </p>
-          ) : null}
-        </div>
-      ) : null}
+      <div className="mt-4">
+        <label htmlFor="fp-verify-child-password" className="mb-1.5 block font-mono text-[11px] uppercase tracking-[0.08em] text-[hsl(25_20%_38%)]">
+          {pending.child.firstName}'s password
+        </label>
+        <span className="relative block">
+          <input
+            id="fp-verify-child-password"
+            type={showChild ? "text" : "password"}
+            value={childPassword}
+            autoComplete="new-password"
+            autoCapitalize="none"
+            autoCorrect="off"
+            onChange={(e) => setChildPassword(e.target.value)}
+            className={`${REPROMPT_INPUT_CLS} pr-16`}
+          />
+          <button
+            type="button"
+            onClick={() => setShowChild((s) => !s)}
+            aria-pressed={showChild}
+            className="absolute right-1 top-1/2 flex min-h-[44px] -translate-y-1/2 items-center rounded-lg px-3 font-mono text-[11px] uppercase tracking-wider text-[hsl(25_20%_38%)] hover:text-ink"
+          >
+            {showChild ? "Hide" : "Show"}
+          </button>
+        </span>
+        {childPassword.length > 0 && !isChildPasswordValid(childPassword) ? (
+          <p className="mt-1.5 text-[13px] leading-snug text-[hsl(25_20%_38%)]">
+            Use at least 10 characters (the same password you set earlier).
+          </p>
+        ) : null}
+      </div>
 
       {error ? (
         <p

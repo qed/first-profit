@@ -100,7 +100,6 @@ function StageRouter() {
       childAgeBand: submission.child.ageBand,
       childDob: submission.child.dob || undefined,
       jurisdiction: submission.jurisdiction,
-      credentialChoice: submission.child.credentialChoice,
     });
     if (result.ok) return { ok: true, attemptId: result.attemptId };
     // A returning parent (the backend's deliberate R10 `existing_account` signal)
@@ -111,10 +110,11 @@ function StageRouter() {
   }, []);
 
   // Verify-return: verify the email + adopt the parent session, RECORD CONSENT,
-  // mint the child, then (path a) log the child in and hand off to the game, or
-  // (path b) resolve to the confirmation. The sequence (incl. the consent-record
-  // step that gates the mint) lives in finishSignup so it is unit-testable; every
-  // failure is a flat { ok: false } (never throws).
+  // mint the child, then log the child in (by their generated username, U13) and
+  // hand off to the game — or, on a login race, resolve to the confirmation that
+  // reveals the username. The sequence (incl. the consent-record step that gates
+  // the mint) lives in finishSignup so it is unit-testable; every failure is a
+  // flat { ok: false } (never throws).
   const handleCompleteVerification = useCallback(
     (req: CompleteVerificationRequest): Promise<CompleteVerificationResult> =>
       finishSignup(
