@@ -38,14 +38,16 @@ _Last updated: 2026-08-02_
 
 ## Active side-tracks (not roadmap pieces)
 
-- **FP login + account-creation link-out** (achieves the user-flow testing goal) —
-  account model decided 2026-08-02: fpv2 = game + login (username/password) only;
-  account creation lives at the120 `/start`. Retire the redundant in-SPA signup flow
-  + add a "Create Account" link on the login page →
+- **FP login + account-creation link-out** — ✅ **SHIPPED to prod 2026-08-02**
+  (PR #6, merge `22419f7`; firstprofit.school live). Account model: fpv2 = game +
+  login (username/password) only; account creation lives at the120 `/start`. The
+  login page now has a "Create Account" link →
   `https://the120.school/start?src=fplogin`. Requirements:
-  `docs/brainstorms/2026-08-02-fp-login-account-creation-requirements.md`.
-  (Supersedes the old flag-flip "testing milestone" + the the120 signup-enable
-  handoff, both now marked superseded.)
+  `docs/brainstorms/2026-08-02-fp-login-account-creation-requirements.md`; plan:
+  `docs/plans/2026-08-02-002-feat-login-create-account-link-plan.md`. (Superseded the
+  old flag-flip "testing milestone" + the the120 signup-enable handoff.)
+  **Deferred:** retiring the now-redundant in-SPA signup flow (stays dormant, flag
+  off) is a separate later cleanup.
 - **Slice B go-live remainder** — with the in-SPA signup retired, the FP CTA cutover
   is moot; any remaining go-live items (RLS re-probe, etc.) live on the120 side.
 
