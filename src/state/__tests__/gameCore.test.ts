@@ -275,6 +275,142 @@ describe("ADD_LEDGER", () => {
     expect(grossSalesSumCents(s)).toBe(2000);
   });
 
+  it("models a REAL sale through the chosen provider (Replit): gross/fee/net/providerId snapshot", () => {
+    let s = withOneIdea();
+    s = completeCriterion(s, 0, "1.1");
+    s = reducer(s, { type: "DISMISS_CELEBRATION" });
+    s = reducer(s, { type: "SET_PROVIDER", providerId: "replit", chosenAt: 1 });
+    s = reducer(s, {
+      type: "ADD_LEDGER",
+      id: "sale-replit",
+      kind: "sale",
+      payer: "Nadia",
+      amountCents: 2000,
+      grossCents: 2000,
+      createdAt: "2026-08-02T00:00:00.000Z",
+    });
+    const row = s.ledger[0];
+    expect(row.grossCents).toBe(2000);
+    expect(row.feeCents).toBe(88); // floor(2000*290/10000)=58 + 30 flat
+    expect(row.netCents).toBe(1912);
+    expect(row.providerId).toBe("replit");
+    // Sums: net drives salesSumCents, gross drives grossSalesSumCents.
+    expect(salesSumCents(s)).toBe(1912);
+    expect(grossSalesSumCents(s)).toBe(2000);
+  });
+
+  it("models a REAL sale through First Profit Pay (50%): fee 1000, net 1000 on a $20 sale", () => {
+    let s = withOneIdea();
+    s = completeCriterion(s, 0, "1.1");
+    s = reducer(s, { type: "DISMISS_CELEBRATION" });
+    s = reducer(s, { type: "SET_PROVIDER", providerId: "first_profit_pay", chosenAt: 1 });
+    s = reducer(s, {
+      type: "ADD_LEDGER",
+      id: "sale-fpp",
+      kind: "sale",
+      payer: "Nadia",
+      amountCents: 2000,
+      grossCents: 2000,
+      createdAt: "2026-08-02T00:01:00.000Z",
+    });
+    const row = s.ledger[0];
+    expect(row.feeCents).toBe(1000);
+    expect(row.netCents).toBe(1000);
+    expect(row.providerId).toBe("first_profit_pay");
+    expect(salesSumCents(s)).toBe(1000);
+  });
+
+  it("with NO provider chosen a real sale is un-modeled (fee 0, net = gross, provider null)", () => {
+    let s = withOneIdea();
+    s = completeCriterion(s, 0, "1.1");
+    s = reducer(s, { type: "DISMISS_CELEBRATION" });
+    // No SET_PROVIDER: the reducer stays safe (the UI routes to choose first).
+    s = reducer(s, {
+      type: "ADD_LEDGER",
+      id: "sale-noprov",
+      kind: "sale",
+      payer: "Helen",
+      amountCents: 2000,
+      grossCents: 2000,
+      createdAt: "2026-08-02T00:02:00.000Z",
+    });
+    const row = s.ledger[0];
+    expect(row.feeCents).toBe(0);
+    expect(row.netCents).toBe(2000);
+    expect(row.providerId).toBeNull();
+    expect(salesSumCents(s)).toBe(2000);
+  });
+
+  it("a modeled REAL sale still auto-completes 1.2's last task and fires the celebration", () => {
+    let s = withOneIdea();
+    s = completeCriterion(s, 0, "1.1");
+    s = reducer(s, { type: "DISMISS_CELEBRATION" });
+    for (let i = 0; i < LAST_1_2_INDEX; i++) {
+      s = reducer(s, { type: "COMPLETE_TASK", ideaIndex: 0, stepId: "1.2", index: i });
+    }
+    s = reducer(s, { type: "SET_PROVIDER", providerId: "replit", chosenAt: 1 });
+    s = reducer(s, {
+      type: "ADD_LEDGER",
+      id: "sale-completes",
+      kind: "sale",
+      payer: "Nadia",
+      amountCents: 2000,
+      grossCents: 2000,
+      createdAt: "2026-08-02T00:03:00.000Z",
+    });
+    expect(isTaskDone(s, 0, "1.2", LAST_1_2_INDEX)).toBe(true);
+    expect(isCriterionDone(s, 0, "1.2")).toBe(true);
+    expect(s.celebrate).toBe("1.2");
+    // The completing sale is still fee-modeled (net felt).
+    expect(s.ledger[0].feeCents).toBe(88);
+    expect(salesSumCents(s)).toBe(1912);
+  });
+
+  it("DURABILITY: the modeled row carries the full gross/fee/net/provider snapshot sync persists (gross = fee + net)", () => {
+    let s = withOneIdea();
+    s = completeCriterion(s, 0, "1.1");
+    s = reducer(s, { type: "DISMISS_CELEBRATION" });
+    s = reducer(s, { type: "SET_PROVIDER", providerId: "shopify", chosenAt: 1 });
+    s = reducer(s, {
+      type: "ADD_LEDGER",
+      id: "sale-durable",
+      kind: "sale",
+      payer: "Nadia",
+      amountCents: 1337,
+      grossCents: 1337,
+      createdAt: "2026-08-02T00:05:00.000Z",
+    });
+    const row = s.ledger[0];
+    // Every field notifyLedger -> insertLedger forwards is present on the row...
+    expect(row.grossCents).toBeDefined();
+    expect(row.feeCents).toBeDefined();
+    expect(row.netCents).toBeDefined();
+    expect(row.providerId).toBe("shopify");
+    // ...and the fee-snapshot invariant holds (computeFee guarantee).
+    expect((row.grossCents ?? 0)).toBe((row.feeCents ?? 0) + (row.netCents ?? 0));
+  });
+
+  it("a mock sale is never fee-modeled even with a provider chosen", () => {
+    let s = withOneIdea();
+    s = completeCriterion(s, 0, "1.1");
+    s = reducer(s, { type: "DISMISS_CELEBRATION" });
+    s = reducer(s, { type: "SET_PROVIDER", providerId: "replit", chosenAt: 1 });
+    s = reducer(s, {
+      type: "ADD_LEDGER",
+      id: "mock-with-provider",
+      kind: "sale",
+      mock: true,
+      payer: "A backer",
+      amountCents: 2000,
+      grossCents: 2000,
+      createdAt: "2026-08-02T00:04:00.000Z",
+    });
+    const row = s.ledger[0];
+    expect(row.feeCents).toBe(0);
+    expect(row.netCents).toBe(2000);
+    expect(row.providerId).toBeNull();
+  });
+
   it("a sale before 1.2 is unlocked appends the row but completes no task", () => {
     // withOneIdea has 1.1 incomplete, so 1.2 is locked for idea #0.
     const s = withOneIdea();

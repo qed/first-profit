@@ -18,6 +18,7 @@
 import { useState } from "react";
 import { useGame } from "../../state/GameContext";
 import { LedgerList } from "./LedgerList";
+import { LogSaleForm } from "./LogSaleForm";
 import { ProviderComparison, feeLabel } from "./ProviderComparison";
 import { PROVIDERS } from "../../data/providers";
 
@@ -45,7 +46,13 @@ export function CheckoutBooth() {
           <ProviderComparison onChoose={() => setComparing(false)} />
         </div>
       ) : (
-        <ChosenSummary onCompareAgain={() => setComparing(true)} />
+        <>
+          <ChosenSummary onCompareAgain={() => setComparing(true)} />
+          {/* Log real sales through the chosen provider (fee modeled per row). */}
+          <div className="mt-4">
+            <LogSaleForm onChooseProvider={() => setComparing(true)} />
+          </div>
+        </>
       )}
 
       <div className="mt-4">

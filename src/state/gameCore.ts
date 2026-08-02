@@ -10,7 +10,7 @@
  * adds new code.
  */
 import { parseTask, stepById, type RoomId } from "../data/path";
-import { PROVIDER_IDS, type ProviderId } from "../data/providers";
+import { PROVIDER_IDS, computeFee, providerById, type ProviderId } from "../data/providers";
 
 /** Schema version stored inside every serialized save doc. Bump on shape change. */
 export const DOC_VERSION = 1;
@@ -496,21 +496,48 @@ export function reducer(state: GameState, action: Action): GameState {
     case "ADD_LEDGER": {
       // Idempotent on id (retried outbox inserts must not double-append).
       if (state.ledger.some((row) => row.id === action.id)) return state;
-      // Carry the fee snapshot through when supplied (Unit 5 computes it); a bare
-      // sale with no snapshot defaults gross = net = amountCents, fee = 0,
-      // providerId = null so the net/gross sums stay consistent. The snapshot is
-      // ALL-OR-NOTHING: supply gross+fee+net together (computeFee guarantees
-      // gross = fee + net). A partial snapshot (e.g. feeCents without netCents)
-      // would default the omitted parts independently and break that identity.
+      // Gross is the amount charged the customer (amountCents kept = gross).
+      const grossCents = action.grossCents ?? action.amountCents;
+      // Fee MODELING (Unit 5): a REAL sale (kind:'sale', NOT mock) with a provider
+      // chosen is modeled through the CHOSEN provider at sale time —
+      // computeFee(gross, provider) snapshots {feeCents, netCents} and providerId
+      // onto the row (computeFee guarantees gross = fee + net). A caller may still
+      // pass a full snapshot explicitly (feeCents+netCents together, e.g. an
+      // idempotent replay); that is honored as-is and never recomputed. Otherwise
+      // the row defaults to un-modeled: gross = net = amountCents, fee = 0,
+      // providerId = null (a mock overlay row, or a real sale with no provider
+      // chosen, which the UI prevents but the reducer stays safe against). The
+      // snapshot is ALL-OR-NOTHING: a partial one (feeCents without netCents)
+      // would default the omitted part independently and break gross = fee + net.
+      const suppliedSnapshot =
+        action.feeCents !== undefined && action.netCents !== undefined;
+      let feeCents: number;
+      let netCents: number;
+      let providerId: string | null;
+      if (
+        action.kind === "sale" &&
+        !action.mock &&
+        state.chosenProvider &&
+        !suppliedSnapshot
+      ) {
+        const computed = computeFee(grossCents, providerById(state.chosenProvider.providerId));
+        feeCents = computed.feeCents;
+        netCents = computed.netCents;
+        providerId = state.chosenProvider.providerId;
+      } else {
+        feeCents = action.feeCents ?? 0;
+        netCents = action.netCents ?? grossCents;
+        providerId = action.providerId ?? null;
+      }
       const entry: LedgerEntry = {
         id: action.id,
         kind: action.kind,
         payer: action.payer,
         amountCents: action.amountCents,
-        grossCents: action.grossCents ?? action.amountCents,
-        feeCents: action.feeCents ?? 0,
-        netCents: action.netCents ?? action.amountCents,
-        providerId: action.providerId ?? null,
+        grossCents,
+        feeCents,
+        netCents,
+        providerId,
         createdAt: action.createdAt,
       };
       let next: GameState = { ...state, ledger: [...state.ledger, entry] };
