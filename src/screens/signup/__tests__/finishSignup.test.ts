@@ -129,4 +129,25 @@ describe("finishSignup — verify → consent → child ordering (FIX 1/4a)", ()
     const res = await finishSignup(deps, REQ);
     expect(res).toEqual({ ok: true, outcome: "confirmation", username: "alex" });
   });
+
+  it("an empty minted username attempts login with '' , fails, and degrades to confirmation (not playing)", async () => {
+    // The mint could not surface a username (empty replay): login by an empty
+    // username fails, so the outcome is the graceful confirmation carrying "".
+    const { deps, order } = makeDeps({
+      createSignupChild: vi.fn(async () => {
+        order.push("child");
+        return { ok: true, childId: "child-1", username: "" } as const;
+      }),
+      loginChildIntoGame: vi.fn(async (identifier: string) => {
+        order.push("login");
+        return identifier !== ""; // login by empty username fails
+      }),
+    });
+    const res = await finishSignup(deps, REQ);
+    // Login was attempted with the empty string ...
+    expect(deps.loginChildIntoGame).toHaveBeenCalledWith("", "kidpassword");
+    // ... and, failing, the outcome is confirmation (never playing), carrying "".
+    expect(res).toEqual({ ok: true, outcome: "confirmation", username: "" });
+    expect(order).toEqual(["verify", "consent", "child", "login"]);
+  });
 });

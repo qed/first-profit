@@ -287,6 +287,43 @@ describe("Signup verify-return", () => {
     expect(screen.getByText(/username you were emailed/i)).toBeTruthy();
   });
 
+  it("the confirmation copy contains no em dash (username-present and empty variants)", async () => {
+    for (const username of ["alex4", ""]) {
+      window.localStorage.clear();
+      savePendingSignup(PENDING_A);
+      const onCompleteVerification = vi.fn(async (_r: CompleteVerificationRequest) => ({
+        ok: true,
+        outcome: "confirmation" as const,
+        username,
+      }));
+      const { container } = render(
+        <Signup verifyToken="tok-em" onCompleteVerification={onCompleteVerification} onExit={vi.fn()} />,
+      );
+      fireEvent.change(screen.getByLabelText("Your password"), { target: { value: "parentpass" } });
+      fireEvent.change(screen.getByLabelText("Alex's password"), { target: { value: "kidpassword" } });
+      fireEvent.click(screen.getByRole("button", { name: /Finish setup/ }));
+      await waitFor(() => expect(screen.getByText("You are all set.")).toBeTruthy());
+      expect(container.textContent).not.toContain("—");
+      cleanup();
+    }
+  });
+
+  it("associates the confirmation username value with its Username label (a11y)", async () => {
+    savePendingSignup(PENDING_A);
+    const onCompleteVerification = vi.fn(async (_r: CompleteVerificationRequest) => ({
+      ok: true,
+      outcome: "confirmation" as const,
+      username: "alex4",
+    }));
+    render(<Signup verifyToken="tok-a11y" onCompleteVerification={onCompleteVerification} onExit={vi.fn()} />);
+    fireEvent.change(screen.getByLabelText("Your password"), { target: { value: "parentpass" } });
+    fireEvent.change(screen.getByLabelText("Alex's password"), { target: { value: "kidpassword" } });
+    fireEvent.click(screen.getByRole("button", { name: /Finish setup/ }));
+    await waitFor(() => expect(screen.getByText("You are all set.")).toBeTruthy());
+    // The value's accessible name is provided by the "Username" label.
+    expect(screen.getByLabelText("Username").textContent).toBe("alex4");
+  });
+
   it("surfaces an error, clears the persisted blob, but stays on the reprompt when completion fails (FIX 2)", async () => {
     savePendingSignup(PENDING_A);
     const onCompleteVerification = vi.fn(async (_r: CompleteVerificationRequest) => ({ ok: false }));

@@ -385,8 +385,8 @@ export function ChildCredential({ data, onChange, onNext, onBack }: ChildCredent
         Set up how your child signs in.
       </h2>
       <p className="mt-2 text-sm leading-[1.6] text-[hsl(25_20%_38%)]">
-        Only a first name ever goes on the public website. You set a password now, and we give your
-        child a username to log in with. We show it on the next-to-last screen and email it to you.
+        Only a first name ever goes on the public website. You set a password now, and First Profit
+        picks a unique username for your child and emails it to you, so you always have it.
       </p>
 
       <TextField

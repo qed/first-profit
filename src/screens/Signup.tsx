@@ -517,10 +517,16 @@ function VerifyReturn({
                 with the username below and the password you set.
               </p>
               <div className="mt-4 rounded-xl border-2 border-[hsl(25_34%_20%/0.15)] bg-white px-4 py-3.5">
-                <p className="font-mono text-[10px] uppercase tracking-[0.08em] text-[hsl(25_20%_38%)]">
+                <p
+                  id="fp-confirm-username-label"
+                  className="font-mono text-[10px] uppercase tracking-[0.08em] text-[hsl(25_20%_38%)]"
+                >
                   Username
                 </p>
-                <p className="mt-1 break-all font-display text-[20px] font-black text-[hsl(25_34%_20%)]">
+                <p
+                  aria-labelledby="fp-confirm-username-label"
+                  className="mt-1 break-all font-display text-[20px] font-black text-[hsl(25_34%_20%)]"
+                >
                   {username}
                 </p>
               </div>
