@@ -10,13 +10,6 @@
  * Copy rule (global product rule): NO em dashes anywhere.
  */
 
-/**
- * R12 credential path. `existing_credential` = parent sets the child's first
- * name + a password (path a). `provision_workspace` = request a provisioned
- * @the120.school address, no password (path b). Values match the backend enum.
- */
-export type CredentialChoice = "existing_credential" | "provision_workspace";
-
 /** Revision 5 age band. Values match the backend `child_age_band` enum. */
 export type AgeBand = "under_13" | "13_to_15" | "16_plus";
 
@@ -41,19 +34,19 @@ export const CHILD_FIRST_NAME_MAX = 80;
 export const JURISDICTION_MIN = 2;
 export const JURISDICTION_MAX = 100;
 
-/** The Workspace domain a provisioned (path b) child address lands under. */
-export const PROVISION_DOMAIN = "the120.school";
-
 /**
  * The signup-LOCAL state the container owns and every screen reads/writes via
  * props. Not the game reducer: this never touches the engine, save, or session.
+ *
+ * (Slice B U15) Every child is created ONE way — a display first name + a
+ * parent-set password — so there is no longer a `credentialChoice`; the child's
+ * login username is minted server-side and shown back on the confirmation.
  */
 export interface SignupData {
   parentName: string;
   parentEmail: string;
   parentPassword: string;
   childFirstName: string;
-  credentialChoice: CredentialChoice;
   childPassword: string;
   ageBand: AgeBand | null;
   dob: string; // ISO yyyy-mm-dd from a native date input
@@ -61,14 +54,13 @@ export interface SignupData {
   consentAccepted: boolean;
 }
 
-/** A blank signup-local state (path a is the default credential choice). */
+/** A blank signup-local state. */
 export function emptySignupData(): SignupData {
   return {
     parentName: "",
     parentEmail: "",
     parentPassword: "",
     childFirstName: "",
-    credentialChoice: "existing_credential",
     childPassword: "",
     ageBand: null,
     dob: "",
@@ -86,74 +78,7 @@ export function isValidEmail(email: string): boolean {
   return EMAIL_RE.test(email.trim());
 }
 
-/**
- * Non-decomposable Latin letters the backend transliterates explicitly (it must
- * not silently drop them). Mirrors The120 `fw-provision-rules.foldToAscii` so the
- * preview matches what the backend will mint. Kept in sync by hand — the backend
- * is the source of truth.
- */
-const LATIN_TRANSLITERATIONS: ReadonlyArray<readonly [RegExp, string]> = [
-  [/ß/g, "ss"],
-  [/æ/g, "ae"],
-  [/œ/g, "oe"],
-  [/ø/g, "o"],
-  [/ð/g, "d"],
-  [/đ/g, "d"],
-  [/þ/g, "th"],
-  [/ł/g, "l"],
-  [/ı/g, "i"],
-  [/ŋ/g, "n"],
-];
-
-/** Cap per name part, mirroring the backend FW_NAME_PART_MAX (64-octet safety). */
-const NAME_PART_MAX = 24;
-
-/**
- * Slug a first name into the provisioned-address local part, aligned with the
- * backend's FIRST-NAME-ONLY deriver (`deriveStudentLocalBaseFromFirstName` →
- * `buildFwLocalBaseFromFirstName`, Slice B Unit 11): NFKC compose, lowercase,
- * strip diacritics (NFD + remove combining marks), transliterate the
- * non-decomposable Latin letters, drop elision marks, then level every remaining
- * non-alphanumeric run to a single hyphen, trim, and cap at NAME_PART_MAX. So
- * `Jose` → `jose`, `Ann-Marie` → `ann-marie`, `Weiß` → `weiss` — exactly the base
- * the backend mints (before its collision suffix).
- *
- * RESIDUAL DIFFERENCE (preview only): the backend REFUSES a name with no
- * address-safe characters after folding (empty / non-Latin script / a homoglyph)
- * — those park server-side as underivable. This client preview instead best-effort
- * folds and falls back to `student` (see derivedProvisionAddress), because it only
- * shows a shape and never mints; the real address is always minted server-side.
- */
-export function slugifyName(name: string): string {
-  let folded = name
-    .normalize("NFKC")
-    .toLowerCase()
-    .normalize("NFD")
-    .replace(/\p{M}+/gu, "");
-  for (const [pattern, replacement] of LATIN_TRANSLITERATIONS) {
-    folded = folded.replace(pattern, replacement);
-  }
-  folded = folded.replace(/['’ʼ`´]/g, ""); // O'Brien -> obrien
-  return folded
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "")
-    .slice(0, NAME_PART_MAX)
-    .replace(/-+$/g, "");
-}
-
-/**
- * The provisioned (path b) address preview. Format only — the real address is
- * minted server-side (Unit 5), where it is also collision-suffixed (alex, alex2,
- * ...), which this client cannot predict; the preview shows the un-suffixed base,
- * so the copy phrases it as the address the child will get "or similar". Aligned
- * with the backend's first-name-only slug so the base shown equals what the
- * backend derives.
- */
-export function derivedProvisionAddress(firstName: string): string {
-  return `${slugifyName(firstName) || "student"}@${PROVISION_DOMAIN}`;
-}
-
-/** True once the child's own password clears the min-length floor (path a). */
+/** True once the child's own password clears the min-length floor. */
 export function isChildPasswordValid(password: string): boolean {
   return password.length >= CHILD_PASSWORD_MIN;
 }
@@ -249,11 +174,8 @@ export function canContinueAge(d: SignupData): boolean {
 export function canContinueCredential(d: SignupData): boolean {
   const firstName = d.childFirstName.trim();
   if (firstName.length === 0 || firstName.length > CHILD_FIRST_NAME_MAX) return false;
-  if (d.credentialChoice === "existing_credential") {
-    return isChildPasswordValid(d.childPassword);
-  }
-  // provision_workspace: no password is entered on this path.
-  return true;
+  // Single path (U15): a valid first name AND a password clearing the min floor.
+  return isChildPasswordValid(d.childPassword);
 }
 
 export function canContinueConsent(d: SignupData): boolean {
@@ -270,11 +192,8 @@ export interface SignupSubmission {
   };
   child: {
     firstName: string;
-    credentialChoice: CredentialChoice;
-    /** Path a only; null on the provision path (no password entered). */
-    password: string | null;
-    /** Path b only; null on the credential path. Format preview of the address. */
-    provisionAddress: string | null;
+    /** The parent-set child password (single path, U15; always present). */
+    password: string;
     ageBand: AgeBand;
     dob: string;
   };
@@ -297,9 +216,9 @@ export interface ConsentMeta {
 }
 
 /**
- * Assemble the backend-contract payload from signup-local state. Path a carries
- * a child password and no provision address; path b carries a provision-address
- * preview and a null password. The `ageBand` gate is RE-CHECKED here (not merely
+ * Assemble the backend-contract payload from signup-local state. Single path
+ * (U15): the child carries the parent-set first name + password (no credential
+ * choice, no provision address). The `ageBand` gate is RE-CHECKED here (not merely
  * asserted): the container only submits once `canContinueAge` passed, but a null
  * band must never reach the wire as `ageBand: null` (the backend enum rejects it
  * and the record would be self-contradictory), so we fail loudly instead.
@@ -310,7 +229,6 @@ export function buildSubmission(d: SignupData, consent: ConsentMeta): SignupSubm
       "buildSubmission requires a non-null ageBand; the age-step gate must pass before submit",
     );
   }
-  const isProvision = d.credentialChoice === "provision_workspace";
   return {
     parent: {
       name: d.parentName.trim(),
@@ -319,9 +237,7 @@ export function buildSubmission(d: SignupData, consent: ConsentMeta): SignupSubm
     },
     child: {
       firstName: d.childFirstName.trim(),
-      credentialChoice: d.credentialChoice,
-      password: isProvision ? null : d.childPassword,
-      provisionAddress: isProvision ? derivedProvisionAddress(d.childFirstName) : null,
+      password: d.childPassword,
       ageBand: d.ageBand,
       dob: d.dob,
     },

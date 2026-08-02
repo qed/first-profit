@@ -52,7 +52,8 @@ function fillAge() {
   fireEvent.click(screen.getByRole("button", { name: /Continue/ }));
 }
 
-function fillCredentialPathA() {
+/** Drive the single credential step: a first name + a child password. */
+function fillCredential() {
   fireEvent.change(screen.getByPlaceholderText("Alex"), { target: { value: "Alex" } });
   fireEvent.change(screen.getByLabelText("Password for your child"), {
     target: { value: "kidpassword" },
@@ -61,13 +62,13 @@ function fillCredentialPathA() {
 }
 
 describe("Signup container", () => {
-  it("walks all four steps and submits the backend-contract shape (path a)", async () => {
+  it("walks all four steps and submits the backend-contract shape (single path)", async () => {
     const onSubmitSignup = vi.fn(async (_s: SignupSubmission) => ({ ok: true }));
     render(<Signup onSubmitSignup={onSubmitSignup} onExit={vi.fn()} />);
 
     fillParent();
     fillAge();
-    fillCredentialPathA();
+    fillCredential();
 
     // Consent step: attest, then submit.
     expect(screen.getByText("Step 4 of 5 · Your consent")).toBeTruthy();
@@ -77,38 +78,33 @@ describe("Signup container", () => {
     await waitFor(() => expect(onSubmitSignup).toHaveBeenCalledTimes(1));
     const submission = onSubmitSignup.mock.calls[0][0] as SignupSubmission;
     expect(submission.parent.email).toBe("sam@example.com");
-    expect(submission.child.credentialChoice).toBe("existing_credential");
-    expect(submission.child.password).toBe("kidpassword");
-    expect(submission.child.provisionAddress).toBeNull();
-    expect(submission.child.ageBand).toBe("13_to_15");
-    expect(submission.child.dob).toBe(AGE_DOB);
+    // Single path (U15): no credentialChoice, no provisionAddress — just the
+    // parent-set first name + password.
+    expect(submission.child).toEqual({
+      firstName: "Alex",
+      password: "kidpassword",
+      ageBand: "13_to_15",
+      dob: AGE_DOB,
+    });
     expect(submission.jurisdiction).toBe("California, US");
     expect(submission.consent.accepted).toBe(true);
     expect(submission.consent.policyNamespace).toBe("fp_parental_consent");
     expect(submission.consent.method).toBe("email_plus_attestation");
 
-    // On success the container shows the confirmation.
+    // On success the container shows the email-wait screen.
     await waitFor(() => expect(screen.getByText("Check your email.")).toBeTruthy());
   });
 
-  it("submits path b with a provision address and no password", async () => {
-    const onSubmitSignup = vi.fn(async (_s: SignupSubmission) => ({ ok: true }));
-    render(<Signup onSubmitSignup={onSubmitSignup} onExit={vi.fn()} />);
-
+  it("has no login-method choice or school-email option on the credential step", () => {
+    render(<Signup onSubmitSignup={vi.fn(async () => ({ ok: true }))} onExit={vi.fn()} />);
     fillParent();
     fillAge();
-    fireEvent.change(screen.getByPlaceholderText("Alex"), { target: { value: "Robin" } });
-    fireEvent.click(screen.getByRole("radio", { name: /Give them a school email/ }));
-    fireEvent.click(screen.getByRole("button", { name: /Continue/ }));
-
-    fireEvent.click(screen.getByRole("checkbox"));
-    fireEvent.click(screen.getByRole("button", { name: /Create my child's account/ }));
-
-    await waitFor(() => expect(onSubmitSignup).toHaveBeenCalledTimes(1));
-    const submission = onSubmitSignup.mock.calls[0][0] as SignupSubmission;
-    expect(submission.child.credentialChoice).toBe("provision_workspace");
-    expect(submission.child.password).toBeNull();
-    expect(submission.child.provisionAddress).toBe("robin@the120.school");
+    // The single credential step: a first name + a password, and nothing else.
+    expect(screen.getByPlaceholderText("Alex")).toBeTruthy();
+    expect(screen.getByLabelText("Password for your child")).toBeTruthy();
+    expect(screen.queryByRole("radiogroup", { name: /Login method/i })).toBeNull();
+    expect(screen.queryByRole("radio", { name: /school email/i })).toBeNull();
+    expect(screen.queryByText(/the120\.school/i)).toBeNull();
   });
 
   it("exits to landing from step 1 back, and step 2 back returns to step 1", () => {
@@ -133,7 +129,7 @@ describe("Signup container", () => {
     render(<Signup onSubmitSignup={onSubmitSignup} onExit={vi.fn()} />);
     fillParent();
     fillAge();
-    fillCredentialPathA();
+    fillCredential();
     fireEvent.click(screen.getByRole("checkbox"));
     const cta = screen.getByRole("button", { name: /Creating account|Create my child's account/ });
     fireEvent.click(cta);
@@ -149,7 +145,7 @@ describe("Signup container", () => {
     render(<Signup onSubmitSignup={onSubmitSignup} onExit={vi.fn()} />);
     fillParent();
     fillAge();
-    fillCredentialPathA();
+    fillCredential();
     fireEvent.click(screen.getByRole("checkbox"));
     fireEvent.click(screen.getByRole("button", { name: /Create my child's account/ }));
     await waitFor(() => expect(screen.getByRole("alert")).toBeTruthy());
@@ -161,7 +157,7 @@ describe("Signup container", () => {
     render(<Signup onSubmitSignup={onSubmitSignup} onExit={vi.fn()} />);
     fillParent();
     fillAge();
-    fillCredentialPathA();
+    fillCredential();
     fireEvent.click(screen.getByRole("checkbox"));
     fireEvent.click(screen.getByRole("button", { name: /Create my child's account/ }));
 
@@ -171,7 +167,7 @@ describe("Signup container", () => {
       attemptId: "attempt-9",
       parentEmail: "sam@example.com",
       jurisdiction: "California, US",
-      child: { firstName: "Alex", credentialChoice: "existing_credential", ageBand: "13_to_15", dob: AGE_DOB },
+      child: { firstName: "Alex", ageBand: "13_to_15", dob: AGE_DOB },
       consent: {
         policyVersion: "2026-08-01.1",
         method: "email_plus_attestation",
@@ -190,7 +186,7 @@ const PENDING_A: PendingSignup = {
   attemptId: "attempt-9",
   parentEmail: "sam@example.com",
   createdAt: Date.now(),
-  child: { firstName: "Alex", credentialChoice: "existing_credential", ageBand: "13_to_15", dob: "2011-05-04" },
+  child: { firstName: "Alex", ageBand: "13_to_15", dob: "2011-05-04" },
   jurisdiction: "California, US",
   consent: { policyVersion: "2026-08-01.1", policyHash: "f".repeat(64), method: "email_plus_attestation" },
 };
@@ -198,10 +194,10 @@ const PENDING_A: PendingSignup = {
 describe("Signup verify-return", () => {
   beforeEach(() => window.localStorage.clear());
 
-  it("reprompts BOTH passwords (NOT prefilled) and completes the mint (path a -> playing)", async () => {
+  it("reprompts BOTH passwords (NOT prefilled) and completes the mint (single path -> playing)", async () => {
     savePendingSignup(PENDING_A);
     const onCompleteVerification = vi.fn(
-      async (_r: CompleteVerificationRequest) => ({ ok: true, outcome: "playing" as const }),
+      async (_r: CompleteVerificationRequest) => ({ ok: true, outcome: "playing" as const, username: "alex" }),
     );
     render(<Signup verifyToken="tok-123" onCompleteVerification={onCompleteVerification} onExit={vi.fn()} />);
 
@@ -218,7 +214,7 @@ describe("Signup verify-return", () => {
     const cta = screen.getByRole("button", { name: /Finish setup/ });
     expect((cta as HTMLButtonElement).disabled).toBe(true);
 
-    // Only the parent password → still disabled (path a needs the child password).
+    // Only the parent password → still disabled (the child password is required too).
     fireEvent.change(pw, { target: { value: "parentpass" } });
     expect((cta as HTMLButtonElement).disabled).toBe(true);
     fireEvent.change(childPw, { target: { value: "kidpassword" } });
@@ -238,7 +234,6 @@ describe("Signup verify-return", () => {
       },
       child: {
         firstName: "Alex",
-        credentialChoice: "existing_credential",
         ageBand: "13_to_15",
         dob: "2011-05-04",
         password: "kidpassword",
@@ -248,30 +243,85 @@ describe("Signup verify-return", () => {
     await waitFor(() => expect(loadPendingSignup()).toBeNull());
   });
 
-  it("path b (provision) needs only the parent password and resolves to the setup-email confirmation", async () => {
-    savePendingSignup({
-      attemptId: "attempt-b",
-      parentEmail: "sam@example.com",
-      createdAt: Date.now(),
-      child: { firstName: "Robin", credentialChoice: "provision_workspace", ageBand: "16_plus" },
-      jurisdiction: "California, US",
-      consent: { policyVersion: "2026-08-01.1", policyHash: "f".repeat(64), method: "email_plus_attestation" },
-    });
+  it("a login-race confirmation reveals the generated username to the parent", async () => {
+    savePendingSignup(PENDING_A);
     const onCompleteVerification = vi.fn(
-      async (_r: CompleteVerificationRequest) => ({ ok: true, outcome: "confirmation" as const }),
+      async (_r: CompleteVerificationRequest) => ({
+        ok: true,
+        outcome: "confirmation" as const,
+        username: "alex4",
+      }),
     );
-    render(<Signup verifyToken="tok-b" onCompleteVerification={onCompleteVerification} onExit={vi.fn()} />);
+    render(<Signup verifyToken="tok-c" onCompleteVerification={onCompleteVerification} onExit={vi.fn()} />);
 
-    // Path b renders NO child-password field.
-    expect(screen.queryByLabelText("Robin's password")).toBeNull();
     fireEvent.change(screen.getByLabelText("Your password"), { target: { value: "parentpass" } });
+    fireEvent.change(screen.getByLabelText("Alex's password"), { target: { value: "kidpassword" } });
     fireEvent.click(screen.getByRole("button", { name: /Finish setup/ }));
 
     await waitFor(() => expect(screen.getByText("You are all set.")).toBeTruthy());
-    // Path b confirmation copy references the provisioned address / setup email.
-    expect(screen.getByText(/school sign-in address/i)).toBeTruthy();
-    expect(onCompleteVerification.mock.calls[0][0].child.password).toBeUndefined();
+    // The confirmation shows the child's login username prominently, under a
+    // "Username" label (exact-case, unique to the label — the body copy uses
+    // lowercase "username").
+    expect(screen.getByText("alex4")).toBeTruthy();
+    expect(screen.getByText("Username")).toBeTruthy();
     expect(loadPendingSignup()).toBeNull();
+  });
+
+  it("a confirmation with no username degrades to a graceful fallback line (never blank)", async () => {
+    savePendingSignup(PENDING_A);
+    const onCompleteVerification = vi.fn(
+      async (_r: CompleteVerificationRequest) => ({
+        ok: true,
+        outcome: "confirmation" as const,
+        username: "",
+      }),
+    );
+    render(<Signup verifyToken="tok-d" onCompleteVerification={onCompleteVerification} onExit={vi.fn()} />);
+
+    fireEvent.change(screen.getByLabelText("Your password"), { target: { value: "parentpass" } });
+    fireEvent.change(screen.getByLabelText("Alex's password"), { target: { value: "kidpassword" } });
+    fireEvent.click(screen.getByRole("button", { name: /Finish setup/ }));
+
+    await waitFor(() => expect(screen.getByText("You are all set.")).toBeTruthy());
+    // Fallback copy points the parent to the emailed username; still names the child.
+    expect(screen.getByText(/username you were emailed/i)).toBeTruthy();
+  });
+
+  it("the confirmation copy contains no em dash (username-present and empty variants)", async () => {
+    for (const username of ["alex4", ""]) {
+      window.localStorage.clear();
+      savePendingSignup(PENDING_A);
+      const onCompleteVerification = vi.fn(async (_r: CompleteVerificationRequest) => ({
+        ok: true,
+        outcome: "confirmation" as const,
+        username,
+      }));
+      const { container } = render(
+        <Signup verifyToken="tok-em" onCompleteVerification={onCompleteVerification} onExit={vi.fn()} />,
+      );
+      fireEvent.change(screen.getByLabelText("Your password"), { target: { value: "parentpass" } });
+      fireEvent.change(screen.getByLabelText("Alex's password"), { target: { value: "kidpassword" } });
+      fireEvent.click(screen.getByRole("button", { name: /Finish setup/ }));
+      await waitFor(() => expect(screen.getByText("You are all set.")).toBeTruthy());
+      expect(container.textContent).not.toContain("—");
+      cleanup();
+    }
+  });
+
+  it("associates the confirmation username value with its Username label (a11y)", async () => {
+    savePendingSignup(PENDING_A);
+    const onCompleteVerification = vi.fn(async (_r: CompleteVerificationRequest) => ({
+      ok: true,
+      outcome: "confirmation" as const,
+      username: "alex4",
+    }));
+    render(<Signup verifyToken="tok-a11y" onCompleteVerification={onCompleteVerification} onExit={vi.fn()} />);
+    fireEvent.change(screen.getByLabelText("Your password"), { target: { value: "parentpass" } });
+    fireEvent.change(screen.getByLabelText("Alex's password"), { target: { value: "kidpassword" } });
+    fireEvent.click(screen.getByRole("button", { name: /Finish setup/ }));
+    await waitFor(() => expect(screen.getByText("You are all set.")).toBeTruthy());
+    // The value's accessible name is provided by the "Username" label.
+    expect(screen.getByLabelText("Username").textContent).toBe("alex4");
   });
 
   it("surfaces an error, clears the persisted blob, but stays on the reprompt when completion fails (FIX 2)", async () => {
@@ -310,7 +360,7 @@ describe("Signup assembled flow + progress bar (Unit 10)", () => {
     expect(screen.getByRole("img", { name: "Step 2 of 5" })).toBeTruthy();
     fillAge();
     expect(screen.getByRole("img", { name: "Step 3 of 5" })).toBeTruthy();
-    fillCredentialPathA();
+    fillCredential();
     expect(screen.getByRole("img", { name: "Step 4 of 5" })).toBeTruthy();
   });
 
@@ -318,23 +368,24 @@ describe("Signup assembled flow + progress bar (Unit 10)", () => {
     render(<Signup onSubmitSignup={vi.fn(async () => ({ ok: true, attemptId: "a1" }))} onExit={vi.fn()} />);
     fillParent();
     fillAge();
-    fillCredentialPathA();
+    fillCredential();
     fireEvent.click(screen.getByRole("checkbox"));
     fireEvent.click(screen.getByRole("button", { name: /Create my child's account/ }));
     await waitFor(() => expect(screen.getByText("Check your email.")).toBeTruthy());
     expect(screen.getByRole("img", { name: "Step 5 of 5" })).toBeTruthy();
   });
 
-  it("path a: a full walk from the form through the email return mints and enters the game (playing)", async () => {
+  it("a full walk from the form through the email return mints and enters the game (playing)", async () => {
     const start = vi.fn(async () => ({ ok: true, attemptId: "a1" }));
     const finish = vi.fn(async (_r: CompleteVerificationRequest) => ({
       ok: true,
       outcome: "playing" as const,
+      username: "alex",
     }));
     const { rerender } = render(<Signup onSubmitSignup={start} onExit={vi.fn()} />);
     fillParent();
     fillAge();
-    fillCredentialPathA();
+    fillCredential();
     fireEvent.click(screen.getByRole("checkbox"));
     fireEvent.click(screen.getByRole("button", { name: /Create my child's account/ }));
     await waitFor(() => expect(screen.getByText("Check your email.")).toBeTruthy());
@@ -346,34 +397,9 @@ describe("Signup assembled flow + progress bar (Unit 10)", () => {
     fireEvent.change(screen.getByLabelText("Alex's password"), { target: { value: "kidpassword" } });
     fireEvent.click(screen.getByRole("button", { name: /Finish setup/ }));
     await waitFor(() => expect(finish).toHaveBeenCalledTimes(1));
-    expect(finish.mock.calls[0][0].child.credentialChoice).toBe("existing_credential");
+    expect(finish.mock.calls[0][0].child.password).toBe("kidpassword");
     // playing = the game took over; the container cleared the pending blob.
     await waitFor(() => expect(loadPendingSignup()).toBeNull());
-  });
-
-  it("path b: a full walk through the email return resolves to the setup-email confirmation", async () => {
-    const start = vi.fn(async () => ({ ok: true, attemptId: "b1" }));
-    const finish = vi.fn(async (_r: CompleteVerificationRequest) => ({
-      ok: true,
-      outcome: "confirmation" as const,
-    }));
-    const { rerender } = render(<Signup onSubmitSignup={start} onExit={vi.fn()} />);
-    fillParent();
-    fillAge();
-    fireEvent.change(screen.getByPlaceholderText("Alex"), { target: { value: "Robin" } });
-    fireEvent.click(screen.getByRole("radio", { name: /Give them a school email/ }));
-    fireEvent.click(screen.getByRole("button", { name: /Continue/ }));
-    fireEvent.click(screen.getByRole("checkbox"));
-    fireEvent.click(screen.getByRole("button", { name: /Create my child's account/ }));
-    await waitFor(() => expect(screen.getByText("Check your email.")).toBeTruthy());
-    rerender(<Signup verifyToken="tok" onCompleteVerification={finish} onExit={vi.fn()} />);
-    // Path b reprompts ONLY the parent password (no child-password field).
-    expect(screen.queryByLabelText("Robin's password")).toBeNull();
-    fireEvent.change(screen.getByLabelText("Your password"), { target: { value: "parentpass" } });
-    fireEvent.click(screen.getByRole("button", { name: /Finish setup/ }));
-    await waitFor(() => expect(screen.getByText("You are all set.")).toBeTruthy());
-    expect(screen.getByText(/school sign-in address/i)).toBeTruthy();
-    expect(finish.mock.calls[0][0].child.password).toBeUndefined();
   });
 
   it("existing_account routes to the sign-in interruption (not a generic error) and fires onGoToLogin", async () => {
@@ -382,7 +408,7 @@ describe("Signup assembled flow + progress bar (Unit 10)", () => {
     render(<Signup onSubmitSignup={start} onGoToLogin={onGoToLogin} onExit={vi.fn()} />);
     fillParent();
     fillAge();
-    fillCredentialPathA();
+    fillCredential();
     fireEvent.click(screen.getByRole("checkbox"));
     fireEvent.click(screen.getByRole("button", { name: /Create my child's account/ }));
     await waitFor(() => expect(screen.getByText("You may already have an account.")).toBeTruthy());

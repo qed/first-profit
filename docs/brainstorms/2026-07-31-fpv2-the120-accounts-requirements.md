@@ -263,11 +263,23 @@ Two slices, so a playable increment exists before the cross-repo funnel is done:
   (R18–R20), first-run in-game onboarding for existing The120 children (R5),
   mock checkout (R23). The120-side work: the FP tables, the login/profile route,
   and the parent-triggered reset route.
-- **Slice B — Start Building:** the self-serve signup and provisioning path
-  (R9–R17) plus parent emails (R26–R28).
+- **Slice B — Start Building:** the self-serve signup + login path (R9–R17)
+  plus parent emails (R26–R28). **AMENDED 2026-08-01:** children get an
+  auto-generated **unique First Profit username** (no email) and log in with
+  that username + password. The child-email and Workspace-provisioning paths
+  (R12(a)/(b), R13) are **deferred** to the "Student email addresses" piece
+  below — Slice B has no Google Workspace dependency.
 - Payment Phases 2–3 (R24–R25) follow as their own plans. `/fp` child-facing
   retirement happens when fpv2 reaches parity for child-used flows (its own
   small plan on The120's side).
+- **Student email addresses (firstprofit.school):** provision real Google
+  Workspace mailboxes for students under the `firstprofit.school` domain —
+  moving ALL student mailbox addresses (First Profit signup students AND the
+  existing FW/funnel students) off `the120.school` — and re-introducing the
+  child-email / provision-an-address paths (R12(a)/(b), R13). Security-touching
+  and shared-system (it changes the `auth-mail-guard` and the pre-existing
+  FW/funnel provisioning product), so it gets its **own branch and own review**.
+  Sequenced **after** the `/fp` retirement.
 
 ## Success Criteria
 
@@ -429,6 +441,31 @@ provisioning). These override the minimal framing above where they conflict:
   recognizable test-origin marker + a cleanup path), matching how Slice A applied
   migrations to prod. Planning defines the tagging + teardown so test data never
   pollutes real CRM/funnel state.
+
+## Amendment 2026-08-01: username-based login; email/provisioning deferred
+
+Discovered during Slice B go-live: real Google Workspace provisioning was never
+configured in production (no SA key), and standing it up is a security-touching,
+shared-system change that also implicates the student mailbox DOMAIN. Rather than
+block Slice B on it, the child-login model is simplified and the whole email story
+is carved into its own roadmap piece.
+
+- **Slice B now: auto-generated unique username, no email.** When a child is
+  created, First Profit assigns a **unique username** derived from the first name
+  via the existing slug machinery (`alex`, `alex2`, …) — surfaced to the parent at
+  signup. The child logs into First Profit with **username + password**. No email
+  address (deliverable or `.invalid`-internal) is required for the login model, and
+  Slice B has **no Google Workspace dependency**. This supersedes the R12(a)/(b)
+  email-credential paths and R13 provisioning-timing for Slice B.
+- **The signup UI drops the path-a/path-b choice** — it becomes a single
+  username + password step. (The "give them a school email" option returns with the
+  future piece.)
+- **The email story is its own future piece** (see Build Sequencing, after `/fp`
+  retirement): provisioning real `firstprofit.school` mailboxes for ALL students
+  (First Profit + FW/funnel), moving every student mailbox domain off
+  `the120.school`, updating the `auth-mail-guard`, and re-introducing R12(a)/(b) +
+  R13. Its own branch, its own review. The Slice B "real Workspace provisioning end
+  to end" decision above is thereby **deferred to that piece**, not dropped.
 
 ## Next Steps
 

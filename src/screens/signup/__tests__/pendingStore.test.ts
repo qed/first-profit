@@ -16,7 +16,6 @@ const SAMPLE: PendingSignup = {
   createdAt: NOW,
   child: {
     firstName: "Alex",
-    credentialChoice: "existing_credential",
     ageBand: "13_to_15",
     dob: "2011-05-04",
   },
@@ -84,17 +83,6 @@ describe("pendingStore", () => {
     expect(loadPendingSignup(NOW)).toBeNull();
     // Missing the new required fields (createdAt / consent / ageBand / jurisdiction).
     window.localStorage.setItem("fp:signup:pending", JSON.stringify({ parentEmail: "x" }));
-    expect(loadPendingSignup(NOW)).toBeNull();
-    window.localStorage.setItem(
-      "fp:signup:pending",
-      JSON.stringify({
-        parentEmail: "x",
-        createdAt: NOW,
-        jurisdiction: "US",
-        child: { firstName: "A", credentialChoice: "bogus", ageBand: "13_to_15" },
-        consent: { policyVersion: "v", policyHash: "h", method: "m" },
-      }),
-    );
     expect(loadPendingSignup(NOW)).toBeNull();
     // A valid child shape but a bogus age band is rejected too.
     window.localStorage.setItem(

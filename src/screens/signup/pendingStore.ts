@@ -12,10 +12,10 @@
  * SECURITY (Unit 9 review, FIX 2): NO PASSWORD is EVER persisted — neither the
  * parent's nor the child's. Both are re-prompted on the verify-return screen (the
  * "different tab / after reload" reprompt). The blob carries only non-secret
- * carry-forward: the attempt id, the parent email, the child's first name + path
- * + age band + DOB, the jurisdiction, and the consent policy echo (version + hash
- * + method) — which are validated-then-discarded server-side at START, so they
- * must ride the client to reach the consent-record step.
+ * carry-forward: the attempt id, the parent email, the child's first name + age
+ * band + DOB, the jurisdiction, and the consent policy echo (version + hash +
+ * method) — which are validated-then-discarded server-side at START, so they must
+ * ride the client to reach the consent-record step.
  *
  * TTL (FIX 2): the blob is stamped with `createdAt`; a blob older than
  * `PENDING_TTL_MS` is treated as absent (a stale, abandoned signup degrades to
@@ -28,7 +28,7 @@
  * message rather than a broken mint.
  */
 
-import type { SignupAgeBand, SignupCredentialChoice } from "../../lib/auth";
+import type { SignupAgeBand } from "../../lib/auth";
 
 const PENDING_KEY = "fp:signup:pending";
 
@@ -44,7 +44,6 @@ export interface PendingSignup {
   createdAt: number;
   child: {
     firstName: string;
-    credentialChoice: SignupCredentialChoice;
     /** The validated age band (echoed to the consent-record step). */
     ageBand: SignupAgeBand;
     /** ISO yyyy-mm-dd; optional (the age band is the required signal). */
@@ -93,8 +92,6 @@ export function loadPendingSignup(now: number = Date.now()): PendingSignup | nul
       typeof parsed.child !== "object" ||
       parsed.child === null ||
       typeof parsed.child.firstName !== "string" ||
-      (parsed.child.credentialChoice !== "existing_credential" &&
-        parsed.child.credentialChoice !== "provision_workspace") ||
       !AGE_BANDS.includes(parsed.child.ageBand as SignupAgeBand) ||
       typeof parsed.consent !== "object" ||
       parsed.consent === null ||
@@ -112,7 +109,6 @@ export function loadPendingSignup(now: number = Date.now()): PendingSignup | nul
       createdAt: parsed.createdAt,
       child: {
         firstName: parsed.child.firstName,
-        credentialChoice: parsed.child.credentialChoice,
         ageBand: parsed.child.ageBand as SignupAgeBand,
         dob: typeof parsed.child.dob === "string" ? parsed.child.dob : undefined,
       },

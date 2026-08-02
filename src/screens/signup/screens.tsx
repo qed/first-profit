@@ -10,7 +10,7 @@
  * Screens here:
  *   1 · SignupIntro       (parent account: name + email + password, value prop)
  *   2 · AgeJurisdiction   (age band + DOB + parent-declared jurisdiction)
- *   3 · ChildCredential   (path a: first name + password >=10 | path b: provision)
+ *   3 · ChildCredential   (child first name + a password >=10; single path, U15)
  *   4 · ConsentScreen     (rendered versioned policy + attestation gate)
  *
  * Copy rule (global product rule): NO em dashes anywhere.
@@ -32,12 +32,10 @@ import {
   canContinueConsent,
   canContinueCredential,
   canContinueParent,
-  derivedProvisionAddress,
   isChildPasswordValid,
   isDobConsistentWithBand,
   isValidDob,
   type AgeBand,
-  type CredentialChoice,
   type SignupData,
 } from "./validation";
 import {
@@ -366,7 +364,7 @@ export function AgeJurisdiction({ data, onChange, onNext, onBack }: AgeJurisdict
   );
 }
 
-// ── Screen 3 · Child credential (path a / path b) ────────────────────────────
+// ── Screen 3 · Child credential (single username+password path, U15) ─────────
 
 export interface ChildCredentialProps {
   data: SignupData;
@@ -377,8 +375,6 @@ export interface ChildCredentialProps {
 
 export function ChildCredential({ data, onChange, onNext, onBack }: ChildCredentialProps) {
   const canContinue = canContinueCredential(data);
-  const setChoice = (credentialChoice: CredentialChoice) => onChange({ credentialChoice });
-  const isProvision = data.credentialChoice === "provision_workspace";
   const pwEntered = data.childPassword.length > 0;
   const pwTooShort = pwEntered && !isChildPasswordValid(data.childPassword);
 
@@ -386,10 +382,11 @@ export function ChildCredential({ data, onChange, onNext, onBack }: ChildCredent
     <>
       <StepKicker text="Step 3 of 5 · How they log in" color="hsl(265 52% 48%)" />
       <h2 className="mt-2 font-display text-[26px] font-black leading-[1.15] text-[hsl(25_34%_20%)]">
-        How will your child sign in?
+        Set up how your child signs in.
       </h2>
       <p className="mt-2 text-sm leading-[1.6] text-[hsl(25_20%_38%)]">
-        Only a first name ever goes on the public website. Pick how they log in.
+        Only a first name ever goes on the public website. You set a password now, and First Profit
+        picks a unique username for your child and emails it to you, so you always have it.
       </p>
 
       <TextField
@@ -403,78 +400,20 @@ export function ChildCredential({ data, onChange, onNext, onBack }: ChildCredent
         className="mt-6"
       />
 
-      <div
-        className="mt-5 grid grid-cols-1 gap-2"
-        role="radiogroup"
-        aria-label="Login method"
-      >
-        <button
-          type="button"
-          role="radio"
-          aria-checked={!isProvision}
-          onClick={() => setChoice("existing_credential")}
-          className={`min-h-[52px] rounded-xl border-2 px-4 py-3 text-left transition-colors ${
-            !isProvision
-              ? "border-verified bg-[hsl(150_52%_42%/0.08)]"
-              : "border-[hsl(25_34%_20%/0.15)] bg-white hover:border-[hsl(25_34%_20%/0.3)]"
-          }`}
-        >
-          <span className="block font-display text-[16px] font-bold text-[hsl(25_34%_20%)]">
-            Set a password now
-          </span>
-          <span className="mt-0.5 block text-[12.5px] leading-[1.5] text-[hsl(25_20%_38%)]">
-            You choose a first name and password. Your child logs in with those.
-          </span>
-        </button>
-        <button
-          type="button"
-          role="radio"
-          aria-checked={isProvision}
-          onClick={() => setChoice("provision_workspace")}
-          className={`min-h-[52px] rounded-xl border-2 px-4 py-3 text-left transition-colors ${
-            isProvision
-              ? "border-verified bg-[hsl(150_52%_42%/0.08)]"
-              : "border-[hsl(25_34%_20%/0.15)] bg-white hover:border-[hsl(25_34%_20%/0.3)]"
-          }`}
-        >
-          <span className="block font-display text-[16px] font-bold text-[hsl(25_34%_20%)]">
-            Give them a school email
-          </span>
-          <span className="mt-0.5 block text-[12.5px] leading-[1.5] text-[hsl(25_20%_38%)]">
-            We create a managed {"@" + "the120.school"} address. No password to pick now.
-          </span>
-        </button>
-      </div>
-
-      {!isProvision ? (
-        <PasswordField
-          id="fp-child-password"
-          label="Password for your child"
-          value={data.childPassword}
-          onChange={(v) => onChange({ childPassword: v })}
-          autoComplete="new-password"
-          hint={
-            pwTooShort ? (
-              <span className="text-sell">At least {CHILD_PASSWORD_MIN} characters. Keep going.</span>
-            ) : (
-              `At least ${CHILD_PASSWORD_MIN} characters, so it is safe for a kid to use.`
-            )
-          }
-        />
-      ) : (
-        <div className="mt-4 rounded-xl border-2 border-dashed border-[hsl(25_34%_20%/0.15)] bg-white px-3.5 py-3.5">
-          <p className="font-mono text-[10px] uppercase tracking-[0.08em] text-[hsl(25_20%_38%)]">
-            Their address will look like
-          </p>
-          <p className="mt-1 break-all font-mono text-[14px] font-bold text-[hsl(25_34%_20%)]">
-            {derivedProvisionAddress(data.childFirstName)}
-          </p>
-          <p className="mt-2 text-[12.5px] leading-[1.5] text-[hsl(25_20%_38%)]">
-            We set it up after you finish. You will get the sign-in details by email. Nothing to
-            remember right now.
-          </p>
-        </div>
-      )}
+      <PasswordField
+        id="fp-child-password"
+        label="Password for your child"
+        value={data.childPassword}
+        onChange={(v) => onChange({ childPassword: v })}
+        autoComplete="new-password"
+        hint={
+          pwTooShort ? (
+            <span className="text-sell">At least {CHILD_PASSWORD_MIN} characters. Keep going.</span>
+          ) : (
+            `At least ${CHILD_PASSWORD_MIN} characters, so it is safe for a kid to use.`
+          )
+        }
+      />
 
       <GreenCta onClick={onNext} disabled={!canContinue}>
         Continue →
