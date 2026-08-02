@@ -66,8 +66,15 @@ export function LedgerList({
     ) : null;
   }
 
-  // Newest first, bounded to the render cap.
-  const rows = ledger.slice(-LEDGER_RENDER_CAP).reverse();
+  // Newest first, bounded to the render cap. Sort by createdAt rather than array
+  // position: an in-session ledger is append-ordered (oldest->newest), but after
+  // a reload loadLedger returns rows created_at DESC and SET_LEDGER stores them
+  // verbatim, so a position-based slice(-CAP).reverse() would flip the order and
+  // (past the cap) drop the NEWEST rows. Sorting on createdAt is order-source
+  // independent, so the cap always keeps the newest CAP rows, newest first.
+  const rows = [...ledger]
+    .sort((a, b) => (a.createdAt < b.createdAt ? 1 : a.createdAt > b.createdAt ? -1 : 0))
+    .slice(0, LEDGER_RENDER_CAP);
 
   return (
     <div className="mt-2 flex flex-col gap-1.5">

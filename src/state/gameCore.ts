@@ -506,9 +506,10 @@ export function reducer(state: GameState, action: Action): GameState {
       // idempotent replay); that is honored as-is and never recomputed. Otherwise
       // the row defaults to un-modeled: gross = net = amountCents, fee = 0,
       // providerId = null (a mock overlay row, or a real sale with no provider
-      // chosen, which the UI prevents but the reducer stays safe against). The
-      // snapshot is ALL-OR-NOTHING: a partial one (feeCents without netCents)
-      // would default the omitted part independently and break gross = fee + net.
+      // chosen, which the UI prevents but the reducer stays safe against). A
+      // snapshot is honored as full only when BOTH halves are present; a partial
+      // one (only feeCents or only netCents) is not trusted as a replay, and the
+      // omitted half is derived from gross below so gross = fee + net always holds.
       const suppliedSnapshot =
         action.feeCents !== undefined && action.netCents !== undefined;
       let feeCents: number;
@@ -524,6 +525,18 @@ export function reducer(state: GameState, action: Action): GameState {
         feeCents = computed.feeCents;
         netCents = computed.netCents;
         providerId = state.chosenProvider.providerId;
+      } else if (action.feeCents !== undefined && action.netCents === undefined) {
+        // Partial snapshot: derive the omitted half from gross instead of
+        // defaulting it independently, so the row stays coherent (gross = fee +
+        // net). An incoherent row would be rejected by the fp_ledger coherence
+        // CHECK and terminally dropped by the outbox.
+        feeCents = action.feeCents;
+        netCents = grossCents - feeCents;
+        providerId = action.providerId ?? null;
+      } else if (action.netCents !== undefined && action.feeCents === undefined) {
+        netCents = action.netCents;
+        feeCents = grossCents - netCents;
+        providerId = action.providerId ?? null;
       } else {
         feeCents = action.feeCents ?? 0;
         netCents = action.netCents ?? grossCents;
