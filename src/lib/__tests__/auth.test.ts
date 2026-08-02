@@ -47,7 +47,7 @@ describe("loginChild", () => {
     (global.fetch as ReturnType<typeof vi.fn>).mockResolvedValue(jsonResponse(200, validBody));
     setSession.mockResolvedValue({ data: { user: { id: "user-1" } }, error: null });
 
-    const result = await loginChild("Ada", "supersecret10");
+    const result = await loginChild("ada", "supersecret10");
 
     expect(result).toEqual({
       ok: true,
@@ -70,7 +70,7 @@ describe("loginChild", () => {
       jsonResponse(200, { access_token: "only-access", profile: { handle: "ada" } }),
     );
 
-    const result = await loginChild("Ada", "supersecret10");
+    const result = await loginChild("ada", "supersecret10");
 
     expect(result).toEqual({ ok: false });
     expect(setSession).not.toHaveBeenCalled();
@@ -79,7 +79,7 @@ describe("loginChild", () => {
   it("non-200 response -> { ok: false }", async () => {
     (global.fetch as ReturnType<typeof vi.fn>).mockResolvedValue(jsonResponse(401, {}));
 
-    const result = await loginChild("Ada", "wrong");
+    const result = await loginChild("ada", "wrong");
 
     expect(result).toEqual({ ok: false });
     expect(setSession).not.toHaveBeenCalled();
@@ -88,7 +88,7 @@ describe("loginChild", () => {
   it("thrown / network error -> { ok: false }", async () => {
     (global.fetch as ReturnType<typeof vi.fn>).mockRejectedValue(new Error("network down"));
 
-    const result = await loginChild("Ada", "supersecret10");
+    const result = await loginChild("ada", "supersecret10");
 
     expect(result).toEqual({ ok: false });
   });
@@ -97,7 +97,7 @@ describe("loginChild", () => {
     (global.fetch as ReturnType<typeof vi.fn>).mockResolvedValue(jsonResponse(200, validBody));
     setSession.mockResolvedValue({ data: { user: null }, error: { message: "bad token" } });
 
-    const result = await loginChild("Ada", "supersecret10");
+    const result = await loginChild("ada", "supersecret10");
 
     expect(result).toEqual({ ok: false });
   });

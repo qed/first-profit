@@ -2,8 +2,8 @@
  * Child login screen in the HQ visual language (white card, Fraunces headings).
  *
  * One generic, kid-friendly error for EVERY failure (R4 enumeration
- * resistance): we never tell a child whether the name or the password was the
- * problem. No em dashes anywhere (global product copy rule).
+ * resistance): we never tell a child whether the username or the password was
+ * the problem. No em dashes anywhere (global product copy rule).
  *
  * Mobile-first at ~390px: single-column card, tap targets >= 44px; desktop is
  * re-asserted with `sm:` variants (centered, slightly wider card).
@@ -12,7 +12,7 @@ import React, { useState } from "react";
 import { useGame } from "../state/GameContext";
 
 const GENERIC_ERROR =
-  "Hmm, that name and password do not match. Check the spelling and try again, or ask your grown-up.";
+  "Hmm, that username and password do not match. Check the spelling and try again, or ask your grown-up.";
 
 export function Login() {
   const { login, dispatch } = useGame();
@@ -50,21 +50,24 @@ export function Login() {
           <p className="font-mono text-[11px] uppercase tracking-[0.28em] text-sell">First Profit</p>
           <h1 className="mt-2 font-display text-3xl font-black leading-tight">Welcome back, founder.</h1>
           <p className="mt-2 text-sm leading-relaxed text-ink/60">
-            Log in with the name and password your grown-up set up for you.
+            Log in with the username and password your grown-up set up for you.
           </p>
 
           <form onSubmit={onSubmit} className="mt-6 space-y-4" noValidate>
             <div>
               <label htmlFor="fp-identifier" className="block font-mono text-[11px] uppercase tracking-wider text-ink/60">
-                Your name
+                Username
               </label>
               <input
                 id="fp-identifier"
                 name="identifier"
                 type="text"
+                inputMode="text"
+                placeholder="e.g. alex"
                 autoComplete="username"
                 autoCapitalize="none"
                 autoCorrect="off"
+                spellCheck={false}
                 value={identifier}
                 onChange={(e) => setIdentifier(e.target.value)}
                 aria-invalid={error}
