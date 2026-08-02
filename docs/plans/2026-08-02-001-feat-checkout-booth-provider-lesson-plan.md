@@ -229,6 +229,17 @@ survives a reload and legacy rows never yield `NaN`.
 **Patterns to follow:** the existing `insertLedger`/`loadLedger`/`isValidLedgerRow`
 shape; the RLS column-scoped-grant discipline for client-writable columns.
 
+**⚠ DEPLOY ORDERING (mandatory, silent-sale-loss hazard):** the T120 migration —
+the four fee columns AND a PostgREST schema-cache reload — MUST be live in prod
+BEFORE the FP build that names `gross_cents`/`fee_cents`/`net_cents`/`provider_id`
+deploys. If FP ships first (or during the brief schema-cache reload window right
+after apply), every `insertLedger` fails with `PGRST204` / `42703`. The classifier
+now treats those as RETRYABLE, so the sale PARKS in the outbox and replays once the
+columns are live — never dropped. (Pre-fix, an unknown code was TERMINAL → DROP →
+the child's real sale was lost forever. That is the consequence of getting the
+ordering wrong without the fix.) Order: apply + reload T120 → verify columns
+visible → then deploy FP.
+
 **Test scenarios:**
 - Happy path (durability): a logged sale inserted with `gross/fee/net/providerId`
   survives a `loadLedger` round-trip with all four fields intact.
@@ -470,7 +481,7 @@ provide real-world setup guidance; leave the forward reference to Criterion 4.2.
 
 | Risk | Mitigation |
 |------|------------|
-| Cross-repo migration ordering (`fp_ledger` columns in The120 vs FP writes) | Author + apply the The120 migration FIRST; FP build that writes the columns ships only after they exist (Unit 2, deploy-ordering constraint). |
+| Cross-repo migration ordering (`fp_ledger` columns in The120 vs FP writes) — **silent sale loss** if FP deploys first, or during the PostgREST schema-cache reload window right after apply | Apply + schema-reload the The120 migration FIRST and verify the columns are visible; the FP build that writes them ships only after (Unit 2 deploy-ordering note). Defense in depth: `classifyWriteError` treats the missing-column codes `PGRST204`/`42703` as RETRYABLE, so a premature deploy PARKS the sale in the outbox and replays it — never drops it (pre-fix an unknown code was TERMINAL → DROP → the child's real sale lost forever). |
 | DOC_VERSION discard of saves/outbox | Avoided by NOT bumping: `chosenProvider` is additive-optional, defaulted in `fromSaveDoc`; `DOC_VERSION` stays 1 so `OUTBOX_VERSION` entries survive (Unit 3). |
 | Legacy amount-only ledger rows yield `NaN` | `loadLedger` defaults `net=amount, fee=0, providerId=null` (Unit 2) + a durability test. |
 | `source` value for a real logged sale | Decide keep `'mock'` vs a new value, and whether the `source`/`kind` CHECK must change, when authoring the Unit 2 migration (cross-repo). |

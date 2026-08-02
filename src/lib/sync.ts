@@ -99,6 +99,19 @@ function isRecord(value: unknown): value is Record<string, unknown> {
  */
 const TERMINAL_CODES = new Set(["22001", "22003", "23502", "23503", "23514", "P0001"]);
 
+/**
+ * Missing-column errors, which are TRANSIENT-by-deploy, not structural. If the
+ * FP build that names gross_cents/fee_cents/net_cents/provider_id deploys BEFORE
+ * the T120 migration applies — or during the brief PostgREST schema-cache reload
+ * window right after apply — the insert fails with `PGRST204` ("could not find
+ * the 'gross_cents' column in the schema cache") or the Postgres `42703`
+ * (undefined_column). Unlike a check-constraint violation, this clears itself
+ * the moment the columns + a schema reload are live, so it MUST be RETRYABLE
+ * (park in the outbox and replay) — never terminal. Classifying it terminal
+ * would DROP a child's real sale on a mis-ordered deploy (silent sale loss).
+ */
+const MISSING_COLUMN_CODES = new Set(["PGRST204", "42703"]);
+
 /** Unique-violation — for the ledger PK this means "already landed": success. */
 const DUPLICATE_CODE = "23505";
 
@@ -124,6 +137,11 @@ function isAuthError(code: string): boolean {
 export function classifyWriteError(error: unknown): WriteFailure {
   const code = pgCode(error);
   if (isAuthError(code)) return { ok: false, reason: "retryable", needsReauth: true, error };
+  // A missing-column error means the columns / schema-cache reload are not live
+  // YET (premature deploy or the post-apply reload window). It clears itself once
+  // they are, so PARK + replay — do NOT drop the sale. Checked BEFORE the unknown
+  // -code terminal default below.
+  if (MISSING_COLUMN_CODES.has(code)) return { ok: false, reason: "retryable", needsReauth: false, error };
   if (TERMINAL_CODES.has(code)) return { ok: false, reason: "terminal", error };
   // No code at all → a thrown network/offline error (fetch reject, timeout):
   // genuinely transient, so retryable.
@@ -287,7 +305,20 @@ export async function loadLedger(profileId: string): Promise<LedgerEntry[]> {
         // amount, fee to 0, provider to null.
         const gross = typeof r.gross_cents === "number" ? r.gross_cents : r.amount_cents;
         const fee = typeof r.fee_cents === "number" ? r.fee_cents : 0;
-        const net = typeof r.net_cents === "number" ? r.net_cents : r.amount_cents;
+        // net default is layered: an explicit net wins; else a PARTIAL row whose
+        // gross AND fee are present derives net = gross - fee (NOT amount_cents, so
+        // a fee-bearing row isn't silently over-counted); else the all-null legacy
+        // default net = amount_cents.
+        const net =
+          typeof r.net_cents === "number"
+            ? r.net_cents
+            : typeof r.gross_cents === "number" && typeof r.fee_cents === "number"
+              ? r.gross_cents - r.fee_cents
+              : r.amount_cents;
+        // provider_id is bounded free text (DB CHECK: <= 64 chars). Unit 4/5
+        // display code MUST render it through React's default escaping only (never
+        // dangerouslySetInnerHTML), with a safe fallback label for an unknown /
+        // foreign id — a crafted row must never inject markup into the P&L view.
         const providerId = typeof r.provider_id === "string" ? r.provider_id : null;
         rows.push({
           id: r.id,

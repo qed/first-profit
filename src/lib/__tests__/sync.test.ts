@@ -69,6 +69,7 @@ import {
   saveSnapshot,
   insertLedger,
   classifyWriteError,
+  classifyLedgerOutcome,
   readOutbox,
   enqueueLedger,
   parkSnapshot,
@@ -259,6 +260,58 @@ describe("loadLedger", () => {
     expect(Number.isNaN(row.netCents)).toBe(false);
   });
 
+  it("DURABILITY: a PARTIAL-null row (gross+fee present, net null) derives net = gross - fee (not amount_cents)", async () => {
+    // A fee-bearing row whose net_cents somehow arrived null must NOT default net
+    // to amount_cents (gross) — that would silently OVER-count the sale by the
+    // fee. Derive net = gross - fee instead.
+    handlers.select = () => ({
+      data: [
+        {
+          id: "partial",
+          kind: "sale",
+          payer: "Mom",
+          amount_cents: 2000,
+          gross_cents: 2000,
+          fee_cents: 88,
+          net_cents: null,
+          provider_id: "replit",
+          created_at: "2026-07-31T00:00:00.000Z",
+        },
+      ],
+      error: null,
+    });
+    const [row] = await loadLedger(PROFILE);
+    expect(row.netCents).toBe(1912); // gross - fee, NOT amount_cents (2000)
+    expect(row.grossCents).toBe(2000);
+    expect(row.feeCents).toBe(88);
+    expect(Number.isNaN(row.netCents)).toBe(false);
+  });
+
+  it("DROPS a row with a null amount_cents (never defaulted; no NaN leaks)", async () => {
+    // amount_cents is the RLS-bounded anchor; a row missing it is malformed and
+    // must be dropped, not defaulted (a defaulted null would poison gross/net).
+    handlers.select = () => ({
+      data: [
+        { id: "ok", kind: "sale", payer: "Mom", amount_cents: 500, created_at: "2026-07-31T00:00:00.000Z" },
+        {
+          id: "no-amount",
+          kind: "sale",
+          payer: "Mom",
+          amount_cents: null,
+          gross_cents: null,
+          fee_cents: null,
+          net_cents: null,
+          provider_id: null,
+          created_at: "2026-07-31T00:00:00.000Z",
+        },
+      ],
+      error: null,
+    });
+    const rows = await loadLedger(PROFILE);
+    expect(rows.map((r) => r.id)).toEqual(["ok"]); // null-amount row dropped
+    expect(rows.every((r) => !Number.isNaN(r.netCents))).toBe(true);
+  });
+
   it("DROPS a 'backing' DB row (kind retired: only 'sale' is surfaced)", async () => {
     handlers.select = () => ({
       data: [
@@ -419,6 +472,62 @@ describe("insertLedger", () => {
     const result = await insertLedger(PROFILE, row);
     expect(result).toEqual(expect.objectContaining({ ok: false, reason: "retryable" }));
   });
+
+  it("PARKS (keep, not drop) a PGRST204 missing-column insert (premature deploy / schema-cache window)", async () => {
+    // If the FP build deploys before the T120 fee-column migration applies — or
+    // during the PostgREST schema-cache reload window right after apply — the
+    // insert fails with PGRST204. This is TRANSIENT-by-deploy: it must PARK in the
+    // outbox and replay once the columns are live, never DROP the child's sale.
+    handlers.insert = () => ({
+      error: { code: "PGRST204", message: "could not find the 'gross_cents' column in the schema cache" },
+    });
+    const result = await insertLedger(PROFILE, row);
+    expect(result).toEqual(expect.objectContaining({ ok: false, reason: "retryable" }));
+    // Prove the full classifier path routes it to KEEP (park), not DROP.
+    expect(classifyLedgerOutcome(result)).toEqual({ decision: "keep", needsReauth: false });
+  });
+
+  it("PARKS (keep) a 42703 undefined_column insert too", async () => {
+    handlers.insert = () => ({ error: { code: "42703", message: 'column "gross_cents" does not exist' } });
+    const result = await insertLedger(PROFILE, row);
+    expect(classifyLedgerOutcome(result)).toEqual({ decision: "keep", needsReauth: false });
+  });
+
+  it("ROUND-TRIP: an insertLedger payload echoed back through loadLedger preserves all 4 fee fields", async () => {
+    let sent: Record<string, unknown> | null = null;
+    handlers.insert = (r) => {
+      sent = r as Record<string, unknown>;
+      return { error: null };
+    };
+    const feeRow: LedgerInsertRow = {
+      id: "rt-1",
+      kind: "sale",
+      payer: "Mom",
+      amountCents: 2000,
+      grossCents: 2000,
+      feeCents: 88,
+      netCents: 1912,
+      providerId: "replit",
+    };
+    expect(await insertLedger(PROFILE, feeRow)).toEqual({ ok: true });
+    // Echo the server-shaped row back (the DB adds created_at) and re-read it.
+    handlers.select = () => ({
+      data: [{ ...(sent as Record<string, unknown>), created_at: "2026-08-02T00:00:00.000Z" }],
+      error: null,
+    });
+    const [row] = await loadLedger(PROFILE);
+    expect(row).toEqual({
+      id: "rt-1",
+      kind: "sale",
+      payer: "Mom",
+      amountCents: 2000,
+      grossCents: 2000,
+      feeCents: 88,
+      netCents: 1912,
+      providerId: "replit",
+      createdAt: "2026-08-02T00:00:00.000Z",
+    });
+  });
 });
 
 // ── classifyWriteError ───────────────────────────────────────────────────────
@@ -435,6 +544,17 @@ describe("classifyWriteError", () => {
   });
   it("maps a codeless (network/offline) error to plain retryable", () => {
     expect(classifyWriteError(new Error("boom"))).toEqual(
+      expect.objectContaining({ reason: "retryable", needsReauth: false }),
+    );
+  });
+
+  it("maps a missing-column error (PGRST204 schema-cache / 42703 undefined_column) to retryable, NOT terminal", () => {
+    // Transient-by-deploy: the columns/schema-cache reload are not live yet. Park
+    // + replay once they are — a terminal classification here would DROP the sale.
+    expect(classifyWriteError({ code: "PGRST204", message: "schema cache" })).toEqual(
+      expect.objectContaining({ reason: "retryable", needsReauth: false }),
+    );
+    expect(classifyWriteError({ code: "42703", message: "undefined column" })).toEqual(
       expect.objectContaining({ reason: "retryable", needsReauth: false }),
     );
   });
