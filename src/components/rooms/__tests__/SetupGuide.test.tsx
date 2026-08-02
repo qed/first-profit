@@ -13,7 +13,7 @@ import { render, act, fireEvent, cleanup } from "@testing-library/react";
 
 import { SetupGuide } from "../SetupGuide";
 import { estimateSubscriptionSoFarCents } from "../CheckoutBooth";
-import { PROVIDERS } from "../../../data/providers";
+import { PROVIDERS, type ProviderId } from "../../../data/providers";
 
 afterEach(() => cleanup());
 
@@ -32,6 +32,12 @@ describe("SetupGuide — a provider with real setup", () => {
     for (const s of PROVIDERS.replit.setup) {
       expect(text).toContain(s.title);
     }
+    // ...and rendered IN ORDER: the <ol> step titles match providers.ts exactly.
+    // (Each <li>'s first <p> is the step title; the number lives in a <span>.)
+    const renderedTitles = Array.from(document.querySelectorAll("ol li")).map(
+      (li) => li.querySelector("p")?.textContent,
+    );
+    expect(renderedTitles).toEqual(PROVIDERS.replit.setup.map((s) => s.title));
     // Headline names the provider.
     expect(text).toMatch(/Go live with Replit/);
   });
@@ -84,6 +90,30 @@ describe("SetupGuide — First Profit Pay (no external setup)", () => {
     expect(Array.from(document.querySelectorAll("button")).some((b) => b.textContent === "Got it")).toBe(true);
     // No em dashes.
     expect(text).not.toMatch(/—/);
+  });
+});
+
+describe("SetupGuide — unknown/stale providerId (render fallback)", () => {
+  it("renders the raw id as the heading with no step list and does not throw", () => {
+    // A stale/off-type id that is not in PROVIDERS (e.g. a persisted value from a
+    // removed provider). The render path must degrade gracefully, mirroring the
+    // helper's undefined-provider path that is already covered below.
+    const unknownId = "stripe_direct" as unknown as ProviderId;
+    expect(() =>
+      render(React.createElement(SetupGuide, { providerId: unknownId, onDismiss: vi.fn() })),
+    ).not.toThrow();
+
+    const text = document.body.textContent || "";
+    // The raw id is surfaced as the name in the heading (React-escaped text),
+    // never a crash or a blank panel.
+    expect(text).toMatch(/stripe_direct is ready to go/);
+    // No numbered step list for an unknown provider (treated as no steps).
+    expect(document.querySelectorAll("ol li")).toHaveLength(0);
+    // Still a dismissible dialog.
+    expect(document.querySelector('[role="dialog"]')).toBeTruthy();
+    expect(Array.from(document.querySelectorAll("button")).some((b) => b.textContent === "Got it")).toBe(
+      true,
+    );
   });
 });
 
