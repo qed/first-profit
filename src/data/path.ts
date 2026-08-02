@@ -380,6 +380,11 @@ export const STEPS: Step[] = [
   'Thank every customer by name']
 
 },
+// PP2 forward reference (Unit 7): when the P&L is built here, the "money out"
+// lines are the chosen provider's MONTHLY SUBSCRIPTION (providers.ts
+// subscriptionCents) plus the PER-SALE FEES already snapshotted on each fp_ledger
+// sale row (feeCents). The Checkout Booth only shows a light directional
+// "subscription so far" estimate today; the real accounting belongs in this task.
 {
   id: '4.2',
   phase: 'grow',

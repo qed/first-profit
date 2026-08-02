@@ -1,6 +1,6 @@
 /**
  * A minimal focus trap for the fpv2 modal dialogs (StepRunner, Celebration,
- * MockCheckout, the room dialog). While `active`, Tab / Shift+Tab cycle between
+ * the room dialog). While `active`, Tab / Shift+Tab cycle between
  * the first and last focusable element INSIDE the panel, so a keyboard user can
  * never tab out of an `aria-modal` dialog into the scrim'd floor behind it.
  *

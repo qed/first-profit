@@ -14,10 +14,9 @@
  *
  * Dialog / runner / picker / celebration open-state lives in the gameCore reducer
  * (in the provider, above everything), so those already survive the swap; we just
- * render them here. The Step Runner (Unit 10), room dialogs + mock checkout
- * (Unit 11) are MINIMAL placeholders here — functional enough that the game loop
- * (create idea → do tasks → pass criterion → unlock 1.2) works and nothing is
- * broken, but visually plain. See the per-dialog notes for where Units 10/11 plug in.
+ * render them here. The mock Stripe checkout overlay was retired in Payment Phase
+ * 2 Unit 4; the Checkout Booth now teaches the provider-choice lesson inline in
+ * the room dialog body.
  */
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useGame } from "../state/GameContext";
@@ -27,7 +26,6 @@ import { FactoryFloor, type FloorView, type WalkIntent } from "../components/Fac
 import { Hud } from "../components/Hud";
 import { StepRunner } from "../components/StepRunner";
 import { Celebration } from "../components/Celebration";
-import { MockCheckout } from "../components/MockCheckout";
 import { useFocusTrap } from "../lib/useFocusTrap";
 import { YourSite } from "../components/rooms/YourSite";
 import { CheckoutBooth } from "../components/rooms/CheckoutBooth";
@@ -232,7 +230,6 @@ export function Factory() {
       <StepRunner />
       <Celebration />
       <RoomDialog />
-      <MockCheckout />
       <PickerDialog />
     </main>
   );

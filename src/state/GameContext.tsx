@@ -30,7 +30,7 @@ import {
   reducer,
   initialState,
   toSaveDoc,
-  backingSumCents as backingSumCentsFn,
+  grossSalesSumCents as grossSalesSumCentsFn,
   salesSumCents as salesSumCentsFn,
   nextUpFor as nextUpForFn,
   isTaskDone as isTaskDoneFn,
@@ -74,7 +74,7 @@ export interface GameApi extends GameState {
   sellProgress: (ideaIndex: number) => { done: number; total: number };
   isStepUnlocked: (ideaIndex: number, stepId: string) => boolean;
   ideasEligibleFor: (stepId: string) => number[];
-  backingSumCents: () => number;
+  grossSalesSumCents: () => number;
   salesSumCents: () => number;
 
   // Auth / session actions.
@@ -189,7 +189,7 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
         startEngine(userId);
         // Fill the session ledger from the server. HYDRATE always clears it to []
         // so a session boundary starts empty; SET_LEDGER now repopulates it from
-        // fp_ledger so Sales/backing totals + LedgerList survive a reload/re-login.
+        // fp_ledger so Sales/net totals + LedgerList survive a reload/re-login.
         // Seed the engine's "known ledger ids" from these rows FIRST so the
         // reducer-change subscription treats them as already-persisted and never
         // re-inserts the just-loaded rows (the insert path is also idempotent by
@@ -251,6 +251,13 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
           kind: row.kind,
           payer: row.payer,
           amountCents: row.amountCents,
+          // Forward the per-sale fee snapshot so persistence writes the fee
+          // columns (sync.ts insertLedger). Undefined until Unit 3/5 wire the
+          // reducer's fee modeling; insertLedger defaults a missing value.
+          grossCents: row.grossCents,
+          feeCents: row.feeCents,
+          netCents: row.netCents,
+          providerId: row.providerId,
         });
       }
     }
@@ -388,7 +395,7 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
       sellProgress: (ideaIndex) => sellProgressFn(state, ideaIndex),
       isStepUnlocked: (ideaIndex, stepId) => isStepUnlockedFn(state, ideaIndex, stepId),
       ideasEligibleFor: (stepId) => ideasEligibleForFn(state, stepId),
-      backingSumCents: () => backingSumCentsFn(state),
+      grossSalesSumCents: () => grossSalesSumCentsFn(state),
       salesSumCents: () => salesSumCentsFn(state),
       login,
       logout,
