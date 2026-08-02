@@ -211,6 +211,55 @@ describe("GameProvider boot", () => {
     expect(forwardedIds).not.toContain("s1");
     expect(forwardedIds).not.toContain("b1");
   });
+
+  it("notifyLedger forwards the per-sale fee fields (gross/fee/net/providerId) to the engine", async () => {
+    authMock.getCurrentUserId.mockResolvedValue("user-A");
+    syncMock.loadSave.mockResolvedValue({
+      doc: {
+        docVersion: 1,
+        ideas: [{ fields: {}, done: {} }],
+        activeIdea: 0,
+        siteHeadline: "",
+        onboardingComplete: true,
+      },
+      revision: 3,
+    });
+    renderProvider();
+    await waitFor(() => expect(api?.stage).toBe("app"));
+
+    // A fee-snapshotted row that was NOT seeded into knownLedgerIds (unlike the
+    // hydrate path) must be forwarded to the engine WITH its fee fields intact.
+    act(() => {
+      getApi().dispatch({
+        type: "SET_LEDGER",
+        ledger: [
+          {
+            id: "sale-fee",
+            kind: "sale",
+            payer: "Mom",
+            amountCents: 2000,
+            grossCents: 2000,
+            feeCents: 88,
+            netCents: 1912,
+            providerId: "replit",
+            createdAt: "2026-08-02T00:00:00.000Z",
+          },
+        ],
+      });
+    });
+
+    await waitFor(() =>
+      expect(engines[0].notifyLedger).toHaveBeenCalledWith(
+        expect.objectContaining({
+          id: "sale-fee",
+          grossCents: 2000,
+          feeCents: 88,
+          netCents: 1912,
+          providerId: "replit",
+        }),
+      ),
+    );
+  });
 });
 
 describe("GameProvider login (draft wipe + session boundary)", () => {

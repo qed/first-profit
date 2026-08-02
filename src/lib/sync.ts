@@ -40,12 +40,26 @@ import { getDraft, setDraft } from "./draftCache";
 
 // ── Shared types ───────────────────────────────────────────────────────────
 
-/** The columns a client is permitted to insert into fp_ledger (source is pinned). */
+/**
+ * The columns a client is permitted to insert into fp_ledger (source is pinned).
+ * `amountCents` stays = gross for back-compat; the per-sale fee snapshot
+ * (`grossCents`/`feeCents`/`netCents`/`providerId`) is optional so a caller that
+ * has not computed a fee yet (or a legacy-shaped row) still inserts coherently —
+ * insertLedger defaults a missing gross/net to amountCents and fee to 0.
+ * The 'backing' concept is retired at the ledger boundary: the runtime
+ * validators (loadLedger + isValidLedgerRow) accept only 'sale'. The `kind` type
+ * stays a union for source-compatibility with the in-memory `LedgerKind` (which
+ * Unit 3 finalizes); a 'backing' value never survives the validators.
+ */
 export interface LedgerInsertRow {
   id: string;
   kind: "sale" | "backing";
   payer: string;
   amountCents: number;
+  grossCents?: number;
+  feeCents?: number;
+  netCents?: number;
+  providerId?: string | null;
 }
 
 /** Minimal shape of a PostgREST / supabase-js error. */
@@ -231,6 +245,10 @@ interface LedgerDbRow {
   kind?: unknown;
   payer?: unknown;
   amount_cents?: unknown;
+  gross_cents?: unknown;
+  fee_cents?: unknown;
+  net_cents?: unknown;
+  provider_id?: unknown;
   created_at?: unknown;
 }
 
@@ -246,7 +264,9 @@ export async function loadLedger(profileId: string): Promise<LedgerEntry[]> {
   try {
     const { data, error } = (await getSupabase()
       .from("fp_ledger")
-      .select("id, kind, payer, amount_cents, created_at")
+      .select(
+        "id, kind, payer, amount_cents, gross_cents, fee_cents, net_cents, provider_id, created_at",
+      )
       .eq("profile_id", profileId)
       .order("created_at", { ascending: false })
       .limit(LEDGER_LOAD_LIMIT)) as { data: LedgerDbRow[] | null; error: PgError | null };
@@ -255,16 +275,29 @@ export async function loadLedger(profileId: string): Promise<LedgerEntry[]> {
     for (const r of data) {
       if (
         typeof r.id === "string" &&
-        (r.kind === "sale" || r.kind === "backing") &&
+        // 'backing' is retired: only a 'sale' row is surfaced. A legacy backing
+        // row (if any exists at rest) is dropped here, never fed to the reducer.
+        r.kind === "sale" &&
         typeof r.payer === "string" &&
         typeof r.amount_cents === "number" &&
         typeof r.created_at === "string"
       ) {
+        // Fee snapshot with legacy-row DEFAULTS so a reload of an amount-only row
+        // (new columns null) never yields NaN: gross/net fall back to the gross
+        // amount, fee to 0, provider to null.
+        const gross = typeof r.gross_cents === "number" ? r.gross_cents : r.amount_cents;
+        const fee = typeof r.fee_cents === "number" ? r.fee_cents : 0;
+        const net = typeof r.net_cents === "number" ? r.net_cents : r.amount_cents;
+        const providerId = typeof r.provider_id === "string" ? r.provider_id : null;
         rows.push({
           id: r.id,
           kind: r.kind,
           payer: r.payer,
           amountCents: r.amount_cents,
+          grossCents: gross,
+          feeCents: fee,
+          netCents: net,
+          providerId,
           createdAt: r.created_at,
         });
       }
@@ -326,6 +359,13 @@ export async function insertLedger(
         source: "mock",
         payer: row.payer,
         amount_cents: row.amountCents,
+        // Fee snapshot columns. A caller without a computed fee (or a legacy
+        // amount-only row) still writes coherent values: gross/net default to
+        // the gross amount, fee to 0, provider to null — mirroring loadLedger.
+        gross_cents: row.grossCents ?? row.amountCents,
+        fee_cents: row.feeCents ?? 0,
+        net_cents: row.netCents ?? row.amountCents,
+        provider_id: row.providerId ?? null,
       })) as { error: PgError | null };
     if (!error) return { ok: true };
     if (pgCode(error) === DUPLICATE_CODE) return { ok: true };
@@ -378,7 +418,8 @@ function isValidLedgerRow(row: unknown): row is LedgerInsertRow {
   return (
     isRecord(row) &&
     typeof row.id === "string" &&
-    (row.kind === "sale" || row.kind === "backing") &&
+    // 'backing' retired: a queued backing entry is dropped before it can be sent.
+    row.kind === "sale" &&
     typeof row.payer === "string" &&
     typeof row.amountCents === "number" &&
     Number.isFinite(row.amountCents)
@@ -588,6 +629,10 @@ export function flushLedgerViaKeepalive(
     source: "mock",
     payer: row.payer,
     amount_cents: row.amountCents,
+    gross_cents: row.grossCents ?? row.amountCents,
+    fee_cents: row.feeCents ?? 0,
+    net_cents: row.netCents ?? row.amountCents,
+    provider_id: row.providerId ?? null,
   });
   if (byteLength(body) > KEEPALIVE_MAX_BYTES) return { sent: false, reason: "too-large" };
   void fetch(`${auth.supabaseUrl}/rest/v1/fp_ledger`, {

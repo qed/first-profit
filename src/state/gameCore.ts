@@ -40,7 +40,18 @@ export interface LedgerEntry {
   id: string;
   kind: LedgerKind;
   payer: string;
+  /** Kept = gross for back-compat. */
   amountCents: number;
+  /**
+   * Per-sale fee snapshot (Payment Phase 2). Optional here: Unit 3 finalizes the
+   * reducer's ADD_LEDGER fee modeling and Unit 5 wires computeFee. The
+   * persistence layer (sync.ts) already reads/writes them and defaults legacy
+   * rows (grossCents/netCents -> amountCents, feeCents -> 0, providerId -> null).
+   */
+  grossCents?: number;
+  feeCents?: number;
+  netCents?: number;
+  providerId?: string | null;
   createdAt: string;
 }
 

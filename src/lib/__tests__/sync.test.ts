@@ -191,19 +191,84 @@ describe("loadSave", () => {
 
 // ── loadLedger (server read-back) ────────────────────────────────────────────
 describe("loadLedger", () => {
-  it("maps DB snake_case rows to the app LedgerEntry shape, newest-first as returned", async () => {
+  it("maps DB snake_case rows (incl. the fee columns) to the app LedgerEntry shape", async () => {
     handlers.select = () => ({
       data: [
-        { id: "s1", kind: "sale", payer: "Mom", amount_cents: 1500, created_at: "2026-07-31T00:02:00.000Z" },
-        { id: "b1", kind: "backing", payer: "Dad", amount_cents: 2500, created_at: "2026-07-31T00:01:00.000Z" },
+        {
+          id: "s1",
+          kind: "sale",
+          payer: "Mom",
+          amount_cents: 2000,
+          gross_cents: 2000,
+          fee_cents: 88,
+          net_cents: 1912,
+          provider_id: "replit",
+          created_at: "2026-07-31T00:02:00.000Z",
+        },
       ],
       error: null,
     });
     const rows = await loadLedger(PROFILE);
     expect(rows).toEqual([
-      { id: "s1", kind: "sale", payer: "Mom", amountCents: 1500, createdAt: "2026-07-31T00:02:00.000Z" },
-      { id: "b1", kind: "backing", payer: "Dad", amountCents: 2500, createdAt: "2026-07-31T00:01:00.000Z" },
+      {
+        id: "s1",
+        kind: "sale",
+        payer: "Mom",
+        amountCents: 2000,
+        grossCents: 2000,
+        feeCents: 88,
+        netCents: 1912,
+        providerId: "replit",
+        createdAt: "2026-07-31T00:02:00.000Z",
+      },
     ]);
+  });
+
+  it("DURABILITY: a legacy amount-only row (fee columns null) defaults gross=amount, fee=0, net=amount, providerId=null — no NaN", async () => {
+    handlers.select = () => ({
+      data: [
+        {
+          id: "legacy",
+          kind: "sale",
+          payer: "Gran",
+          amount_cents: 1500,
+          gross_cents: null,
+          fee_cents: null,
+          net_cents: null,
+          provider_id: null,
+          created_at: "2026-07-31T00:00:00.000Z",
+        },
+      ],
+      error: null,
+    });
+    const [row] = await loadLedger(PROFILE);
+    expect(row).toEqual({
+      id: "legacy",
+      kind: "sale",
+      payer: "Gran",
+      amountCents: 1500,
+      grossCents: 1500, // defaulted from amount_cents
+      feeCents: 0,
+      netCents: 1500, // defaulted from amount_cents
+      providerId: null,
+      createdAt: "2026-07-31T00:00:00.000Z",
+    });
+    // Explicitly guard the NaN-avoidance the durability requirement is about.
+    expect(Number.isNaN(row.grossCents)).toBe(false);
+    expect(Number.isNaN(row.feeCents)).toBe(false);
+    expect(Number.isNaN(row.netCents)).toBe(false);
+  });
+
+  it("DROPS a 'backing' DB row (kind retired: only 'sale' is surfaced)", async () => {
+    handlers.select = () => ({
+      data: [
+        { id: "s1", kind: "sale", payer: "Mom", amount_cents: 500, created_at: "2026-07-31T00:01:00.000Z" },
+        { id: "b1", kind: "backing", payer: "Dad", amount_cents: 2500, created_at: "2026-07-31T00:00:00.000Z" },
+      ],
+      error: null,
+    });
+    const rows = await loadLedger(PROFILE);
+    expect(rows.map((r) => r.id)).toEqual(["s1"]); // backing dropped
   });
 
   it("skips malformed rows and returns [] on error", async () => {
@@ -290,7 +355,7 @@ describe("saveSnapshot", () => {
 describe("insertLedger", () => {
   const row: LedgerInsertRow = { id: "led-1", kind: "sale", payer: "Mom", amountCents: 500 };
 
-  it("inserts with source pinned to 'mock' and the client id", async () => {
+  it("inserts with source pinned to 'mock', the client id, and the (defaulted) fee columns", async () => {
     let sent: Record<string, unknown> | null = null;
     handlers.insert = (r) => {
       sent = r as Record<string, unknown>;
@@ -298,6 +363,8 @@ describe("insertLedger", () => {
     };
     const result = await insertLedger(PROFILE, row);
     expect(result).toEqual({ ok: true });
+    // A row without an explicit fee snapshot still writes coherent columns:
+    // gross/net default to the gross amount, fee to 0, provider to null.
     expect(sent).toEqual({
       id: "led-1",
       profile_id: PROFILE,
@@ -305,6 +372,37 @@ describe("insertLedger", () => {
       source: "mock",
       payer: "Mom",
       amount_cents: 500,
+      gross_cents: 500,
+      fee_cents: 0,
+      net_cents: 500,
+      provider_id: null,
+    });
+  });
+
+  it("writes the 4 fee columns from the row's snapshot (gross/fee/net/providerId)", async () => {
+    let sent: Record<string, unknown> | null = null;
+    handlers.insert = (r) => {
+      sent = r as Record<string, unknown>;
+      return { error: null };
+    };
+    const feeRow: LedgerInsertRow = {
+      id: "led-fee",
+      kind: "sale",
+      payer: "Mom",
+      amountCents: 2000,
+      grossCents: 2000,
+      feeCents: 88,
+      netCents: 1912,
+      providerId: "replit",
+    };
+    const result = await insertLedger(PROFILE, feeRow);
+    expect(result).toEqual({ ok: true });
+    expect(sent).toMatchObject({
+      amount_cents: 2000,
+      gross_cents: 2000,
+      fee_cents: 88,
+      net_cents: 1912,
+      provider_id: "replit",
     });
   });
 
@@ -400,6 +498,21 @@ describe("outbox", () => {
     expect(outbox.ledger.map((e) => e.row.id)).toEqual(["led-1"]); // only the valid row survives
   });
 
+  it("DROPS a 'backing' ledger entry (kind retired: only 'sale' survives the validator)", () => {
+    const s = fakeStorage();
+    s.setItem(
+      `fp:${USER}:outbox`,
+      JSON.stringify({
+        ledger: [
+          { v: OUTBOX_VERSION, row: { ...row, id: "backing", kind: "backing" } },
+          { v: OUTBOX_VERSION, row },
+        ],
+        snapshot: null,
+      }),
+    );
+    expect(readOutbox(USER, s).ledger.map((e) => e.row.id)).toEqual(["led-1"]);
+  });
+
   it("DISCARDS a parked snapshot whose doc fails the SaveDoc shape/version gate", () => {
     const s = fakeStorage();
     // Current `v`, but the doc's docVersion is wrong: an unvalidated PATCH of this
@@ -429,7 +542,7 @@ describe("replayOutbox", () => {
   it("replays queued ledger inserts IN ORDER and resolves them; a 23505 replay is success", async () => {
     const s = fakeStorage();
     const a: LedgerInsertRow = { id: "a", kind: "sale", payer: "A", amountCents: 100 };
-    const b: LedgerInsertRow = { id: "b", kind: "backing", payer: "B", amountCents: 200 };
+    const b: LedgerInsertRow = { id: "b", kind: "sale", payer: "B", amountCents: 200 };
     enqueueLedger(USER, a, s);
     enqueueLedger(USER, b, s);
 

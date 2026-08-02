@@ -251,6 +251,13 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
           kind: row.kind,
           payer: row.payer,
           amountCents: row.amountCents,
+          // Forward the per-sale fee snapshot so persistence writes the fee
+          // columns (sync.ts insertLedger). Undefined until Unit 3/5 wire the
+          // reducer's fee modeling; insertLedger defaults a missing value.
+          grossCents: row.grossCents,
+          feeCents: row.feeCents,
+          netCents: row.netCents,
+          providerId: row.providerId,
         });
       }
     }
