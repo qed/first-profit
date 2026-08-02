@@ -162,13 +162,15 @@ export const providerById = (id: ProviderId): Provider => PROVIDERS[id];
  *
  * Rounding rule (guarantees `grossCents === feeCents + netCents` for any
  * integer `grossCents >= 0`):
- *   1. rawFee = round(gross * percentBps / 10000) + flatCents
+ *   1. rawFee = floor(gross * percentBps / 10000) + flatCents
  *   2. feeCents = min(rawFee, gross)   // clamp so netCents is never negative
  *   3. netCents = gross - feeCents     // net is defined as the remainder
  *
- * Because netCents is derived by subtraction, the two parts always sum back to
- * gross exactly, and the clamp keeps net >= 0 even when the flat component alone
- * would exceed a tiny sale.
+ * The percent part is FLOORED so a provider never takes MORE than its stated
+ * rate on a rounding tie (e.g. First Profit Pay never exceeds 50%). Because
+ * netCents is derived by subtraction, the two parts always sum back to gross
+ * exactly, and the clamp keeps net >= 0 even when the flat component alone would
+ * exceed a tiny sale.
  */
 export function computeFee(
   grossCents: number,
@@ -176,7 +178,7 @@ export function computeFee(
 ): { feeCents: number; netCents: number } {
   const gross = Math.max(0, Math.trunc(grossCents));
   const rawFee =
-    Math.round((gross * provider.fee.percentBps) / 10000) + provider.fee.flatCents;
+    Math.floor((gross * provider.fee.percentBps) / 10000) + provider.fee.flatCents;
   const feeCents = Math.min(rawFee, gross);
   const netCents = gross - feeCents;
   return { feeCents, netCents };
