@@ -251,4 +251,41 @@ describe("Checkout Booth — provider choice", () => {
       ).toHaveLength(3),
     );
   });
+
+  it("switching to a DIFFERENT provider shows the coach beat; dismissing lands on the new provider (R24.6)", async () => {
+    renderBooth();
+    await waitFor(() => expect(api?.stage).toBe("landing"));
+    // Start on First Profit Pay.
+    act(() => getApi().dispatch({ type: "SET_PROVIDER", providerId: "first_profit_pay", chosenAt: 1 }));
+    await waitFor(() => expect(document.body.textContent).toMatch(/You chose this/));
+
+    // Re-open and choose a DIFFERENT provider -> a real switch.
+    act(() => fireEvent.click(button((b) => b.textContent === "Compare providers again")));
+    act(() => fireEvent.click(button((b) => b.textContent === "Choose Replit")));
+
+    // The coach beat renders and names the lesson.
+    await waitFor(() => expect(document.querySelector('[role="dialog"]')).toBeTruthy());
+    expect(document.body.textContent).toMatch(/First Profit Pay was taking half of every sale/);
+    expect(getApi().chosenProvider?.providerId).toBe("replit");
+
+    // Dismissing returns to the chosen summary with the NEW provider active.
+    act(() => fireEvent.click(button((b) => b.textContent === "Got it")));
+    await waitFor(() => expect(document.querySelector('[role="dialog"]')).toBeNull());
+    expect(document.body.textContent).toMatch(/You chose this/);
+    expect(document.body.textContent).toMatch(/Replit/);
+  });
+
+  it("choosing the SAME provider again does NOT show the coach beat (no-op switch)", async () => {
+    renderBooth();
+    await waitFor(() => expect(api?.stage).toBe("landing"));
+    act(() => getApi().dispatch({ type: "SET_PROVIDER", providerId: "replit", chosenAt: 1 }));
+    await waitFor(() => expect(document.body.textContent).toMatch(/You chose this/));
+
+    act(() => fireEvent.click(button((b) => b.textContent === "Compare providers again")));
+    act(() => fireEvent.click(button((b) => b.textContent === "Choose Replit")));
+
+    // Back to the summary, and NO coach dialog appeared.
+    await waitFor(() => expect(document.body.textContent).toMatch(/You chose this/));
+    expect(document.querySelector('[role="dialog"]')).toBeNull();
+  });
 });

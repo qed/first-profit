@@ -5,12 +5,18 @@
  * Two states:
  *   - NO provider chosen yet  -> the ProviderComparison lesson is the booth's
  *     primary content (the choice is available the moment the booth is first
- *     reachable, R24.3 — it is NOT gated behind logging a sale).
+ *     reachable, R24.3, and is NOT gated behind logging a sale).
  *   - A provider ALREADY chosen -> a compact chosen-provider SUMMARY (name, its
  *     per-sale fee, "you chose this") plus a "Compare providers again" entry that
- *     re-opens the comparison. The full SWITCH flow + coach beat is Unit 6; here
- *     the re-open is intentionally simple (choosing a different provider already
- *     works via SET_PROVIDER from Unit 3).
+ *     re-opens the comparison.
+ *
+ * SWITCH flow + coach beat (Unit 6, R24.6): re-opening the comparison and
+ * choosing a DIFFERENT provider is a real switch (old id != new id) and shows the
+ * ProviderSwitchCoach reflection overlay. Choosing the SAME provider is a no-op
+ * (the reducer no-ops a same-id SET_PROVIDER, and no coach fires). Dismissing the
+ * coach returns to the chosen summary with the NEW provider active. Past sales are
+ * UNTOUCHED: each ledger row carries its own Unit 5 fee snapshot, so a switch
+ * never rewrites history.
  *
  * The append-only Ledger list (the sale record) stays visible in both states.
  * Mobile-first at ~390px; no em dashes.
@@ -20,18 +26,42 @@ import { useGame } from "../../state/GameContext";
 import { LedgerList } from "./LedgerList";
 import { LogSaleForm } from "./LogSaleForm";
 import { ProviderComparison, feeLabel } from "./ProviderComparison";
-import { PROVIDERS } from "../../data/providers";
+import { ProviderSwitchCoach } from "./ProviderSwitchCoach";
+import { PROVIDERS, type ProviderId } from "../../data/providers";
 
 export function CheckoutBooth() {
   const { chosenProvider, ledger } = useGame();
   // Re-open the comparison over an existing choice ("compare again"). Simple
-  // local toggle; the switch coach beat is Unit 6.
+  // local toggle.
   const [comparing, setComparing] = useState(false);
+  // The in-flight switch the coach beat is reflecting on, or null. Captured at
+  // choose time (old id from the pre-dispatch closure vs the newly chosen id).
+  const [switchCoach, setSwitchCoach] = useState<{ from: ProviderId; to: ProviderId } | null>(null);
 
   const showComparison = !chosenProvider || comparing;
 
+  // Fires from ProviderComparison AFTER it dispatched SET_PROVIDER. This closure
+  // still holds the PRE-dispatch chosenProvider, so an existing id that differs
+  // from the new one is a real switch -> raise the coach beat. First-ever choice
+  // (no prior provider) and same-provider re-pick raise nothing.
+  const handleChoose = (newId: ProviderId) => {
+    const oldId = chosenProvider?.providerId;
+    setComparing(false);
+    if (oldId && oldId !== newId) {
+      setSwitchCoach({ from: oldId, to: newId });
+    }
+  };
+
   return (
     <div>
+      {switchCoach && (
+        <ProviderSwitchCoach
+          oldProviderId={switchCoach.from}
+          newProviderId={switchCoach.to}
+          ledger={ledger}
+          onDismiss={() => setSwitchCoach(null)}
+        />
+      )}
       {showComparison ? (
         <div>
           {chosenProvider && (
@@ -43,7 +73,7 @@ export function CheckoutBooth() {
               ← Back to my provider
             </button>
           )}
-          <ProviderComparison onChoose={() => setComparing(false)} />
+          <ProviderComparison onChoose={handleChoose} />
         </div>
       ) : (
         <>

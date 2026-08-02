@@ -819,6 +819,95 @@ describe("SET_PROVIDER (chosen payment provider)", () => {
   });
 });
 
+describe("provider switch (PP2 Unit 6, R24.6)", () => {
+  it("switching to the SAME provider is a no-op (same state ref, no chosenAt churn)", () => {
+    let s = withOneIdea();
+    s = reducer(s, { type: "SET_PROVIDER", providerId: "replit", chosenAt: 1 });
+    // Re-picking the same id must not churn chosenAt or produce a new object: the
+    // CheckoutBooth coach keys off a real old!=new switch, so a same-id re-pick
+    // must have no effect for it to react to.
+    const again = reducer(s, { type: "SET_PROVIDER", providerId: "replit", chosenAt: 999 });
+    expect(again).toBe(s); // referential no-op
+    expect(again.chosenProvider).toEqual({ providerId: "replit", chosenAt: 1 });
+  });
+
+  it("a real switch (different id) replaces the provider and stamps a fresh chosenAt", () => {
+    let s = withOneIdea();
+    s = reducer(s, { type: "SET_PROVIDER", providerId: "first_profit_pay", chosenAt: 1 });
+    const switched = reducer(s, { type: "SET_PROVIDER", providerId: "replit", chosenAt: 2 });
+    expect(switched).not.toBe(s);
+    expect(switched.chosenProvider).toEqual({ providerId: "replit", chosenAt: 2 });
+  });
+
+  it("a switch does NOT recompute past ledger rows: prior sale keeps its 50% snapshot, new sale uses replit", () => {
+    let s = withOneIdea();
+    // On First Profit Pay: a $20 sale is taxed at 50% (fee 1000, net 1000).
+    s = reducer(s, { type: "SET_PROVIDER", providerId: "first_profit_pay", chosenAt: 1 });
+    s = reducer(s, {
+      type: "ADD_LEDGER",
+      id: "sale-fpp",
+      kind: "sale",
+      payer: "Ada",
+      amountCents: 2000,
+      grossCents: 2000,
+      createdAt: "2026-08-02T00:00:00.000Z",
+    });
+    // Switch to Replit, then log another $20 sale: 2.9% + 30c = fee 88, net 1912.
+    s = reducer(s, { type: "SET_PROVIDER", providerId: "replit", chosenAt: 2 });
+    s = reducer(s, {
+      type: "ADD_LEDGER",
+      id: "sale-replit",
+      kind: "sale",
+      payer: "Ben",
+      amountCents: 2000,
+      grossCents: 2000,
+      createdAt: "2026-08-02T00:01:00.000Z",
+    });
+
+    const prior = s.ledger.find((r) => r.id === "sale-fpp");
+    const fresh = s.ledger.find((r) => r.id === "sale-replit");
+    // The prior First Profit Pay row is UNTOUCHED by the switch.
+    expect(prior).toMatchObject({ grossCents: 2000, feeCents: 1000, netCents: 1000, providerId: "first_profit_pay" });
+    // The new row uses the new provider's fee.
+    expect(fresh).toMatchObject({ grossCents: 2000, feeCents: 88, netCents: 1912, providerId: "replit" });
+  });
+
+  it("durability (R24.6 proof): after a switch AND a save round-trip + ledger reload, prior rows keep their old fee and chosenProvider is the new one", () => {
+    let s = withOneIdea();
+    s = reducer(s, { type: "SET_PROVIDER", providerId: "first_profit_pay", chosenAt: 1 });
+    s = reducer(s, {
+      type: "ADD_LEDGER",
+      id: "sale-fpp",
+      kind: "sale",
+      payer: "Ada",
+      amountCents: 2000,
+      grossCents: 2000,
+      createdAt: "2026-08-02T00:00:00.000Z",
+    });
+    s = reducer(s, { type: "SET_PROVIDER", providerId: "replit", chosenAt: 2 });
+
+    // The ledger rows are what fp_ledger would have persisted (per-row snapshots).
+    const persistedLedger = s.ledger.map((r) => ({ ...r }));
+
+    // Save round-trip: toSaveDoc/fromSaveDoc/HYDRATE. HYDRATE clears the ledger
+    // (it lives in fp_ledger, not the save doc); the chosenProvider rides the doc.
+    const doc = toSaveDoc(s);
+    const parsed = fromSaveDoc(JSON.parse(JSON.stringify(doc)));
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    let reloaded = reducer(initialState(), { type: "HYDRATE", doc: parsed.doc });
+    expect(reloaded.ledger).toEqual([]); // cleared by HYDRATE
+    // The Unit-2 sync mapping re-fills the session ledger from fp_ledger.
+    reloaded = reducer(reloaded, { type: "SET_LEDGER", ledger: persistedLedger });
+
+    // chosenProvider is the NEW provider after reload.
+    expect(reloaded.chosenProvider).toEqual({ providerId: "replit", chosenAt: 2 });
+    // The pre-switch 50% row STILL carries its old fee/provider snapshot.
+    const prior = reloaded.ledger.find((r) => r.id === "sale-fpp");
+    expect(prior).toMatchObject({ grossCents: 2000, feeCents: 1000, netCents: 1000, providerId: "first_profit_pay" });
+  });
+});
+
 describe("RESET_SESSION (shared-device state clear)", () => {
   it("clears ideas, ledger, and UI but keeps stage + profile, and stays usable", () => {
     let s = withOneIdea();

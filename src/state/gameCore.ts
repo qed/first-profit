@@ -592,6 +592,13 @@ export function reducer(state: GameState, action: Action): GameState {
       // Record (or switch to) the chosen provider. The choice is durable (rides
       // the save doc); a switch stamps a fresh chosenAt. Past ledger rows keep
       // their own fee snapshot, so a switch never rewrites history (R24.6).
+      //
+      // Choosing the SAME provider is a NO-OP: return the same state reference so
+      // there is no spurious effect (no chosenAt churn, nothing for the switch
+      // coach to react to). A real switch is old id != new id (PP2 Unit 6).
+      if (state.chosenProvider && state.chosenProvider.providerId === action.providerId) {
+        return state;
+      }
       return {
         ...state,
         chosenProvider: { providerId: action.providerId, chosenAt: action.chosenAt },
