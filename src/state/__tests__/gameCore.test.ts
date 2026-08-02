@@ -390,6 +390,71 @@ describe("ADD_LEDGER", () => {
     expect((row.grossCents ?? 0)).toBe((row.feeCents ?? 0) + (row.netCents ?? 0));
   });
 
+  it("HONORS a full explicit snapshot even when a DIFFERENT provider is chosen (idempotent-replay durability)", () => {
+    // Durability/idempotent-replay contract: when a caller supplies a COMPLETE
+    // fee snapshot (feeCents AND netCents), the reducer takes it verbatim and
+    // does NOT recompute — even if the currently chosen provider differs. This
+    // is what lets a persisted row replay identically regardless of the live
+    // chosenProvider. Here the chosen provider is Shopify, but the row carries a
+    // First Profit Pay (50%) snapshot; the reducer must keep the FPP numbers.
+    let s = withOneIdea();
+    s = completeCriterion(s, 0, "1.1");
+    s = reducer(s, { type: "DISMISS_CELEBRATION" });
+    s = reducer(s, { type: "SET_PROVIDER", providerId: "shopify", chosenAt: 1 });
+    s = reducer(s, {
+      type: "ADD_LEDGER",
+      id: "sale-honored-snapshot",
+      kind: "sale",
+      payer: "Nadia",
+      amountCents: 2000,
+      grossCents: 2000,
+      feeCents: 1000,
+      netCents: 1000,
+      providerId: "first_profit_pay",
+      createdAt: "2026-08-02T00:06:00.000Z",
+    });
+    const row = s.ledger[0];
+    // Supplied snapshot is honored verbatim...
+    expect(row.feeCents).toBe(1000);
+    expect(row.netCents).toBe(1000);
+    expect(row.providerId).toBe("first_profit_pay");
+    // ...and specifically was NOT recomputed via the chosen provider (Shopify:
+    // floor(2000*290/10000)=58 + 30 flat = 88, net 1912, providerId 'shopify').
+    expect(row.feeCents).not.toBe(88);
+    expect(row.providerId).not.toBe("shopify");
+    // Invariant holds on the honored snapshot.
+    expect((row.grossCents ?? 0)).toBe((row.feeCents ?? 0) + (row.netCents ?? 0));
+  });
+
+  it("DISCARDS a PARTIAL snapshot (feeCents without netCents) and RECOMPUTES via the chosen provider", () => {
+    // A snapshot is all-or-nothing. A partial one (feeCents supplied, netCents
+    // omitted) is NOT trusted: the reducer falls through to modeling the sale
+    // via the chosen provider (Replit), discarding the bogus partial fee, so
+    // gross = fee + net can never be broken by a half-supplied snapshot.
+    let s = withOneIdea();
+    s = completeCriterion(s, 0, "1.1");
+    s = reducer(s, { type: "DISMISS_CELEBRATION" });
+    s = reducer(s, { type: "SET_PROVIDER", providerId: "replit", chosenAt: 1 });
+    s = reducer(s, {
+      type: "ADD_LEDGER",
+      id: "sale-partial-snapshot",
+      kind: "sale",
+      payer: "Nadia",
+      amountCents: 2000,
+      grossCents: 2000,
+      feeCents: 9999, // bogus partial (no netCents) -> must be discarded
+      createdAt: "2026-08-02T00:07:00.000Z",
+    });
+    const row = s.ledger[0];
+    // Recomputed via computeFee(2000, replit) = { fee 88, net 1912 }, NOT 9999.
+    expect(row.feeCents).toBe(88);
+    expect(row.netCents).toBe(1912);
+    expect(row.providerId).toBe("replit");
+    expect(row.feeCents).not.toBe(9999);
+    // Invariant restored by the recompute.
+    expect((row.grossCents ?? 0)).toBe((row.feeCents ?? 0) + (row.netCents ?? 0));
+  });
+
   it("a mock sale is never fee-modeled even with a provider chosen", () => {
     let s = withOneIdea();
     s = completeCriterion(s, 0, "1.1");

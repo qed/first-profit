@@ -90,6 +90,18 @@ describe("parseAmountCents", () => {
     expect(parseAmountCents("abc")).toBeNull();
     expect(parseAmountCents("100000")).toBeNull(); // over the $1000 cap
   });
+
+  it("parses decimal dollars via Math.round, resolving float imprecision", () => {
+    // Headline case: 19.99 * 100 is NOT exactly 1999 in IEEE-754 float
+    // (it evaluates to 1998.9999999999998), so a bare `| 0`/truncation would
+    // yield 1998. Math.round in parseAmountCents recovers the intended 1999.
+    expect(parseAmountCents("19.99")).toBe(1999);
+    expect(parseAmountCents("0.99")).toBe(99);
+    expect(parseAmountCents("100")).toBe(10000);
+    // Rounding case: 19.995 * 100 === 1999.5, and Math.round rounds a .5 tie up
+    // toward +Infinity, so this documents the actual behavior: 2000, not 1999.
+    expect(parseAmountCents("19.995")).toBe(2000);
+  });
 });
 
 describe("LogSaleForm — no provider chosen", () => {
