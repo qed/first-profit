@@ -58,6 +58,22 @@ export interface SwitchReflection {
  * row's OWN snapshot, so past rows are read as-is, never recomputed) vs what the
  * NEW provider would have charged on the same gross amounts. Pure + exported so
  * the number is unit-testable.
+ *
+ * Only rows that carry a REAL fee snapshot (a chosen provider recorded a per-row
+ * fee: providerId != null AND feeCents != null) take part in the comparison, and
+ * they take part in ALL THREE outputs (saleCount + both sums) together. A legacy
+ * row (pre-Unit-5: only amountCents) or a sale logged before any provider was
+ * chosen never incurred a provider fee, so it contributes $0 to feesPaidCents;
+ * counting its gross toward feesUnderNewCents would put a positive "would take"
+ * next to a $0 "paid" — self-contradictory. Excluding such rows from all three
+ * keeps the "on the same sales" framing truthful; if none qualify, saleCount is 0
+ * and the caller omits the panel.
+ *
+ * Guard (#2): an unknown newProviderId makes providerById return undefined at
+ * runtime; computeFee would then dereference provider.fee and white-screen the
+ * room (no ErrorBoundary in src). Skip the fee comparison entirely in that case
+ * (saleCount stays 0 -> no panel), mirroring the display path's unknown-id
+ * fallback (providerName -> raw id).
  */
 export function computeSwitchReflection(
   ledger: LedgerEntry[],
@@ -67,12 +83,17 @@ export function computeSwitchReflection(
   let feesPaidCents = 0;
   let feesUnderNewCents = 0;
   let saleCount = 0;
-  for (const row of ledger) {
-    if (row.kind !== "sale") continue;
-    saleCount += 1;
-    const gross = row.grossCents ?? row.amountCents;
-    feesPaidCents += row.feeCents ?? 0;
-    feesUnderNewCents += computeFee(gross, newProvider).feeCents;
+  if (newProvider) {
+    for (const row of ledger) {
+      if (row.kind !== "sale") continue;
+      // No provider snapshot -> the row never incurred a provider fee; it has no
+      // place in a "you paid X, new would take Y" comparison. Skip it entirely.
+      if (row.providerId == null || row.feeCents == null) continue;
+      saleCount += 1;
+      const gross = row.grossCents ?? row.amountCents;
+      feesPaidCents += row.feeCents;
+      feesUnderNewCents += computeFee(gross, newProvider).feeCents;
+    }
   }
   return { saleCount, feesPaidCents, feesUnderNewCents };
 }

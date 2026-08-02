@@ -275,6 +275,21 @@ describe("Checkout Booth — provider choice", () => {
     expect(document.body.textContent).toMatch(/Replit/);
   });
 
+  it("the FIRST-EVER provider choice (from null) raises NO coach beat", async () => {
+    renderBooth();
+    await waitFor(() => expect(api?.stage).toBe("landing"));
+    // No provider chosen yet: this is a first choice, not a switch.
+    expect(getApi().chosenProvider).toBeNull();
+
+    act(() => fireEvent.click(button((b) => b.textContent === "Choose Replit")));
+
+    // The choice landed, and the summary is shown WITHOUT a coach dialog (a
+    // first choice has no "old" provider to reflect against).
+    await waitFor(() => expect(document.body.textContent).toMatch(/You chose this/));
+    expect(getApi().chosenProvider?.providerId).toBe("replit");
+    expect(document.querySelector('[role="dialog"]')).toBeNull();
+  });
+
   it("choosing the SAME provider again does NOT show the coach beat (no-op switch)", async () => {
     renderBooth();
     await waitFor(() => expect(api?.stage).toBe("landing"));

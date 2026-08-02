@@ -55,6 +55,40 @@ describe("computeSwitchReflection", () => {
       feesUnderNewCents: 0,
     });
   });
+
+  it("counts ONLY rows with a real fee snapshot; excludes legacy + pre-provider rows from saleCount and both sums", () => {
+    const ledger: LedgerEntry[] = [
+      // Real FPP sale: gross $20, paid $10 (50%). The only row that qualifies.
+      saleRow({ id: "real", grossCents: 2000, feeCents: 1000, netCents: 1000, providerId: "first_profit_pay" }),
+      // Legacy row (pre-Unit-5): only amountCents, no gross/fee snapshot, no
+      // provider. Never incurred a provider fee -> excluded entirely.
+      saleRow({ id: "legacy", amountCents: 5000, grossCents: undefined, feeCents: undefined, netCents: undefined, providerId: null }),
+      // Sale logged before a provider was chosen: feeCents 0, providerId null.
+      // A $0 fee with no provider snapshot -> excluded (would otherwise pit a
+      // positive "would take" against a $0 "paid").
+      saleRow({ id: "preprovider", grossCents: 3000, feeCents: 0, netCents: 3000, providerId: null }),
+    ];
+    const r = computeSwitchReflection(ledger, "replit");
+    // Only the one real FPP row participates in the comparison.
+    expect(r.saleCount).toBe(1);
+    expect(r.feesPaidCents).toBe(1000); // just the real row's $10, not $0-fee rows
+    // Replit on the one $20 gross: floor(2000*290/10000)=58, +30 = 88c. The
+    // excluded rows' $50 and $30 gross do NOT contribute.
+    expect(r.feesUnderNewCents).toBe(88);
+  });
+
+  it("falls back to amountCents for a counted (fee-bearing) row that lacks grossCents", () => {
+    const ledger: LedgerEntry[] = [
+      // Fee-bearing row (providerId + feeCents set) but no grossCents -> gross
+      // must fall back to amountCents (2000) when charging the new provider.
+      saleRow({ id: "nogross", amountCents: 2000, grossCents: undefined, feeCents: 1000, netCents: 1000, providerId: "first_profit_pay" }),
+    ];
+    const r = computeSwitchReflection(ledger, "replit");
+    expect(r.saleCount).toBe(1);
+    expect(r.feesPaidCents).toBe(1000);
+    // gross = amountCents = 2000 -> Replit takes 58 + 30 = 88c.
+    expect(r.feesUnderNewCents).toBe(88);
+  });
 });
 
 describe("ProviderSwitchCoach — switching away from First Profit Pay", () => {
@@ -111,6 +145,27 @@ describe("ProviderSwitchCoach — switching away from First Profit Pay", () => {
   it("has no em dashes in its copy", () => {
     renderCoach();
     expect(document.body.textContent || "").not.toMatch(/—/);
+  });
+});
+
+describe("ProviderSwitchCoach — switching TO First Profit Pay", () => {
+  it("renders the enteringFpp heads-up copy naming the old real provider, with no em dash", () => {
+    render(
+      React.createElement(ProviderSwitchCoach, {
+        oldProviderId: "replit",
+        newProviderId: "first_profit_pay",
+        ledger: [],
+        onDismiss: vi.fn(),
+      }),
+    );
+    const text = document.body.textContent || "";
+    // Unique enteringFpp headline + body copy (not the leavingFpp lesson).
+    expect(text).toMatch(/First Profit Pay takes half/);
+    expect(text).toMatch(/it keeps half of every sale/);
+    expect(text).toMatch(/Most founders pick a provider like Replit/);
+    expect(text).not.toMatch(/Now you keep almost all of it/);
+    // Copy standard: no em dashes anywhere in the rendered beat.
+    expect(text).not.toMatch(/—/);
   });
 });
 
