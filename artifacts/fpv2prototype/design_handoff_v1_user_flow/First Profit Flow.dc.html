@@ -1,0 +1,1216 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin="anonymous">
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400..900&family=Inter:wght@400..800&family=Spline+Sans+Mono:wght@400..700&family=Caveat:wght@700&display=swap" rel="stylesheet">
+<style>
+  body { margin:0; background:hsl(40 30% 99%); color:hsl(30 12% 12%); font-family:'Inter',system-ui,sans-serif; -webkit-font-smoothing:antialiased; }
+  a { color:hsl(30 12% 12%); text-decoration:none; }
+  a:hover { color:hsl(14 78% 54%); text-decoration:underline; }
+  ::selection { background:hsl(14 78% 54% / .18); }
+  input, textarea { font-family:'Inter',system-ui,sans-serif; }
+  input:focus, textarea:focus { outline:none; border-color:hsl(25 34% 20% / .5) !important; }
+  @keyframes fp-blink { 0%,100%{opacity:1} 50%{opacity:0} }
+  @keyframes fp-stamp { 0%{transform:scale(2.2) rotate(-14deg);opacity:0} 60%{transform:scale(.94) rotate(-6deg);opacity:1} 100%{transform:scale(1) rotate(-6deg);opacity:1} }
+  @keyframes fp-rise { 0%{transform:translateY(10px);opacity:0} 100%{transform:translateY(0);opacity:1} }
+  @keyframes fp-pulse { 0%,100%{transform:scale(1)} 50%{transform:scale(1.2)} }
+  @keyframes fp-bob { 0%,100%{transform:translateY(0)} 50%{transform:translateY(-3px)} }
+</style>
+</helmet>
+
+<!-- ============ A · LANDING ============ -->
+<sc-if value="{{ isLanding }}" hint-placeholder-val="{{ true }}">
+<div data-screen-label="A · Landing" style="min-height:100vh; background:hsl(40 30% 99%)">
+  <nav style="display:flex; align-items:center; justify-content:space-between; max-width:1120px; margin:0 auto; padding:20px 32px">
+    <div style="display:flex; align-items:center; gap:10px">
+      <img src="assets/logo-mark.svg" alt="" style="height:28px; display:block">
+      <span style="font-weight:800; font-size:15px; letter-spacing:.02em">FIRST PROFIT</span>
+    </div>
+    <div style="display:flex; align-items:center; gap:20px">
+      <span style="font-size:13px; color:hsl(30 6% 52%)">Home Study Edition · v1 tester preview</span>
+      <button onClick="{{ goStart }}" style="height:40px; padding:0 18px; border:0; border-radius:8px; background:hsl(30 12% 12%); color:#fff; font-family:'Inter'; font-weight:500; font-size:14px; cursor:pointer" style-hover="background:hsl(30 12% 22%)">Start Building</button>
+    </div>
+  </nav>
+
+  <header style="max-width:1120px; margin:0 auto; padding:64px 32px 72px; display:grid; grid-template-columns:1.1fr .9fr; gap:56px; align-items:center">
+    <div>
+      <p style="font-family:'Spline Sans Mono',monospace; font-size:12px; text-transform:uppercase; letter-spacing:.14em; color:hsl(14 78% 54%)">For families · ages 8 to 16</p>
+      <h1 style="font-family:'Fraunces',Georgia,serif; font-optical-sizing:auto; font-weight:800; font-size:56px; line-height:1.05; margin-top:14px; letter-spacing:-0.02em">Your kid's first $1,000, earned for real.</h1>
+      <p style="margin-top:20px; font-size:17px; line-height:1.65; color:hsl(30 8% 34%); max-width:52ch; text-wrap:pretty">First Profit turns starting a real, tiny business into a guided game. Real customers, real money changing hands, one fifteen-minute task at a time. You are the coach and the verifier, never the doer.</p>
+      <div style="display:flex; gap:12px; margin-top:28px">
+        <button onClick="{{ goStart }}" style="height:52px; padding:0 26px; border:0; border-radius:14px; background:hsl(150 52% 40%); color:#fff; font-family:'Fraunces',serif; font-weight:700; font-size:18px; cursor:pointer; box-shadow:0 6px 0 hsl(150 52% 26%)" style-hover="transform:translateY(-2px)" style-active="transform:translateY(1px); box-shadow:0 3px 0 hsl(150 52% 26%)">Start Building →</button>
+      </div>
+      <p style="margin-top:14px; font-family:'Spline Sans Mono',monospace; font-size:11px; color:hsl(30 6% 52%)">Free while we test · a parent sets up every account</p>
+    </div>
+    <div style="position:relative">
+      <div style="border:1px solid hsl(40 14% 89%); border-radius:16px; background:#fff; box-shadow:0 4px 12px rgba(30,24,16,.06), 0 12px 32px rgba(30,24,16,.08); overflow:hidden; transform:rotate(-1.5deg)">
+        <div style="display:flex; align-items:center; gap:6px; border-bottom:1px solid hsl(40 14% 89%); background:hsl(40 24% 96%); padding:10px 12px">
+          <span style="height:9px; width:9px; border-radius:99px; background:hsl(14 78% 54%)"></span>
+          <span style="height:9px; width:9px; border-radius:99px; background:hsl(41 88% 52%)"></span>
+          <span style="height:9px; width:9px; border-radius:99px; background:hsl(150 52% 42%)"></span>
+          <span style="margin-left:8px; border-radius:6px; background:#fff; padding:2px 10px; font-family:'Spline Sans Mono',monospace; font-size:11px; color:hsl(30 6% 52%)">firstprofit.school/cedric</span>
+        </div>
+        <div style="padding:20px 22px 24px; background:#FDFBF3">
+          <div style="display:flex; align-items:center; justify-content:space-between; padding-bottom:12px">
+            <span style="display:flex; align-items:center; gap:7px">
+              <span style="position:relative; display:flex; height:22px; width:22px; align-items:center; justify-content:center; border:1px solid rgba(31,41,55,.8); border-radius:5px; background:#F2C14E; transform:rotate(-3deg); font-family:'Caveat','Comic Sans MS',cursive; font-weight:700; font-size:13px; color:#1F2937">A</span>
+              <span style="display:flex; flex-direction:column">
+                <span style="font-family:'Fraunces',serif; font-weight:700; font-size:12px; letter-spacing:-.01em; color:#1F2937; line-height:1">AZEAP</span>
+                <span style="font-size:6.5px; text-transform:uppercase; letter-spacing:.14em; color:#7C7768; margin-top:1px">Almost zero effort</span>
+              </span>
+            </span>
+            <span style="border-radius:5px; background:#E0603A; color:#fff; padding:4px 9px; font-size:8.5px; font-weight:600">Get an invite</span>
+          </div>
+          <div style="text-align:center; padding:6px 0 4px">
+            <span style="display:inline-flex; align-items:center; gap:4px; transform:rotate(-1deg); border:1px solid rgba(31,41,55,.15); border-radius:99px; background:#fff; padding:2px 8px; font-size:6.5px; font-weight:600; text-transform:uppercase; letter-spacing:.14em; color:#7C7768"><span style="height:4px; width:4px; border-radius:99px; background:#E0603A"></span>Almost Zero Effort Activity Planner</span>
+            <p style="font-family:'Fraunces',serif; font-weight:700; font-size:17px; line-height:1.15; letter-spacing:-.01em; color:#1F2937; margin-top:7px">Your kids' activities, planned before your coffee goes <i>cold</i>.</p>
+            <p style="font-size:9px; line-height:1.5; color:#7C7768; margin-top:5px; max-width:36ch; margin-left:auto; margin-right:auto">You didn't sign up to run a small logistics company. AZEAP quietly sorts it out.</p>
+            <span style="display:inline-block; margin-top:8px; border-radius:5px; background:#E0603A; color:#fff; padding:5px 12px; font-size:8.5px; font-weight:600">Poke at the demo planner ↓</span>
+          </div>
+          <div style="display:grid; grid-template-columns:repeat(3,1fr); gap:8px; margin-top:12px">
+            <div style="position:relative; transform:rotate(-2deg); border:1px solid #DDD8C8; border-radius:7px; background:#fff; padding:8px; box-shadow:0 1px 0 #E7E2D2, 0 14px 30px -18px rgba(31,41,55,.35)">
+              <span style="position:absolute; top:-4px; left:10px; height:7px; width:26px; transform:rotate(-2deg); border-radius:2px; background:#6E9BC5; opacity:.8"></span>
+              <p style="font-family:'Fraunces',serif; font-weight:600; font-size:9px; color:#1F2937; border-bottom:1px dashed #DDD8C8; padding-bottom:4px">The Week</p>
+              <p style="font-size:7px; line-height:1.7; color:rgba(31,41,55,.8); margin-top:4px">✓ Swim, Mon 4:15<br>✓ Piano, Tue 4:15<br>✓ Thu: nothing, on purpose</p>
+            </div>
+            <div style="position:relative; transform:rotate(1deg); border:1px solid #DDD8C8; border-radius:7px; background:#fff; padding:8px; box-shadow:0 1px 0 #E7E2D2, 0 14px 30px -18px rgba(31,41,55,.35)">
+              <span style="position:absolute; top:-4px; left:10px; height:7px; width:26px; transform:rotate(-2deg); border-radius:2px; background:#7FB29A; opacity:.8"></span>
+              <p style="font-family:'Fraunces',serif; font-weight:600; font-size:9px; color:#1F2937; border-bottom:1px dashed #DDD8C8; padding-bottom:4px">The Carpool</p>
+              <p style="font-size:7px; line-height:1.7; color:rgba(31,41,55,.8); margin-top:4px">✓ Priya drives Mon<br>✓ You drive Sat<br>✓ Dey family: swim meet</p>
+            </div>
+            <div style="position:relative; transform:rotate(3deg); border:1px solid #DDD8C8; border-radius:7px; background:#fff; padding:8px; box-shadow:0 1px 0 #E7E2D2, 0 14px 30px -18px rgba(31,41,55,.35)">
+              <span style="position:absolute; top:-4px; left:10px; height:7px; width:26px; transform:rotate(-2deg); border-radius:2px; background:#F2C14E; opacity:.8"></span>
+              <p style="font-family:'Fraunces',serif; font-weight:600; font-size:9px; color:#1F2937; border-bottom:1px dashed #DDD8C8; padding-bottom:4px">The Gear</p>
+              <p style="font-size:7px; line-height:1.7; color:rgba(31,41,55,.8); margin-top:4px">✓ Shin guards<br>✓ Goggles<br>✓ Snack that is not a snack</p>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div style="position:absolute; right:-14px; bottom:-56px; transform:rotate(2deg); border:1px solid hsl(40 14% 89%); border-radius:12px; background:#fff; box-shadow:0 4px 12px rgba(30,24,16,.1); padding:12px 16px; display:flex; align-items:center; gap:12px">
+        <span style="display:flex; height:34px; width:34px; align-items:center; justify-content:center; border-radius:8px; background:hsl(150 52% 42% / .12); color:hsl(150 52% 36%); font-size:16px">✓</span>
+        <div>
+          <p style="font-family:'Spline Sans Mono',monospace; font-size:10px; text-transform:uppercase; letter-spacing:.08em; color:hsl(30 6% 52%)">Payment received</p>
+          <p style="font-weight:600; font-size:14px">Helen Rosenfeld subscribed · <span style="font-family:'Spline Sans Mono',monospace">$25</span> / month</p>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <section id="phases" style="background:hsl(30 12% 12%); padding:64px 32px">
+    <div style="max-width:1120px; margin:0 auto">
+      <p style="font-family:'Spline Sans Mono',monospace; font-size:12px; text-transform:uppercase; letter-spacing:.14em; color:hsl(41 74% 60%)">The Path · five phases, 25 criteria, 125 unit tasks</p>
+      <h2 style="font-family:'Fraunces',serif; font-weight:700; font-size:32px; color:#fff; margin-top:10px">Every criterion is a real thing that happened, verified yes or no.</h2>
+      <div style="display:grid; grid-template-columns:repeat(5,1fr); gap:14px; margin-top:36px">
+        <sc-for list="{{ phases }}" as="ph" hint-placeholder-count="5">
+          <div style="border-radius:14px; padding:20px 18px; background:hsl(30 12% 16%); border-top:4px solid {{ ph.color }}">
+            <p style="font-family:'Spline Sans Mono',monospace; font-size:12px; font-weight:600; color:{{ ph.color }}">0{{ ph.index }}</p>
+            <p style="font-family:'Fraunces',serif; font-weight:700; font-size:20px; color:#fff; margin-top:6px">{{ ph.name }}</p>
+            <p style="font-size:13px; line-height:1.5; color:hsl(30 6% 70%); margin-top:6px">{{ ph.promise }}</p>
+          </div>
+        </sc-for>
+      </div>
+    </div>
+  </section>
+
+  <section style="max-width:1120px; margin:0 auto; padding:72px 32px">
+    <h2 style="font-family:'Fraunces',serif; font-weight:700; font-size:32px">Day one takes ten minutes.</h2>
+    <div style="display:grid; grid-template-columns:repeat(3,1fr); gap:20px; margin-top:32px">
+      <div style="border:1px solid hsl(40 14% 89%); border-radius:16px; background:#fff; padding:26px; box-shadow:0 1px 3px rgba(30,24,16,.06)">
+        <p style="font-family:'Spline Sans Mono',monospace; font-size:13px; font-weight:600; color:hsl(14 78% 54%)">1</p>
+        <h3 style="font-family:'Fraunces',serif; font-size:20px; font-weight:700; margin-top:8px">They claim their page</h3>
+        <p style="font-size:14px; line-height:1.6; color:hsl(30 8% 34%); margin-top:8px">A live website at firstprofit.school/their-name, saying exactly one true thing. It fills in as the business becomes real.</p>
+      </div>
+      <div style="border:1px solid hsl(40 14% 89%); border-radius:16px; background:#fff; padding:26px; box-shadow:0 1px 3px rgba(30,24,16,.06)">
+        <p style="font-family:'Spline Sans Mono',monospace; font-size:13px; font-weight:600; color:hsl(217 74% 56%)">2</p>
+        <h3 style="font-family:'Fraunces',serif; font-size:20px; font-weight:700; margin-top:8px">The money booth switches on</h3>
+        <p style="font-size:14px; line-height:1.6; color:hsl(30 8% 34%); margin-top:8px">Stripe checkout through the First Profit account, so you never wire up a merchant account. Payouts land in your parent-controlled account.</p>
+      </div>
+      <div style="border:1px solid hsl(40 14% 89%); border-radius:16px; background:#fff; padding:26px; box-shadow:0 1px 3px rgba(30,24,16,.06)">
+        <p style="font-family:'Spline Sans Mono',monospace; font-size:13px; font-weight:600; color:hsl(150 52% 42%)">3</p>
+        <h3 style="font-family:'Fraunces',serif; font-size:20px; font-weight:700; margin-top:8px">One task at a time</h3>
+        <p style="font-size:14px; line-height:1.6; color:hsl(30 8% 34%); margin-top:8px">A big green Next Step button walks them through 125 unit tasks. Each ends with a "done when" line you can answer yes or no.</p>
+      </div>
+    </div>
+    <div style="margin-top:20px; border:1px solid hsl(40 14% 89%); border-radius:16px; background:hsl(40 24% 96%); padding:22px 26px; display:flex; gap:24px; align-items:center">
+      <span style="font-family:'Fraunces',serif; font-weight:800; font-size:18px; white-space:nowrap">Your role: coach and verifier.</span>
+      <p style="font-size:14px; color:hsl(30 8% 34%); line-height:1.55">You keep it safe, hold the evidence standard, and resist fixing things. A parent is present for all in-person selling, controls every account and payment, and signs off anything published. There is no partial credit.</p>
+    </div>
+  </section>
+
+  <section style="background:hsl(38 46% 95%); border-top:1px solid hsl(40 14% 89%)">
+    <div style="max-width:1120px; margin:0 auto; padding:64px 32px; display:flex; align-items:center; justify-content:space-between; gap:32px">
+      <div>
+        <h2 style="font-family:'Fraunces',serif; font-weight:800; font-size:36px; color:hsl(25 34% 20%)">The game is the real business.<br>The app keeps score.</h2>
+        <p style="margin-top:10px; font-size:15px; color:hsl(25 20% 38%)">Set up takes one parent, one kid, and about four minutes.</p>
+      </div>
+      <button onClick="{{ goStart }}" style="height:56px; padding:0 32px; border:0; border-radius:14px; background:hsl(150 52% 40%); color:#fff; font-family:'Fraunces',serif; font-weight:700; font-size:19px; cursor:pointer; box-shadow:0 6px 0 hsl(150 52% 26%); white-space:nowrap" style-hover="transform:translateY(-2px)">Start Building →</button>
+    </div>
+  </section>
+  <footer style="max-width:1120px; margin:0 auto; padding:20px 32px; display:flex; justify-content:space-between; font-family:'Spline Sans Mono',monospace; font-size:11px; color:hsl(30 6% 52%)">
+    <span>First Profit · Home Study Edition</span><span>Sell → Build → Validate → Grow → Scale</span>
+  </footer>
+</div>
+</sc-if>
+
+<!-- ============ C · PARENT ACCOUNT ============ -->
+<sc-if value="{{ isParent }}" hint-placeholder-val="{{ false }}">
+<div data-screen-label="C · Parent account" style="min-height:100vh; display:flex; align-items:center; justify-content:center; background:hsl(40 24% 96%); padding:24px">
+  <div style="width:100%; max-width:440px; animation:fp-rise .4s cubic-bezier(.22,1,.36,1) both">
+    <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:18px">
+      <img src="assets/logo-mark.svg" alt="First Profit" style="height:26px">
+      <div style="display:flex; gap:6px">
+        <sc-for list="{{ pDots }}" as="d" hint-placeholder-count="5">
+          <span style="height:6px; width:26px; border-radius:99px; background:{{ d.color }}"></span>
+        </sc-for>
+      </div>
+    </div>
+    <div style="border:1px solid hsl(40 14% 89%); border-radius:16px; background:#fff; padding:32px; box-shadow:0 4px 12px rgba(30,24,16,.06), 0 12px 32px rgba(30,24,16,.08)">
+      <p style="font-family:'Spline Sans Mono',monospace; font-size:11px; text-transform:uppercase; letter-spacing:.14em; color:hsl(30 6% 52%)">Step 1 of 5 · The grown-up</p>
+      <h1 style="font-family:'Fraunces',serif; font-weight:800; font-size:28px; line-height:1.15; margin-top:8px">Create the parent account.</h1>
+      <p style="margin-top:8px; font-size:14px; line-height:1.6; color:hsl(30 8% 34%)">You own every account, payment and publish button. Your founder gets the game; you get the keys.</p>
+      <div style="display:flex; flex-direction:column; gap:14px; margin-top:22px">
+        <label style="display:block">
+          <span style="display:block; font-family:'Spline Sans Mono',monospace; font-size:11px; text-transform:uppercase; letter-spacing:.08em; color:hsl(30 8% 34%); margin-bottom:6px">Your name</span>
+          <input value="{{ pName }}" onChange="{{ setPName }}" placeholder="Sam Rivera" style="width:100%; box-sizing:border-box; border:1px solid hsl(40 10% 80%); border-radius:8px; padding:12px 14px; font-size:15px; background:#fff">
+        </label>
+        <label style="display:block">
+          <span style="display:block; font-family:'Spline Sans Mono',monospace; font-size:11px; text-transform:uppercase; letter-spacing:.08em; color:hsl(30 8% 34%); margin-bottom:6px">Email</span>
+          <input value="{{ pEmail }}" onChange="{{ setPEmail }}" placeholder="sam@example.com" type="email" style="width:100%; box-sizing:border-box; border:1px solid hsl(40 10% 80%); border-radius:8px; padding:12px 14px; font-size:15px; background:#fff">
+        </label>
+        <label style="display:block">
+          <span style="display:block; font-family:'Spline Sans Mono',monospace; font-size:11px; text-transform:uppercase; letter-spacing:.08em; color:hsl(30 8% 34%); margin-bottom:6px">Password</span>
+          <input value="{{ pPass }}" onChange="{{ setPPass }}" placeholder="At least 8 characters" type="password" style="width:100%; box-sizing:border-box; border:1px solid hsl(40 10% 80%); border-radius:8px; padding:12px 14px; font-size:15px; background:#fff">
+        </label>
+      </div>
+      <div style="display:flex; gap:10px; margin-top:18px; border-left:2px solid hsl(41 74% 50%); background:hsl(41 74% 50% / .07); border-radius:0 8px 8px 0; padding:10px 14px">
+        <p style="font-size:12.5px; line-height:1.55; color:hsl(30 8% 34%)">By continuing you confirm you are the parent or legal guardian, and that you control payouts, published content and all messaging channels.</p>
+      </div>
+      <button onClick="{{ parentNext }}" disabled="{{ parentDisabled }}" style="margin-top:20px; width:100%; height:48px; border:0; border-radius:10px; background:hsl(30 12% 12%); color:#fff; font-weight:600; font-size:15px; cursor:pointer" style-hover="background:hsl(30 12% 22%)">Create parent account →</button>
+    </div>
+    <p style="text-align:center; margin-top:14px; font-size:12px; color:hsl(30 6% 52%)"><a href="#" onClick="{{ goLanding }}">← Back</a> · Prototype: nothing is stored</p>
+  </div>
+</div>
+</sc-if>
+
+<!-- ============ D · FOUNDER PROFILE ============ -->
+<sc-if value="{{ isChild }}" hint-placeholder-val="{{ false }}">
+<div data-screen-label="D · Founder profile" style="min-height:100vh; display:flex; align-items:center; justify-content:center; background:hsl(40 24% 96%); padding:24px">
+  <div style="width:100%; max-width:440px; animation:fp-rise .4s cubic-bezier(.22,1,.36,1) both">
+    <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:18px">
+      <img src="assets/logo-mark.svg" alt="First Profit" style="height:26px">
+      <div style="display:flex; gap:6px">
+        <sc-for list="{{ cDots }}" as="d" hint-placeholder-count="5">
+          <span style="height:6px; width:26px; border-radius:99px; background:{{ d.color }}"></span>
+        </sc-for>
+      </div>
+    </div>
+    <div style="border:2px solid hsl(25 34% 20% / .15); border-radius:20px; background:hsl(40 55% 97%); padding:32px; box-shadow:0 2px 0 rgba(120,80,40,.12), 0 8px 24px rgba(120,80,40,.14)">
+      <p style="font-family:'Spline Sans Mono',monospace; font-size:11px; text-transform:uppercase; letter-spacing:.14em; color:hsl(14 78% 54%)">Step 2 of 5 · The founder</p>
+      <h1 style="font-family:'Fraunces',serif; font-weight:800; font-size:28px; line-height:1.15; margin-top:8px; color:hsl(25 34% 20%)">Now hand over the keyboard.</h1>
+      <p style="margin-top:8px; font-size:14px; line-height:1.6; color:hsl(25 20% 38%)">Founder: just a first name and an age. That is all we ever put on the internet.</p>
+      <div style="display:grid; grid-template-columns:1fr 7rem; gap:14px; margin-top:22px">
+        <label style="display:block">
+          <span style="display:block; font-family:'Spline Sans Mono',monospace; font-size:11px; text-transform:uppercase; letter-spacing:.08em; color:hsl(25 20% 38%); margin-bottom:6px">First name</span>
+          <input value="{{ cFirst }}" onChange="{{ setCFirst }}" placeholder="Alex" style="width:100%; box-sizing:border-box; border:2px solid hsl(25 34% 20% / .15); border-radius:10px; padding:11px 14px; font-family:'Fraunces',serif; font-weight:700; font-size:19px; background:#fff; color:hsl(25 34% 20%)">
+        </label>
+        <label style="display:block">
+          <span style="display:block; font-family:'Spline Sans Mono',monospace; font-size:11px; text-transform:uppercase; letter-spacing:.08em; color:hsl(25 20% 38%); margin-bottom:6px">Age</span>
+          <input value="{{ cAge }}" onChange="{{ setCAge }}" placeholder="12" style="width:100%; box-sizing:border-box; border:2px solid hsl(25 34% 20% / .15); border-radius:10px; padding:11px 14px; font-family:'Fraunces',serif; font-weight:700; font-size:19px; background:#fff; color:hsl(25 34% 20%)">
+        </label>
+      </div>
+      <div style="display:flex; align-items:center; gap:8px; margin-top:16px; border:2px dashed hsl(25 34% 20% / .15); border-radius:12px; background:#fff; padding:12px 14px">
+        <span style="font-size:14px" aria-hidden>🌐</span>
+        <p style="font-family:'Spline Sans Mono',monospace; font-size:12.5px; color:hsl(25 20% 38%)">firstprofit.school/<b style="color:hsl(25 34% 20%)">{{ handle }}</b></p>
+        <span style="margin-left:auto; font-family:'Spline Sans Mono',monospace; font-size:10px; text-transform:uppercase; letter-spacing:.08em; color:hsl(150 52% 40%)">available</span>
+      </div>
+      <button onClick="{{ childNext }}" disabled="{{ childDisabled }}" style="margin-top:20px; width:100%; height:52px; border:0; border-radius:14px; background:hsl(150 52% 40%); color:#fff; font-family:'Fraunces',serif; font-weight:700; font-size:18px; cursor:pointer; box-shadow:0 5px 0 hsl(150 52% 26%)" style-hover="transform:translateY(-1px)" style-active="transform:translateY(1px); box-shadow:0 2px 0 hsl(150 52% 26%)">Claim my page →</button>
+    </div>
+    <p style="text-align:center; margin-top:14px; font-size:12px; color:hsl(30 6% 52%)">Signed in as {{ pName }} (parent)</p>
+  </div>
+</div>
+</sc-if>
+
+<!-- ============ E/F/G · ONBOARDING ============ -->
+<sc-if value="{{ isOnboard }}" hint-placeholder-val="{{ false }}">
+<div data-screen-label="E · Onboarding" style="min-height:100vh; display:flex; align-items:center; justify-content:center; background:hsl(38 46% 95%); padding:24px">
+  <div style="width:100%; max-width:600px">
+    <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:18px">
+      <img src="assets/logo-mark.svg" alt="First Profit" style="height:30px">
+      <div style="display:flex; gap:6px">
+        <sc-for list="{{ obDots }}" as="d" hint-placeholder-count="5">
+          <span style="height:6px; width:26px; border-radius:99px; background:{{ d.color }}; transition:background .2s"></span>
+        </sc-for>
+      </div>
+    </div>
+    <div style="border:2px solid hsl(25 34% 20% / .15); border-radius:24px; background:hsl(40 55% 97%); padding:34px; box-shadow:0 2px 0 rgba(120,80,40,.12), 0 8px 24px rgba(120,80,40,.14)">
+
+      <sc-if value="{{ ob0 }}" hint-placeholder-val="{{ false }}">
+        <div style="animation:fp-rise .35s cubic-bezier(.22,1,.36,1) both">
+          <p style="font-family:'Spline Sans Mono',monospace; font-size:11px; text-transform:uppercase; letter-spacing:.14em; color:hsl(265 52% 58%)">Step 3 of 5 · Website</p>
+          <h2 style="margin-top:8px; font-family:'Fraunces',serif; font-weight:900; font-size:30px; line-height:1.1; color:hsl(25 34% 20%)">{{ cFirst }}, you have a website.</h2>
+          <p style="margin-top:8px; font-size:14px; color:hsl(25 20% 38%)">It is live right now, and it says exactly one true thing. You will fill in the rest as the business becomes real.</p>
+          <div style="margin-top:20px; overflow:hidden; border-radius:16px; border:2px solid hsl(25 34% 20% / .15); background:#fff">
+            <div style="display:flex; align-items:center; gap:6px; border-bottom:2px solid hsl(25 34% 20% / .1); background:hsl(25 34% 20% / .05); padding:9px 12px">
+              <span style="height:10px; width:10px; border-radius:99px; background:hsl(14 78% 54%)"></span>
+              <span style="height:10px; width:10px; border-radius:99px; background:hsl(41 88% 52%)"></span>
+              <span style="height:10px; width:10px; border-radius:99px; background:hsl(150 52% 42%)"></span>
+              <span style="margin-left:8px; border-radius:6px; background:#fff; padding:2px 10px; font-family:'Spline Sans Mono',monospace; font-size:10.5px; color:hsl(25 20% 38%)">firstprofit.school/{{ handle }}</span>
+              <span style="margin-left:auto; font-family:'Spline Sans Mono',monospace; font-size:9.5px; text-transform:uppercase; letter-spacing:.08em; color:hsl(150 52% 40%)">● live</span>
+            </div>
+            <div style="padding:38px 26px; text-align:center">
+              <p style="margin:0 auto; max-width:38ch; font-family:'Fraunces',serif; font-weight:700; font-size:20px; line-height:1.4; color:hsl(25 34% 20%)">{{ typed }}<span style="display:inline-block; height:19px; width:2px; margin-left:2px; transform:translateY(3px); background:hsl(14 78% 54%); animation:fp-blink 1s step-end infinite"></span></p>
+            </div>
+          </div>
+        </div>
+      </sc-if>
+
+      <sc-if value="{{ ob1 }}" hint-placeholder-val="{{ false }}">
+        <div style="animation:fp-rise .35s cubic-bezier(.22,1,.36,1) both">
+          <p style="font-family:'Spline Sans Mono',monospace; font-size:11px; text-transform:uppercase; letter-spacing:.14em; color:hsl(150 52% 40%)">Step 4 of 5 · Stripe account</p>
+          <h2 style="margin-top:8px; font-family:'Fraunces',serif; font-weight:900; font-size:30px; line-height:1.1; color:hsl(25 34% 20%)">You can take real money today.</h2>
+          <p style="margin-top:8px; font-size:14px; line-height:1.6; color:hsl(25 20% 38%)">Every founder starts with one offer already switched on: people who believe in you can back you, and they get double their money as credit in your store.</p>
+          <div style="margin-top:18px; border:2px solid hsl(25 34% 20% / .15); border-radius:16px; background:#fff; padding:20px; text-align:center">
+            <p style="font-family:'Spline Sans Mono',monospace; font-size:10px; text-transform:uppercase; letter-spacing:.1em; color:hsl(25 20% 38%)">Your first offer</p>
+            <p style="font-family:'Fraunces',serif; font-weight:900; font-size:24px; margin-top:4px; color:hsl(25 34% 20%)">Invest in me</p>
+            <p style="font-size:13.5px; color:hsl(25 20% 38%); margin-top:4px">Get <b style="color:hsl(25 34% 20%)">$20 in store credit</b> for every $10 you spend here.</p>
+            <div style="display:flex; justify-content:center; gap:8px; margin-top:14px">
+              <span style="border:2px solid hsl(14 78% 54% / .4); background:hsl(14 78% 54% / .08); color:hsl(14 78% 44%); border-radius:10px; padding:8px 12px; font-family:'Spline Sans Mono',monospace; font-size:12px; font-weight:600">$10 → $20</span>
+              <span style="border:2px solid hsl(217 74% 56% / .4); background:hsl(217 74% 56% / .08); color:hsl(217 74% 46%); border-radius:10px; padding:8px 12px; font-family:'Spline Sans Mono',monospace; font-size:12px; font-weight:600">$25 → $50</span>
+              <span style="border:2px solid hsl(265 52% 58% / .4); background:hsl(265 52% 58% / .08); color:hsl(265 52% 48%); border-radius:10px; padding:8px 12px; font-family:'Spline Sans Mono',monospace; font-size:12px; font-weight:600">$50 → $100</span>
+            </div>
+            <button onClick="{{ openCheckout }}" style="margin-top:14px; height:38px; padding:0 18px; border:1px solid hsl(25 34% 20% / .25); border-radius:99px; background:hsl(40 55% 97%); color:hsl(25 34% 20%); font-weight:600; font-size:13px; cursor:pointer" style-hover="border-color:hsl(25 34% 20% / .5)">See your live checkout ↗</button>
+          </div>
+          <div style="display:flex; flex-direction:column; gap:8px; margin-top:16px">
+            <p style="display:flex; gap:8px; font-size:12.5px; line-height:1.5; color:hsl(25 20% 38%)"><span style="color:hsl(150 52% 40%)">✓</span> Money is taken by Stripe through the First Profit account. At any time, you can take over how money flows.</p>
+            <p style="display:flex; gap:8px; font-size:12.5px; line-height:1.5; color:hsl(25 20% 38%)"><span style="color:hsl(150 52% 40%)">✓</span> Every payment is tagged to your page, so it lands in your ledger and your $1,000 bar.</p>
+            <p style="display:flex; gap:8px; font-size:12.5px; line-height:1.5; color:hsl(25 20% 38%)"><span style="color:hsl(150 52% 40%)">✓</span> Payouts are released to the parent regularly. Store credit sits in the website app connected to the email address that made the purchase.</p>
+          </div>
+        </div>
+      </sc-if>
+
+      <sc-if value="{{ ob2 }}" hint-placeholder-val="{{ false }}">
+        <div style="animation:fp-rise .35s cubic-bezier(.22,1,.36,1) both">
+          <p style="font-family:'Spline Sans Mono',monospace; font-size:11px; text-transform:uppercase; letter-spacing:.14em; color:hsl(41 74% 44%)">Step 5 of 5 · The Path</p>
+          <h2 style="margin-top:8px; font-family:'Fraunces',serif; font-weight:900; font-size:30px; line-height:1.1; color:hsl(25 34% 20%)">One room. One task at a time.</h2>
+          <p style="margin-top:8px; font-size:14px; line-height:1.6; color:hsl(25 20% 38%)">First Profit is five phases and 25 criteria, but you do not meet them all today. You start in the Idea Room. Everything else on the factory floor stays shut until you have earned it.</p>
+          <div style="display:flex; flex-direction:column; gap:8px; margin-top:18px">
+            <sc-for list="{{ obPhases }}" as="ph" hint-placeholder-count="5">
+              <div style="display:flex; align-items:center; gap:12px; border:2px solid {{ ph.border }}; background:{{ ph.bg }}; border-radius:12px; padding:10px 14px">
+                <span style="display:flex; height:28px; width:28px; align-items:center; justify-content:center; border-radius:8px; font-family:'Spline Sans Mono',monospace; font-size:12px; font-weight:700; color:#fff; background:{{ ph.badge }}">{{ ph.index }}</span>
+                <span style="flex:1">
+                  <span style="display:block; font-family:'Fraunces',serif; font-weight:700; font-size:16px; color:hsl(25 34% 20%)">{{ ph.name }}</span>
+                  <span style="display:block; font-size:12px; color:hsl(25 20% 38%)">{{ ph.promise }}</span>
+                </span>
+                <span style="font-family:'Spline Sans Mono',monospace; font-size:10px; text-transform:uppercase; letter-spacing:.08em; color:{{ ph.tagColor }}">{{ ph.tag }}</span>
+              </div>
+            </sc-for>
+          </div>
+          <div style="margin-top:16px; border-radius:14px; background:hsl(150 52% 40% / .1); padding:14px 16px">
+            <p style="font-family:'Fraunces',serif; font-weight:700; font-size:15.5px; color:hsl(150 52% 32%)">✦ Your first task</p>
+            <p style="margin-top:4px; font-size:13.5px; line-height:1.55; color:hsl(25 20% 38%)">Pick one thing you could sell this week and write a single sentence about it. Ten minutes. The big green <b>Next Step</b> button will walk you there.</p>
+          </div>
+        </div>
+      </sc-if>
+
+      <button onClick="{{ obNext }}" style="margin-top:24px; width:100%; height:54px; display:flex; align-items:center; justify-content:center; gap:8px; border:0; border-radius:14px; background:hsl(150 52% 40%); color:#fff; font-family:'Fraunces',serif; font-weight:700; font-size:18px; cursor:pointer; box-shadow:0 6px 0 hsl(150 52% 26%)" style-hover="transform:translateY(-2px)" style-active="transform:translateY(1px); box-shadow:0 3px 0 hsl(150 52% 26%)">{{ obCta }} →</button>
+    </div>
+  </div>
+</div>
+</sc-if>
+
+<!-- ============ H · THE APP ============ -->
+<sc-if value="{{ isApp }}" hint-placeholder-val="{{ false }}">
+<div data-screen-label="H · Factory floor" style="min-height:100vh; display:flex; flex-direction:column; gap:16px; background:hsl(38 46% 95%); padding:20px 24px">
+
+  <header style="display:flex; flex-wrap:wrap; align-items:center; gap:20px; border:2px solid hsl(25 34% 20% / .1); border-radius:20px; background:hsl(40 55% 97%); padding:12px 20px">
+    <div style="display:flex; align-items:center; gap:10px">
+      <img src="assets/logo-mark.svg" alt="" style="height:26px">
+      <p style="font-weight:800; font-size:13px; letter-spacing:.02em; line-height:1">FIRST PROFIT</p>
+    </div>
+    <div style="display:flex; align-items:center; gap:10px; border:2px solid hsl(14 78% 54%); background:hsl(14 78% 54% / .09); border-radius:10px; padding:6px 12px">
+      <span style="display:flex; height:20px; width:20px; align-items:center; justify-content:center; border-radius:6px; background:hsl(14 78% 54%); color:#fff; font-family:'Spline Sans Mono',monospace; font-size:10px; font-weight:700">1</span>
+      <span style="font-size:12.5px; font-weight:600; color:hsl(14 78% 44%)">Sell</span>
+      <span style="font-family:'Spline Sans Mono',monospace; font-size:10.5px; color:hsl(25 20% 38%)">{{ phaseDone }}/5 criteria</span>
+    </div>
+    <div style="margin-left:auto; display:flex; align-items:center; gap:18px">
+      <div style="text-align:right">
+        <p style="font-family:'Spline Sans Mono',monospace; font-size:9.5px; text-transform:uppercase; letter-spacing:.08em; color:hsl(25 20% 38%)">Sales</p>
+        <p style="font-family:'Spline Sans Mono',monospace; font-weight:700; font-size:16px; line-height:1.1">${{ backing }}</p>
+      </div>
+      <div style="text-align:right">
+        <p style="font-family:'Spline Sans Mono',monospace; font-size:9.5px; text-transform:uppercase; letter-spacing:.08em; color:hsl(25 20% 38%)">Profit</p>
+        <p style="font-family:'Spline Sans Mono',monospace; font-weight:700; font-size:16px; line-height:1.1">${{ revenue }} <span style="font-weight:400; font-size:10px; color:hsl(25 20% 38%)">of $1,000</span></p>
+      </div>
+      <span style="border-radius:99px; background:hsl(14 78% 54% / .12); color:hsl(14 78% 44%); padding:5px 12px; font-family:'Spline Sans Mono',monospace; font-size:10.5px; font-weight:600; text-transform:uppercase; letter-spacing:.06em">{{ cFirst }}</span>
+    </div>
+  </header>
+
+  <div data-floor="1" onClick="{{ floorClick }}" role="application" aria-label="Factory floor" style="position:relative; flex:1; min-height:520px; overflow:hidden; border-radius:22px; border:2px solid {{ floorBorder }}; transition:border-color .3s; background:hsl(38 40% 92%); background-image:linear-gradient(rgba(26,23,18,.05) 1px, transparent 1px), linear-gradient(90deg, rgba(26,23,18,.05) 1px, transparent 1px); background-size:48px 48px; cursor:pointer">
+    <sc-if value="{{ floorPhases }}" hint-placeholder-val="{{ true }}">
+      <div style="position:absolute; inset:0; display:flex; flex-direction:column; gap:22px; padding:26px 28px 22px">
+        <div>
+          <div style="display:flex; align-items:baseline; gap:12px">
+            <p style="font-family:'Fraunces',serif; font-weight:800; font-size:17px; color:hsl(25 34% 20%)">The Path</p>
+          </div>
+          <div style="display:grid; grid-template-columns:repeat(5,1fr); gap:12px; margin-top:12px">
+            <sc-for list="{{ phaseCards }}" as="pc" hint-placeholder-count="5">
+              <sc-if value="{{ pc.unlocked }}" hint-placeholder-val="{{ true }}">
+                <button onClick="{{ pc.open }}" style="display:flex; flex-direction:column; gap:10px; text-align:left; border:2px solid {{ pc.color }}; border-radius:14px; background:hsl(40 55% 97%); padding:13px 14px; cursor:pointer; box-shadow:0 6px 0 rgba(120,80,40,.1); transition:transform .15s" style-hover="transform:translateY(-3px)">
+                  <span style="display:flex; align-items:center; justify-content:space-between">
+                    <span style="display:flex; align-items:center; gap:8px">
+                      <span style="display:flex; height:24px; width:24px; align-items:center; justify-content:center; border-radius:7px; background:{{ pc.color }}; color:#fff; font-family:'Spline Sans Mono',monospace; font-size:11.5px; font-weight:700">{{ pc.index }}</span>
+                      <span style="font-family:'Fraunces',serif; font-weight:800; font-size:16px; color:hsl(25 34% 20%)">{{ pc.name }}</span>
+                    </span>
+                    <span style="font-weight:600; font-size:12px; color:{{ pc.color }}">→</span>
+                  </span>
+                  <span style="display:block">
+                    <span style="display:flex; gap:3px" aria-hidden>
+                      <sc-for list="{{ pc.pips }}" as="pip" hint-placeholder-count="5">
+                        <span style="height:5px; flex:1; border-radius:99px; background:{{ pip.color }}"></span>
+                      </sc-for>
+                    </span>
+                    <span style="display:block; margin-top:6px; font-family:'Spline Sans Mono',monospace; font-size:9.5px; color:hsl(25 20% 38%)">{{ pc.done }}/5 criteria</span>
+                  </span>
+                </button>
+              </sc-if>
+              <sc-if value="{{ pc.locked }}" hint-placeholder-val="{{ false }}">
+                <div style="display:flex; flex-direction:column; gap:10px; border:2px dashed {{ pc.fadedColor }}; border-radius:14px; background:hsl(25 34% 20% / .02); padding:13px 14px">
+                  <span style="display:flex; align-items:center; gap:8px">
+                    <span style="display:flex; height:24px; width:24px; align-items:center; justify-content:center; border-radius:7px; background:{{ pc.fadedColor }}; color:#fff; font-family:'Spline Sans Mono',monospace; font-size:11.5px; font-weight:700">{{ pc.index }}</span>
+                    <span style="font-family:'Fraunces',serif; font-weight:800; font-size:16px; color:hsl(25 34% 20% / .45)">{{ pc.name }}</span>
+                  </span>
+                  <span style="display:flex; align-items:center; gap:5px">
+                    <span style="font-size:10px; opacity:.45" aria-hidden>🔒</span>
+                    <span style="font-family:'Spline Sans Mono',monospace; font-size:9px; text-transform:uppercase; letter-spacing:.06em; color:hsl(25 20% 38% / .75)">{{ pc.hint }}</span>
+                  </span>
+                </div>
+              </sc-if>
+            </sc-for>
+          </div>
+        </div>
+        <div>
+          <div style="display:flex; align-items:baseline; gap:12px">
+            <p style="font-family:'Fraunces',serif; font-weight:800; font-size:17px; color:hsl(25 34% 20%)">The Company</p>
+          </div>
+          <div style="display:grid; grid-template-columns:repeat(5,1fr); grid-auto-rows:min-content; gap:12px; margin-top:12px; align-content:start">
+            <button onClick="{{ openWebsiteRoom }}" style="display:flex; flex-direction:column; gap:8px; text-align:left; border:2px solid hsl(25 34% 20% / .15); border-radius:14px; background:hsl(40 55% 97%); padding:13px 14px; cursor:pointer; box-shadow:0 6px 0 rgba(120,80,40,.1); transition:transform .15s" style-hover="transform:translateY(-3px)">
+              <span style="display:flex; align-items:center; justify-content:space-between">
+                <span style="font-size:18px" aria-hidden>🌐</span>
+                <span style="font-family:'Spline Sans Mono',monospace; font-size:9px; text-transform:uppercase; letter-spacing:.08em; color:hsl(150 52% 40%)">● live</span>
+              </span>
+              <span style="display:block">
+                <span style="display:block; font-family:'Fraunces',serif; font-weight:700; font-size:14.5px; color:hsl(25 34% 20%)">Your Site</span>
+                <span style="display:block; margin-top:4px; font-family:'Spline Sans Mono',monospace; font-size:9px; color:hsl(25 20% 38%); word-break:break-all">firstprofit.school/{{ handle }}</span>
+              </span>
+            </button>
+            <button onClick="{{ openCheckoutRoom }}" style="display:flex; flex-direction:column; gap:8px; text-align:left; border:2px solid hsl(25 34% 20% / .15); border-radius:14px; background:hsl(40 55% 97%); padding:13px 14px; cursor:pointer; box-shadow:0 6px 0 rgba(120,80,40,.1); transition:transform .15s" style-hover="transform:translateY(-3px)">
+              <span style="display:flex; align-items:center; justify-content:space-between">
+                <span style="font-size:18px" aria-hidden>💳</span>
+                <span style="font-family:'Spline Sans Mono',monospace; font-size:9px; text-transform:uppercase; letter-spacing:.08em; color:hsl(150 52% 40%)">● live</span>
+              </span>
+              <span style="display:block">
+                <span style="display:block; font-family:'Fraunces',serif; font-weight:700; font-size:14.5px; color:hsl(25 34% 20%)">The Checkout Booth</span>
+                <span style="display:block; margin-top:4px; font-family:'Spline Sans Mono',monospace; font-size:9px; color:hsl(25 20% 38%); word-break:break-all">pay.firstprofit.school/{{ handle }}</span>
+              </span>
+            </button>
+            <div style="display:flex; flex-direction:column; align-items:center; justify-content:center; gap:5px; border:2px dashed hsl(25 34% 20% / .12); border-radius:14px; background:hsl(25 34% 20% / .02); padding:13px 14px; min-height:92px">
+              <span style="font-size:14px; opacity:.35" aria-hidden>＋</span>
+              <p style="font-family:'Spline Sans Mono',monospace; font-size:9px; text-transform:uppercase; letter-spacing:.06em; text-align:center; color:hsl(25 20% 38% / .6)">Built on The Path</p>
+            </div>
+            <div style="display:flex; flex-direction:column; align-items:center; justify-content:center; gap:5px; border:2px dashed hsl(25 34% 20% / .12); border-radius:14px; background:hsl(25 34% 20% / .02); padding:13px 14px; min-height:92px">
+              <span style="font-size:14px; opacity:.35" aria-hidden>＋</span>
+              <p style="font-family:'Spline Sans Mono',monospace; font-size:9px; text-transform:uppercase; letter-spacing:.06em; text-align:center; color:hsl(25 20% 38% / .6)">Built on The Path</p>
+            </div>
+            <div style="display:flex; flex-direction:column; align-items:center; justify-content:center; gap:5px; border:2px dashed hsl(25 34% 20% / .12); border-radius:14px; background:hsl(25 34% 20% / .02); padding:13px 14px; min-height:92px">
+              <span style="font-size:14px; opacity:.35" aria-hidden>＋</span>
+              <p style="font-family:'Spline Sans Mono',monospace; font-size:9px; text-transform:uppercase; letter-spacing:.06em; text-align:center; color:hsl(25 20% 38% / .6)">Built on The Path</p>
+            </div>
+          </div>
+        </div>
+        <div>
+          <div style="display:flex; align-items:baseline; gap:12px">
+            <p style="font-family:'Fraunces',serif; font-weight:800; font-size:17px; color:hsl(25 34% 20%)">The Products</p>
+          </div>
+          <div style="display:grid; grid-template-columns:repeat(5,1fr); grid-auto-rows:min-content; gap:12px; margin-top:12px; align-content:start">
+            <sc-for list="{{ ideaSlots }}" as="slot" hint-placeholder-count="5">
+              <sc-if value="{{ slot.filled }}" hint-placeholder-val="{{ true }}">
+                <div style="display:flex; flex-direction:column; gap:7px; border:2px solid hsl(25 34% 20% / .15); border-radius:14px; background:hsl(40 55% 97%); padding:12px 13px; box-shadow:0 6px 0 rgba(120,80,40,.1)">
+                  <span style="font-family:'Spline Sans Mono',monospace; font-size:11px; font-weight:700; color:hsl(14 78% 44%)">Idea #{{ slot.num }}</span>
+                  <span style="display:block; font-size:11.5px; line-height:1.4; color:hsl(25 34% 20%)">{{ slot.name }}</span>
+                  <span style="display:block; font-family:'Spline Sans Mono',monospace; font-size:9px; color:hsl(25 20% 38%)">{{ slot.progress }}</span>
+                </div>
+              </sc-if>
+              <sc-if value="{{ slot.empty }}" hint-placeholder-val="{{ false }}">
+                <div style="display:flex; align-items:center; justify-content:center; border:2px dashed hsl(25 34% 20% / .1); border-radius:14px; background:hsl(25 34% 20% / .015); padding:12px 13px; min-height:84px">
+                  <span style="font-family:'Spline Sans Mono',monospace; font-size:9px; text-transform:uppercase; letter-spacing:.06em; color:hsl(25 20% 38% / .5)">Idea #{{ slot.num }}</span>
+                </div>
+              </sc-if>
+            </sc-for>
+          </div>
+        </div>
+      </div>
+    </sc-if>
+
+    <sc-if value="{{ floorSell }}" hint-placeholder-val="{{ false }}">
+      <div style="position:absolute; inset:0; display:flex; flex-direction:column; padding:24px 28px 56px">
+        <div style="display:flex; align-items:center; gap:14px">
+          <button onClick="{{ backToPhases }}" style="border:2px solid hsl(25 34% 20% / .15); border-radius:99px; background:hsl(40 55% 97%); padding:7px 16px; font-family:'Spline Sans Mono',monospace; font-size:11px; text-transform:uppercase; letter-spacing:.08em; color:hsl(25 20% 38%); cursor:pointer" style-hover="border-color:hsl(25 34% 20% / .4)">← The Path</button>
+          <p style="font-family:'Spline Sans Mono',monospace; font-size:11px; text-transform:uppercase; letter-spacing:.14em; color:hsl(14 78% 44%)">Phase 1 · Sell</p>
+          <p style="font-family:'Fraunces',serif; font-weight:700; font-size:16px; color:hsl(25 34% 20%)">Learn to confidently sell anything.</p>
+        </div>
+        <div style="display:grid; grid-template-columns:repeat(5,1fr); grid-auto-rows:min-content; gap:12px; margin-top:16px; align-content:start">
+          <sc-for list="{{ sellCards }}" as="cc" hint-placeholder-count="5">
+            <sc-if value="{{ cc.unlocked }}" hint-placeholder-val="{{ true }}">
+              <button onClick="{{ cc.open }}" style="position:relative; display:flex; flex-direction:column; gap:10px; text-align:left; border:2px solid {{ cc.border }}; border-radius:14px; background:hsl(40 55% 97%); padding:13px 14px; cursor:pointer; box-shadow:0 6px 0 rgba(120,80,40,.1); transition:transform .15s" style-hover="transform:translateY(-3px)">
+                <sc-if value="{{ cc.isNext }}" hint-placeholder-val="{{ false }}">
+                  <span style="position:absolute; top:-10px; right:10px; border-radius:99px; background:hsl(150 52% 40%); padding:2px 9px; font-family:'Spline Sans Mono',monospace; font-size:9px; font-weight:700; text-transform:uppercase; letter-spacing:.08em; color:#fff">You are here</span>
+                </sc-if>
+                <span style="display:flex; align-items:center; justify-content:space-between">
+                  <span style="font-size:18px" aria-hidden>{{ cc.sign }}</span>
+                  <sc-if value="{{ cc.complete }}" hint-placeholder-val="{{ false }}">
+                    <span style="display:flex; height:20px; width:20px; align-items:center; justify-content:center; border-radius:99px; background:hsl(4 62% 46%); color:#fff; font-size:10px; transform:rotate(-6deg); animation:fp-stamp .55s cubic-bezier(.34,1.56,.64,1) both">✓</span>
+                  </sc-if>
+                </span>
+                <span style="display:block">
+                  <span style="display:block; font-family:'Fraunces',serif; font-weight:700; font-size:14.5px; line-height:1.2; color:hsl(25 34% 20%)">{{ cc.room }}</span>
+                  <span style="display:block; margin-top:3px; font-size:10.5px; line-height:1.4; color:hsl(25 20% 38%)"><b style="font-family:'Spline Sans Mono',monospace; color:hsl(14 78% 44%)">{{ cc.id }}</b> · {{ cc.title }}</span>
+                </span>
+                <span style="display:block">
+                  <span style="display:flex; gap:3px" aria-hidden>
+                    <sc-for list="{{ cc.pips }}" as="pip" hint-placeholder-count="5">
+                      <span style="height:5px; flex:1; border-radius:99px; background:{{ pip.color }}"></span>
+                    </sc-for>
+                  </span>
+                  <span style="display:block; margin-top:6px; font-family:'Spline Sans Mono',monospace; font-size:9px; color:hsl(25 20% 38%)">{{ cc.meta }}</span>
+                </span>
+              </button>
+            </sc-if>
+            <sc-if value="{{ cc.locked }}" hint-placeholder-val="{{ false }}">
+              <div style="display:flex; flex-direction:column; gap:10px; border:2px dashed hsl(25 34% 20% / .15); border-radius:14px; background:hsl(25 34% 20% / .02); padding:13px 14px">
+                <span style="font-size:18px; opacity:.35" aria-hidden>{{ cc.sign }}</span>
+                <span style="display:block">
+                  <span style="display:block; font-family:'Fraunces',serif; font-weight:700; font-size:14.5px; line-height:1.2; color:hsl(25 34% 20% / .45)">{{ cc.room }}</span>
+                  <span style="display:block; margin-top:3px; font-size:10.5px; line-height:1.4; color:hsl(25 20% 38% / .6)"><b style="font-family:'Spline Sans Mono',monospace">{{ cc.id }}</b> · {{ cc.title }}</span>
+                </span>
+                <span style="display:flex; align-items:center; gap:5px">
+                  <span style="font-size:10px; opacity:.45" aria-hidden>🔒</span>
+                  <span style="font-family:'Spline Sans Mono',monospace; font-size:9px; text-transform:uppercase; letter-spacing:.06em; color:hsl(25 20% 38% / .75)">{{ cc.hint }}</span>
+                </span>
+              </div>
+            </sc-if>
+          </sc-for>
+        </div>
+        <div style="display:flex; align-items:baseline; gap:12px; margin-top:22px">
+          <p style="font-family:'Fraunces',serif; font-weight:800; font-size:15px; color:hsl(25 34% 20%)">Your Ideas</p>
+          <p style="font-family:'Spline Sans Mono',monospace; font-size:10px; text-transform:uppercase; letter-spacing:.1em; color:hsl(25 20% 38%)">Up to five products through Sell · the best one carries into Build</p>
+        </div>
+        <div style="display:grid; grid-template-columns:repeat(5,1fr); grid-auto-rows:min-content; gap:12px; margin-top:10px; align-content:start">
+          <sc-for list="{{ ideaSlots }}" as="slot" hint-placeholder-count="5">
+            <sc-if value="{{ slot.filled }}" hint-placeholder-val="{{ true }}">
+              <button onClick="{{ slot.open }}" style="position:relative; display:flex; flex-direction:column; gap:7px; text-align:left; border:2px solid {{ slot.border }}; border-radius:14px; background:hsl(40 55% 97%); padding:12px 13px; cursor:pointer; box-shadow:0 6px 0 rgba(120,80,40,.1); transition:transform .15s" style-hover="transform:translateY(-3px)">
+                <span style="display:flex; align-items:center; justify-content:space-between">
+                  <span style="font-family:'Spline Sans Mono',monospace; font-size:11px; font-weight:700; color:hsl(14 78% 44%)">Idea #{{ slot.num }}</span>
+                  <sc-if value="{{ slot.current }}" hint-placeholder-val="{{ false }}">
+                    <span style="border-radius:99px; background:hsl(14 78% 54% / .12); color:hsl(14 78% 44%); padding:2px 8px; font-family:'Spline Sans Mono',monospace; font-size:8.5px; font-weight:700; text-transform:uppercase; letter-spacing:.06em">current</span>
+                  </sc-if>
+                </span>
+                <span style="display:block; font-size:11.5px; line-height:1.4; color:hsl(25 34% 20%)">{{ slot.name }}</span>
+                <span style="display:block; font-family:'Spline Sans Mono',monospace; font-size:9px; color:hsl(25 20% 38%)">{{ slot.progress }}</span>
+              </button>
+            </sc-if>
+            <sc-if value="{{ slot.create }}" hint-placeholder-val="{{ false }}">
+              <button onClick="{{ slot.open }}" style="display:flex; flex-direction:column; align-items:center; justify-content:center; gap:5px; border:2px dashed hsl(14 78% 54% / .4); border-radius:14px; background:hsl(14 78% 54% / .04); padding:12px 13px; min-height:84px; cursor:pointer; transition:transform .15s" style-hover="transform:translateY(-3px)">
+                <span style="font-size:15px; color:hsl(14 78% 44%)" aria-hidden>＋</span>
+                <span style="font-family:'Spline Sans Mono',monospace; font-size:9.5px; text-transform:uppercase; letter-spacing:.06em; color:hsl(14 78% 44%)">Start Idea #{{ slot.num }}</span>
+              </button>
+            </sc-if>
+            <sc-if value="{{ slot.future }}" hint-placeholder-val="{{ false }}">
+              <div style="display:flex; align-items:center; justify-content:center; border:2px dashed hsl(25 34% 20% / .1); border-radius:14px; background:hsl(25 34% 20% / .015); padding:12px 13px; min-height:84px">
+                <span style="font-family:'Spline Sans Mono',monospace; font-size:9px; text-transform:uppercase; letter-spacing:.06em; color:hsl(25 20% 38% / .5)">Idea #{{ slot.num }}</span>
+              </div>
+            </sc-if>
+          </sc-for>
+        </div>
+      </div>
+    </sc-if>
+
+    <div style="position:absolute; z-index:30; left:{{ avatarLeft }}; top:{{ avatarTop }}; transform:translate(-50%,-100%); transition:left .8s cubic-bezier(.22,1,.36,1), top .8s cubic-bezier(.22,1,.36,1); pointer-events:none">
+      <div style="display:flex; flex-direction:column; align-items:center; animation:fp-bob 2s ease-in-out infinite">
+        <span style="margin-bottom:4px; white-space:nowrap; border-radius:99px; background:hsl(25 34% 20%); color:hsl(40 30% 99%); padding:3px 10px; font-family:'Spline Sans Mono',monospace; font-size:10px; font-weight:600; text-transform:uppercase; letter-spacing:.08em">{{ cFirst }}</span>
+        <svg width="34" height="46" viewBox="0 0 34 46" aria-hidden="true">
+          <ellipse cx="17" cy="44" rx="11" ry="2.5" fill="rgba(26,23,18,0.18)"></ellipse>
+          <rect x="8" y="20" width="18" height="19" rx="7" fill="#2F5D8C"></rect>
+          <rect x="12" y="36" width="4" height="8" rx="2" fill="#1A1712"></rect>
+          <rect x="18" y="36" width="4" height="8" rx="2" fill="#1A1712"></rect>
+          <circle cx="17" cy="12" r="9" fill="#F0C89A"></circle>
+          <path d="M8 11a9 9 0 0 1 18 0v-1a9 9 0 0 0-18 0z" fill="#E0562A"></path>
+          <path d="M7 11h20a1.5 1.5 0 0 1 0 3H7a1.5 1.5 0 0 1 0-3z" fill="#E0562A"></path>
+          <circle cx="14" cy="13" r="1.3" fill="#1A1712"></circle>
+          <circle cx="20" cy="13" r="1.3" fill="#1A1712"></circle>
+        </svg>
+      </div>
+    </div>
+    <p style="pointer-events:none; position:absolute; bottom:10px; left:50%; transform:translateX(-50%); border-radius:99px; background:hsl(25 34% 20% / .55); color:hsl(40 55% 97%); padding:3px 12px; font-family:'Spline Sans Mono',monospace; font-size:9.5px; text-transform:uppercase; letter-spacing:.08em">Click the floor to walk · click a room to enter it</p>
+  </div>
+
+  <!-- Next Step button -->
+  <div style="position:fixed; bottom:24px; right:24px; z-index:40; width:min(92vw, 22rem)">
+    <div style="display:flex; gap:8px">
+      <sc-if value="{{ hasNext }}" hint-placeholder-val="{{ true }}">
+        <button onClick="{{ goNextStep }}" style="flex:1; display:flex; align-items:center; justify-content:space-between; gap:12px; border:0; border-radius:16px; background:hsl(150 52% 40%); padding:18px 24px; text-align:left; color:#fff; cursor:pointer; box-shadow:0 8px 0 hsl(150 52% 26%)" style-hover="transform:translateY(-2px)" style-active="transform:translateY(1px); box-shadow:0 4px 0 hsl(150 52% 26%)">
+          <span style="display:block; font-family:'Fraunces',serif; font-weight:900; font-size:22px; line-height:1">Next Step</span>
+          <span style="font-size:22px">→</span>
+        </button>
+      </sc-if>
+      <sc-if value="{{ pathDone }}" hint-placeholder-val="{{ false }}">
+        <div style="flex:1; display:flex; align-items:center; gap:12px; border:2px solid hsl(150 52% 40%); border-radius:16px; background:hsl(40 55% 97%); padding:14px 20px; box-shadow:0 8px 0 rgba(120,80,40,.1)">
+          <span style="font-size:22px">🎉</span>
+          <div>
+            <p style="font-family:'Fraunces',serif; font-weight:700; font-size:15px">That is the v1 flow, done.</p>
+            <p style="font-size:11.5px; color:hsl(25 20% 38%)">1.1 and 1.2 passed. 10 of 10 unit tasks.</p>
+          </div>
+        </div>
+      </sc-if>
+    </div>
+  </div>
+
+  <!-- Step Runner overlay -->
+  <sc-if value="{{ runnerOpen }}" hint-placeholder-val="{{ false }}">
+    <div style="position:fixed; inset:0; z-index:55; display:flex; align-items:center; justify-content:center; background:hsl(25 34% 20% / .55); padding:16px">
+      <div role="dialog" aria-modal="true" style="position:relative; width:100%; max-width:640px; max-height:100%; overflow-y:auto; border-radius:24px; border:2px solid hsl(25 34% 20% / .15); background:hsl(40 55% 97%); box-shadow:0 8px 0 rgba(120,80,40,.1); animation:fp-rise .3s cubic-bezier(.22,1,.36,1) both">
+        <header style="display:flex; align-items:flex-start; justify-content:space-between; gap:16px; border-bottom:2px solid hsl(25 34% 20% / .1); background:hsl(14 78% 54% / .09); padding:16px 24px; border-radius:22px 22px 0 0">
+          <div>
+            <p style="font-family:'Spline Sans Mono',monospace; font-size:10px; text-transform:uppercase; letter-spacing:.2em; color:hsl(14 78% 44%)">Phase 1 · Sell · Criterion {{ runnerStepNum }} of 5 · Idea #{{ activeIdeaNum }}</p>
+            <h2 style="font-family:'Fraunces',serif; font-weight:900; font-size:20px; line-height:1.2; margin-top:4px; color:hsl(25 34% 20%)">{{ runnerTitle }}</h2>
+          </div>
+          <button onClick="{{ closeRunner }}" aria-label="Back to the floor" style="border:2px solid hsl(25 34% 20% / .15); border-radius:10px; background:hsl(40 55% 97%); padding:6px 10px; cursor:pointer; font-size:13px" style-hover="border-color:hsl(25 34% 20% / .4)">✕</button>
+        </header>
+        <div style="display:flex; gap:6px; border-bottom:2px solid hsl(25 34% 20% / .1); padding:12px 24px">
+          <sc-for list="{{ railSegs }}" as="seg" hint-placeholder-count="5">
+            <div style="flex:1">
+              <div style="height:6px; border-radius:99px; background:{{ seg.color }}"></div>
+              <p style="margin-top:5px; font-size:9.5px; line-height:1.3; color:{{ seg.textColor }}; font-weight:{{ seg.weight }}">{{ seg.label }}</p>
+            </div>
+          </sc-for>
+        </div>
+        <div style="padding:22px 24px 26px">
+          <div style="display:flex; align-items:center; gap:8px">
+            <span style="display:flex; height:26px; width:26px; align-items:center; justify-content:center; border-radius:8px; background:hsl(14 78% 54%); color:#fff; font-family:'Spline Sans Mono',monospace; font-size:12px; font-weight:700">{{ taskNum }}</span>
+            <span style="font-family:'Spline Sans Mono',monospace; font-size:10.5px; text-transform:uppercase; letter-spacing:.08em; color:hsl(25 20% 38%)">Task {{ taskNum }} of {{ taskTotal }}</span>
+            <span style="margin-left:auto; font-family:'Spline Sans Mono',monospace; font-size:10.5px; color:hsl(25 20% 38%)">⏱ about {{ taskMinutes }} min</span>
+          </div>
+          <h3 style="margin-top:12px; font-family:'Fraunces',serif; font-weight:900; font-size:26px; line-height:1.15; color:hsl(25 34% 20%)">{{ taskLabel }}</h3>
+          <p style="margin-top:10px; font-size:14.5px; line-height:1.65; color:hsl(25 20% 38%)">{{ taskHow }}</p>
+          <sc-if value="{{ taskHasInput }}" hint-placeholder-val="{{ false }}">
+            <div style="margin-top:18px">
+              <p style="margin-bottom:6px; font-family:'Spline Sans Mono',monospace; font-size:10.5px; text-transform:uppercase; letter-spacing:.08em; color:hsl(25 20% 38%)">{{ taskInputLabel }}</p>
+              <sc-if value="{{ taskInputLong }}" hint-placeholder-val="{{ false }}">
+                <textarea rows="4" value="{{ taskInputValue }}" onChange="{{ onTaskInput }}" placeholder="{{ taskInputPlaceholder }}" style="width:100%; box-sizing:border-box; border:2px solid hsl(25 34% 20% / .15); border-radius:10px; background:#fff; padding:12px 14px; font-size:14px; resize:vertical"></textarea>
+              </sc-if>
+              <sc-if value="{{ taskInputShort }}" hint-placeholder-val="{{ false }}">
+                <input value="{{ taskInputValue }}" onChange="{{ onTaskInput }}" placeholder="{{ taskInputPlaceholder }}" style="width:100%; box-sizing:border-box; border:2px solid hsl(25 34% 20% / .15); border-radius:10px; background:#fff; padding:12px 14px; font-size:14px">
+              </sc-if>
+            </div>
+          </sc-if>
+          <div style="margin-top:18px; border-left:2px solid hsl(14 78% 54%); border-radius:0 10px 10px 0; background:hsl(40 30% 99%); padding:10px 14px">
+            <p style="font-family:'Spline Sans Mono',monospace; font-size:9.5px; font-weight:600; text-transform:uppercase; letter-spacing:.06em; color:hsl(25 20% 38%)">Done when</p>
+            <p style="margin-top:2px; font-size:13.5px; line-height:1.55; color:hsl(25 34% 20%)">{{ taskDoneWhen }}</p>
+          </div>
+          <div style="display:flex; gap:10px; margin-top:22px">
+            <button onClick="{{ markDone }}" style="flex:1; display:flex; align-items:center; justify-content:center; gap:8px; border:0; border-radius:14px; background:hsl(150 52% 40%); padding:16px; color:#fff; font-family:'Fraunces',serif; font-weight:700; font-size:17px; cursor:pointer; box-shadow:0 5px 0 hsl(150 52% 26%)" style-hover="transform:translateY(-2px)" style-active="transform:translateY(1px); box-shadow:0 2px 0 hsl(150 52% 26%)">✓ I did it</button>
+            <button onClick="{{ closeRunner }}" style="display:flex; align-items:center; justify-content:center; gap:8px; border:2px solid hsl(25 34% 20% / .2); border-radius:14px; background:none; padding:0 20px; font-weight:600; font-size:13.5px; cursor:pointer; color:hsl(25 34% 20%)" style-hover="border-color:hsl(25 34% 20% / .5)">Back to the Floor</button>
+          </div>
+          <p style="margin-top:12px; text-align:center; font-size:12px; color:hsl(25 20% 38%)">Stuck? Everything you need for this task is inside {{ taskRoomName }}.</p>
+        </div>
+      </div>
+    </div>
+  </sc-if>
+
+  <!-- Idea picker -->
+  <sc-if value="{{ pickerOpen }}" hint-placeholder-val="{{ false }}">
+    <div style="position:fixed; inset:0; z-index:52; display:flex; align-items:center; justify-content:center; background:hsl(25 34% 20% / .55); padding:16px">
+      <div role="dialog" aria-modal="true" style="width:100%; max-width:400px; border-radius:20px; border:2px solid hsl(25 34% 20% / .15); background:hsl(40 55% 97%); padding:24px; box-shadow:0 8px 0 rgba(120,80,40,.1); animation:fp-rise .25s cubic-bezier(.22,1,.36,1) both">
+        <p style="font-family:'Spline Sans Mono',monospace; font-size:10px; text-transform:uppercase; letter-spacing:.14em; color:hsl(14 78% 44%)">{{ pickerRoom }}</p>
+        <h2 style="margin-top:6px; font-family:'Fraunces',serif; font-weight:900; font-size:22px; color:hsl(25 34% 20%)">Which idea?</h2>
+        <div style="display:flex; flex-direction:column; gap:8px; margin-top:16px">
+          <sc-for list="{{ pickerOptions }}" as="po" hint-placeholder-count="2">
+            <button onClick="{{ po.pick }}" style="display:flex; align-items:center; gap:12px; text-align:left; border:2px solid hsl(25 34% 20% / .15); border-radius:12px; background:#fff; padding:12px 14px; cursor:pointer; transition:border-color .15s" style-hover="border-color:hsl(14 78% 54%)">
+              <span style="font-family:'Spline Sans Mono',monospace; font-size:12px; font-weight:700; color:hsl(14 78% 44%); white-space:nowrap">{{ po.label }}</span>
+              <span style="font-size:12.5px; line-height:1.4; color:hsl(25 34% 20%)">{{ po.sub }}</span>
+            </button>
+          </sc-for>
+        </div>
+        <button onClick="{{ closePicker }}" style="margin-top:14px; width:100%; height:38px; border:2px solid hsl(25 34% 20% / .15); border-radius:10px; background:none; font-weight:600; font-size:13px; color:hsl(25 20% 38%); cursor:pointer" style-hover="border-color:hsl(25 34% 20% / .4)">Cancel</button>
+      </div>
+    </div>
+  </sc-if>
+
+  <!-- Celebration overlay -->
+  <sc-if value="{{ celebrateOpen }}" hint-placeholder-val="{{ false }}">
+    <div style="position:fixed; inset:0; z-index:60; display:flex; align-items:center; justify-content:center; background:hsl(25 34% 20% / .55); padding:16px">
+      <div role="dialog" aria-modal="true" style="width:100%; max-width:480px; border-radius:24px; border-top:4px solid hsl(14 78% 54%); background:hsl(40 55% 97%); padding:36px; text-align:center; box-shadow:0 12px 32px rgba(30,24,16,.2); animation:fp-rise .35s cubic-bezier(.22,1,.36,1) both">
+        <span style="display:inline-flex; height:64px; width:64px; align-items:center; justify-content:center; border-radius:99px; background:hsl(4 62% 46%); color:#fff; font-size:30px; transform:rotate(-6deg); animation:fp-stamp .6s cubic-bezier(.34,1.56,.64,1) both">✓</span>
+        <p style="margin-top:16px; font-family:'Spline Sans Mono',monospace; font-size:11px; text-transform:uppercase; letter-spacing:.25em; color:hsl(4 62% 46%)">Criterion passed</p>
+        <h2 style="margin-top:8px; font-family:'Fraunces',serif; font-weight:900; font-size:28px; line-height:1.15; color:hsl(25 34% 20%)">{{ celebrateTitle }}</h2>
+        <p style="margin-top:6px; font-family:'Spline Sans Mono',monospace; font-size:14px; color:hsl(25 20% 38%)">+{{ celebrateXp }} XP</p>
+        <sc-if value="{{ celebrateHasOpened }}" hint-placeholder-val="{{ false }}">
+          <div style="margin-top:18px; border:2px dashed hsl(14 78% 54% / .4); border-radius:16px; background:hsl(14 78% 54% / .05); padding:14px">
+            <p style="font-family:'Spline Sans Mono',monospace; font-size:10px; text-transform:uppercase; letter-spacing:.08em; color:hsl(14 78% 44%)">New on The Path</p>
+            <sc-for list="{{ celebrateOpened }}" as="o" hint-placeholder-count="1">
+              <p style="margin-top:6px; font-family:'Fraunces',serif; font-weight:700; font-size:17px; color:hsl(25 34% 20%)">{{ o.label }}</p>
+            </sc-for>
+          </div>
+        </sc-if>
+        <button onClick="{{ closeCelebrate }}" style="margin-top:22px; width:100%; height:52px; border:0; border-radius:14px; background:hsl(150 52% 40%); color:#fff; font-family:'Fraunces',serif; font-weight:700; font-size:17px; cursor:pointer; box-shadow:0 5px 0 hsl(150 52% 26%)" style-hover="transform:translateY(-2px)">Keep going →</button>
+      </div>
+    </div>
+  </sc-if>
+
+  <!-- Room overlay -->
+  <sc-if value="{{ roomOpen }}" hint-placeholder-val="{{ false }}">
+    <div style="position:fixed; inset:0; z-index:50; display:flex; align-items:center; justify-content:center; background:hsl(25 34% 20% / .55); padding:16px">
+      <div role="dialog" aria-modal="true" style="position:relative; width:100%; max-width:620px; max-height:100%; overflow-y:auto; border-radius:24px; border:2px solid hsl(25 34% 20% / .15); background:hsl(40 55% 97%); box-shadow:0 8px 0 rgba(120,80,40,.1); animation:fp-rise .3s cubic-bezier(.22,1,.36,1) both">
+        <header style="display:flex; align-items:center; justify-content:space-between; gap:16px; border-bottom:2px solid hsl(25 34% 20% / .1); padding:16px 24px">
+          <div style="display:flex; align-items:center; gap:10px">
+            <span style="font-size:22px" aria-hidden>{{ roomSign }}</span>
+            <div>
+              <h2 style="font-family:'Fraunces',serif; font-weight:900; font-size:19px; color:hsl(25 34% 20%)">{{ roomName }}</h2>
+              <p style="font-size:12px; color:hsl(25 20% 38%)">{{ roomTagline }}</p>
+            </div>
+          </div>
+          <button onClick="{{ closeRoom }}" aria-label="Close" style="border:2px solid hsl(25 34% 20% / .15); border-radius:10px; background:hsl(40 55% 97%); padding:6px 10px; cursor:pointer; font-size:13px" style-hover="border-color:hsl(25 34% 20% / .4)">✕</button>
+        </header>
+        <div style="padding:22px 24px 26px">
+
+          <sc-if value="{{ roomIsWebsite }}" hint-placeholder-val="{{ false }}">
+            <div style="overflow:hidden; border-radius:14px; border:2px solid hsl(25 34% 20% / .15); background:#fff">
+              <div style="display:flex; align-items:center; gap:6px; border-bottom:2px solid hsl(25 34% 20% / .1); background:hsl(25 34% 20% / .05); padding:8px 12px">
+                <span style="height:9px; width:9px; border-radius:99px; background:hsl(14 78% 54%)"></span>
+                <span style="height:9px; width:9px; border-radius:99px; background:hsl(41 88% 52%)"></span>
+                <span style="height:9px; width:9px; border-radius:99px; background:hsl(150 52% 42%)"></span>
+                <span style="margin-left:6px; border-radius:6px; background:#fff; padding:2px 10px; font-family:'Spline Sans Mono',monospace; font-size:10px; color:hsl(25 20% 38%)">firstprofit.school/{{ handle }}</span>
+                <span style="margin-left:auto; font-family:'Spline Sans Mono',monospace; font-size:9px; text-transform:uppercase; color:hsl(150 52% 40%)">● live</span>
+              </div>
+              <div style="padding:28px 22px; text-align:center">
+                <p style="margin:0 auto; max-width:38ch; font-family:'Fraunces',serif; font-weight:700; font-size:17px; line-height:1.45; color:hsl(25 34% 20%)">{{ headline }}</p>
+                <sc-if value="{{ hasOneLiner }}" hint-placeholder-val="{{ false }}">
+                  <p style="margin:10px auto 0; max-width:44ch; font-size:13px; color:hsl(25 20% 38%)">{{ oneLiner }}</p>
+                </sc-if>
+                <span style="display:inline-block; margin-top:16px; border-radius:99px; background:hsl(25 34% 20%); color:hsl(40 55% 97%); padding:9px 20px; font-weight:600; font-size:13px">Back me · from $10</span>
+              </div>
+            </div>
+            <div style="margin-top:16px">
+              <p style="margin-bottom:6px; font-family:'Spline Sans Mono',monospace; font-size:10.5px; text-transform:uppercase; letter-spacing:.08em; color:hsl(25 20% 38%)">Your headline</p>
+              <input value="{{ headline }}" onChange="{{ setHeadline }}" style="width:100%; box-sizing:border-box; border:2px solid hsl(25 34% 20% / .15); border-radius:10px; background:#fff; padding:11px 14px; font-size:14px">
+              <p style="margin-top:8px; font-size:12px; color:hsl(25 20% 38%)">Edits publish instantly. Your parent sees everything that goes live.</p>
+            </div>
+          </sc-if>
+
+          <sc-if value="{{ roomIsCheckout }}" hint-placeholder-val="{{ false }}">
+            <div style="border:2px solid hsl(25 34% 20% / .15); border-radius:16px; background:#fff; padding:20px; text-align:center">
+              <p style="font-family:'Spline Sans Mono',monospace; font-size:10px; text-transform:uppercase; letter-spacing:.1em; color:hsl(25 20% 38%)">Product 1 of 1 · live</p>
+              <p style="font-family:'Fraunces',serif; font-weight:900; font-size:22px; margin-top:4px; color:hsl(25 34% 20%)">Invest in me</p>
+              <p style="font-size:13px; color:hsl(25 20% 38%); margin-top:4px">Backers get double their money as store credit.</p>
+              <button onClick="{{ openCheckout }}" style="margin-top:14px; height:42px; padding:0 22px; border:0; border-radius:10px; background:hsl(217 74% 56%); color:#fff; font-weight:600; font-size:14px; cursor:pointer" style-hover="filter:brightness(1.08)">Open the live checkout ↗</button>
+              <p style="margin-top:10px; font-family:'Spline Sans Mono',monospace; font-size:10.5px; color:hsl(25 20% 38%)">pay.firstprofit.school/{{ handle }} · Stripe, via the First Profit account</p>
+            </div>
+            <div style="margin-top:16px">
+              <p style="font-family:'Spline Sans Mono',monospace; font-size:10.5px; text-transform:uppercase; letter-spacing:.08em; color:hsl(25 20% 38%)">Ledger</p>
+              <sc-if value="{{ hasSales }}" hint-placeholder-val="{{ false }}">
+                <div style="display:flex; flex-direction:column; gap:6px; margin-top:8px">
+                  <sc-for list="{{ salesList }}" as="s" hint-placeholder-count="1">
+                    <div style="display:flex; align-items:center; gap:10px; border:1px solid hsl(25 34% 20% / .12); border-radius:10px; background:#fff; padding:9px 12px">
+                      <span style="display:flex; height:26px; width:26px; align-items:center; justify-content:center; border-radius:7px; background:{{ s.iconBg }}; font-size:12px">{{ s.icon }}</span>
+                      <span style="flex:1; font-size:13px; color:hsl(25 34% 20%)"><b>{{ s.customer }}</b> · {{ s.product }}</span>
+                      <span style="font-family:'Spline Sans Mono',monospace; font-size:13px; font-weight:600">${{ s.amount }}</span>
+                    </div>
+                  </sc-for>
+                </div>
+              </sc-if>
+              <sc-if value="{{ noSales }}" hint-placeholder-val="{{ true }}">
+                <p style="margin-top:8px; font-size:12.5px; color:hsl(25 20% 38%)">Empty so far. The first row is the whole point of Phase 1.</p>
+              </sc-if>
+            </div>
+          </sc-if>
+
+          <sc-if value="{{ roomIsMarket }}" hint-placeholder-val="{{ false }}">
+            <p style="font-size:13.5px; line-height:1.6; color:hsl(25 20% 38%)">When money actually changes hands, log it here. Your parent audits every row against real money received.</p>
+            <div style="margin-top:14px; border:2px solid hsl(25 34% 20% / .15); border-radius:14px; background:#fff; padding:16px">
+              <p style="font-family:'Spline Sans Mono',monospace; font-size:10.5px; text-transform:uppercase; letter-spacing:.08em; color:hsl(25 20% 38%)">Log a sale</p>
+              <div style="display:grid; grid-template-columns:1fr 6rem; gap:10px; margin-top:10px">
+                <input value="{{ saleName }}" onChange="{{ setSaleName }}" placeholder="Customer (not family)" style="width:100%; box-sizing:border-box; border:2px solid hsl(25 34% 20% / .15); border-radius:10px; padding:10px 12px; font-size:14px">
+                <input value="{{ saleAmount }}" onChange="{{ setSaleAmount }}" placeholder="$12" style="width:100%; box-sizing:border-box; border:2px solid hsl(25 34% 20% / .15); border-radius:10px; padding:10px 12px; font-size:14px; font-family:'Spline Sans Mono',monospace">
+              </div>
+              <button onClick="{{ logSale }}" disabled="{{ saleDisabled }}" style="margin-top:10px; width:100%; height:42px; border:0; border-radius:10px; background:hsl(25 34% 20%); color:hsl(40 55% 97%); font-weight:600; font-size:14px; cursor:pointer" style-hover="filter:brightness(1.15)">Log the sale</button>
+            </div>
+            <sc-if value="{{ hasSales }}" hint-placeholder-val="{{ false }}">
+              <div style="display:flex; flex-direction:column; gap:6px; margin-top:14px">
+                <sc-for list="{{ salesList }}" as="s" hint-placeholder-count="1">
+                  <div style="display:flex; align-items:center; gap:10px; border:1px solid hsl(25 34% 20% / .12); border-radius:10px; background:#fff; padding:9px 12px">
+                    <span style="display:flex; height:26px; width:26px; align-items:center; justify-content:center; border-radius:7px; background:{{ s.iconBg }}; font-size:12px">{{ s.icon }}</span>
+                    <span style="flex:1; font-size:13px; color:hsl(25 34% 20%)"><b>{{ s.customer }}</b> · {{ s.product }}</span>
+                    <span style="font-family:'Spline Sans Mono',monospace; font-size:13px; font-weight:600">${{ s.amount }}</span>
+                  </div>
+                </sc-for>
+              </div>
+            </sc-if>
+          </sc-if>
+
+          <sc-if value="{{ roomIsIdea }}" hint-placeholder-val="{{ false }}">
+            <p style="font-size:13.5px; line-height:1.6; color:hsl(25 20% 38%)">Everything from your pitch work lives here. It flows straight onto your website when you are ready.</p>
+            <div style="margin-top:14px; display:flex; flex-direction:column; gap:10px">
+              <div style="border:2px solid hsl(25 34% 20% / .15); border-radius:14px; background:#fff; padding:14px 16px">
+                <p style="font-family:'Spline Sans Mono',monospace; font-size:10px; text-transform:uppercase; letter-spacing:.08em; color:hsl(25 20% 38%)">Your one-liner</p>
+                <p style="margin-top:4px; font-size:14px; line-height:1.55; color:hsl(25 34% 20%)">{{ oneLinerOrHint }}</p>
+              </div>
+              <div style="border:2px solid hsl(25 34% 20% / .15); border-radius:14px; background:#fff; padding:14px 16px">
+                <p style="font-family:'Spline Sans Mono',monospace; font-size:10px; text-transform:uppercase; letter-spacing:.08em; color:hsl(25 20% 38%)">Your 60-second pitch</p>
+                <p style="margin-top:4px; font-size:14px; line-height:1.55; white-space:pre-wrap; color:hsl(25 34% 20%)">{{ pitchOrHint }}</p>
+              </div>
+            </div>
+          </sc-if>
+
+        </div>
+      </div>
+    </div>
+  </sc-if>
+</div>
+</sc-if>
+
+<!-- ============ G · MOCK STRIPE CHECKOUT ============ -->
+<sc-if value="{{ checkoutOpen }}" hint-placeholder-val="{{ false }}">
+  <div data-screen-label="G · Checkout" style="position:fixed; inset:0; z-index:70; display:flex; align-items:center; justify-content:center; background:hsl(25 34% 20% / .6); padding:16px">
+    <div role="dialog" aria-modal="true" style="width:100%; max-width:840px; max-height:100%; overflow-y:auto; border-radius:16px; background:#fff; box-shadow:0 24px 64px rgba(0,0,0,.3); animation:fp-rise .3s cubic-bezier(.22,1,.36,1) both">
+      <div style="display:flex; align-items:center; justify-content:space-between; border-bottom:1px solid hsl(40 14% 89%); padding:12px 20px">
+        <span style="font-family:'Spline Sans Mono',monospace; font-size:12px; color:hsl(30 6% 52%)">🔒 pay.firstprofit.school/{{ handle }}</span>
+        <button onClick="{{ closeCheckout }}" aria-label="Close checkout" style="border:0; background:none; font-size:15px; cursor:pointer; color:hsl(30 6% 52%); padding:4px 8px; border-radius:6px" style-hover="background:hsl(40 24% 96%)">✕</button>
+      </div>
+      <sc-if value="{{ notPaid }}" hint-placeholder-val="{{ true }}">
+        <div style="display:grid; grid-template-columns:1fr 1fr">
+          <div style="padding:32px; background:hsl(40 30% 99%); border-right:1px solid hsl(40 14% 89%)">
+            <div style="display:flex; align-items:center; gap:10px">
+              <span style="display:flex; height:30px; width:30px; align-items:center; justify-content:center; border-radius:99px; background:hsl(14 78% 54%); color:#fff; font-family:'Fraunces',serif; font-weight:800; font-size:14px">{{ initial }}</span>
+              <span style="font-weight:600; font-size:14px">{{ cFirst }}'s first company</span>
+            </div>
+            <p style="margin-top:24px; font-size:14px; color:hsl(30 8% 34%)">Back {{ cFirst }}</p>
+            <p style="font-family:'Spline Sans Mono',monospace; font-weight:700; font-size:34px; margin-top:4px">${{ payAmount }}.00</p>
+            <p style="margin-top:4px; font-size:13px; color:hsl(30 8% 34%)">Invest in me · you get <b>${{ payCredit }} in store credit</b></p>
+            <div style="display:flex; gap:8px; margin-top:18px">
+              <sc-for list="{{ payOptions }}" as="opt" hint-placeholder-count="3">
+                <button onClick="{{ opt.pick }}" style="flex:1; border:{{ opt.border }}; border-radius:10px; background:{{ opt.bg }}; padding:10px 0; font-family:'Spline Sans Mono',monospace; font-size:13px; font-weight:600; cursor:pointer">${{ opt.amt }}</button>
+              </sc-for>
+            </div>
+            <p style="margin-top:22px; font-size:11.5px; line-height:1.55; color:hsl(30 6% 52%)">Paid to First Profit on behalf of {{ cFirst }} (parent-controlled payout). Store credit is a promise to deliver later.</p>
+          </div>
+          <div style="padding:32px">
+            <p style="font-weight:600; font-size:14px">Pay with card</p>
+            <div style="display:flex; flex-direction:column; gap:10px; margin-top:14px">
+              <input value="{{ payerName }}" onChange="{{ setPayerName }}" placeholder="Name on card" style="width:100%; box-sizing:border-box; border:1px solid hsl(40 10% 80%); border-radius:8px; padding:11px 12px; font-size:14px">
+              <div style="border:1px solid hsl(40 10% 80%); border-radius:8px; overflow:hidden">
+                <input value="4242 4242 4242 4242" readOnly style="width:100%; box-sizing:border-box; border:0; border-bottom:1px solid hsl(40 10% 80%); padding:11px 12px; font-size:14px; font-family:'Spline Sans Mono',monospace; color:hsl(30 6% 52%); background:#fff">
+                <div style="display:grid; grid-template-columns:1fr 1fr">
+                  <input value="12 / 28" readOnly style="width:100%; box-sizing:border-box; border:0; border-right:1px solid hsl(40 10% 80%); padding:11px 12px; font-size:14px; font-family:'Spline Sans Mono',monospace; color:hsl(30 6% 52%); background:#fff">
+                  <input value="424" readOnly style="width:100%; box-sizing:border-box; border:0; padding:11px 12px; font-size:14px; font-family:'Spline Sans Mono',monospace; color:hsl(30 6% 52%); background:#fff">
+                </div>
+              </div>
+              <button onClick="{{ payNow }}" disabled="{{ payDisabled }}" style="margin-top:6px; height:46px; border:0; border-radius:8px; background:hsl(217 74% 56%); color:#fff; font-weight:600; font-size:15px; cursor:pointer" style-hover="filter:brightness(1.08)">Pay ${{ payAmount }}.00</button>
+              <p style="text-align:center; font-family:'Spline Sans Mono',monospace; font-size:10.5px; color:hsl(30 6% 52%)">Test mode · powered by Stripe · no real charge</p>
+            </div>
+          </div>
+        </div>
+      </sc-if>
+      <sc-if value="{{ isPaid }}" hint-placeholder-val="{{ false }}">
+        <div style="padding:48px 32px; text-align:center">
+          <span style="display:inline-flex; height:60px; width:60px; align-items:center; justify-content:center; border-radius:99px; background:hsl(150 52% 42% / .12); color:hsl(150 52% 36%); font-size:28px; animation:fp-stamp .55s cubic-bezier(.34,1.56,.64,1) both">✓</span>
+          <h2 style="margin-top:16px; font-family:'Fraunces',serif; font-weight:800; font-size:26px">{{ payerName }} backed {{ cFirst }}.</h2>
+          <p style="margin-top:8px; font-size:14px; color:hsl(30 8% 34%)">${{ payAmount }}.00 received · ${{ payCredit }} store credit issued</p>
+          <p style="margin-top:4px; font-family:'Spline Sans Mono',monospace; font-size:12px; color:hsl(30 6% 52%)">It just landed in the ledger and the $1,000 bar.</p>
+          <button onClick="{{ closeCheckout }}" style="margin-top:22px; height:44px; padding:0 26px; border:0; border-radius:10px; background:hsl(30 12% 12%); color:#fff; font-weight:600; font-size:14px; cursor:pointer">Done</button>
+        </div>
+      </sc-if>
+    </div>
+  </div>
+</sc-if>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;: {&quot;width&quot;: 1280, &quot;height&quot;: 800}, &quot;startStage&quot;: {&quot;editor&quot;: &quot;enum&quot;, &quot;options&quot;: [&quot;landing&quot;, &quot;parent&quot;, &quot;child&quot;, &quot;onboard&quot;, &quot;app&quot;], &quot;default&quot;: &quot;landing&quot;, &quot;tsType&quot;: &quot;string&quot;, &quot;section&quot;: &quot;Testing shortcuts&quot;}, &quot;testerName&quot;: {&quot;editor&quot;: &quot;text&quot;, &quot;default&quot;: &quot;&quot;, &quot;tsType&quot;: &quot;string&quot;, &quot;section&quot;: &quot;Testing shortcuts&quot;}}">
+class Component extends DCLogic {
+  state = {
+    stage: 'landing', ob: 0, typed: '',
+    pName: '', pEmail: '', pPass: '',
+    cFirst: '', cAge: '12',
+    ideas: [{ fields: {}, done: {} }], activeIdea: 0,
+    runnerOpen: false, coachOpen: false, celebrate: null,
+    room: null, checkoutOpen: false, paid: false, payAmount: 25, payerName: '',
+    sales: [], avatar: { x: 50, y: 94 }
+  };
+
+  get steps() {
+    return [
+      { id: '1.1', room: 'idea', title: 'Pitch a product in 60 seconds, no notes', xp: 60, tasks: [
+        { id: '1.1.1', label: 'Pick the product', minutes: 10, how: 'Choose one thing you could sell this week. Something you make, something you can do for people, or something you already own and would happily sell. Then write one sentence: what it is, who it is for, and why they would want it.', doneWhen: 'Your one-liner is written down and you can say it without looking.', input: { key: 'oneLiner', label: 'Your one-liner', placeholder: 'Team-colour friendship bracelets for kids who want to trade at practice.' } },
+        { id: '1.1.2', label: 'Write the 60-second pitch', minutes: 20, how: 'Four beats, 150 words max. Hook (make them look up), what it is (plainly), why it is good (the problem it kills), the ask (exactly what you want them to do).', doneWhen: 'The written pitch reads aloud in under 60 seconds.', input: { key: 'pitch', label: 'Your 60-second pitch', placeholder: 'Ever lost a friendship bracelet the day after you made it? Mine are stitched...', long: true } },
+        { id: '1.1.3', label: 'Rehearse until note-free and filler-free', minutes: 25, how: 'Record yourself on a phone. Watch it back and count your "um"s and "like"s. Run it again until you get three clean takes in a row: no notes, no fillers, under 60 seconds.', doneWhen: 'You have three clean, note-free runs in a row on video.' },
+        { id: '1.1.4', label: 'Cold pitch a parent', minutes: 15, how: 'Pitch a parent who plays a real, slightly grumpy customer. They must give you one honest objection. Then change one thing in your pitch because of it.', doneWhen: 'You wrote down the objection and the one thing you changed.', input: { key: 'objection', label: 'Their objection, then your fix', placeholder: '"Too expensive." I say the team colours first, price last.' } },
+        { id: '1.1.5', label: 'Cold pitch a non-family adult, no notes', minutes: 20, how: 'A neighbour, a coach, a family friend. An adult who does not live with you. Pitch them live, no notes, under 60 seconds. Then ask them to say back what it is and what you asked for.', doneWhen: 'Their say-back matches your pitch, and a parent watched it happen.', input: { key: 'firstAudience', label: 'Who you pitched', placeholder: 'Coach Mel, after Tuesday practice' } }
+      ]},
+      { id: '1.2', room: 'market', title: 'Make a real sale', xp: 120, tasks: [
+        { id: '1.2.1', label: 'Choose the offer and set the price', minutes: 15, how: 'Decide exactly what one unit is and what it costs. Write one sentence on how you picked the price.', doneWhen: 'The offer, the unit and the price are written down.', input: { key: 'offer', label: 'One unit is...', placeholder: 'One woven bracelet in your team colours, $12' } },
+        { id: '1.2.2', label: 'Build a list of ten people to ask', minutes: 20, how: 'With a parent, list ten real people or households who are not family, and how you will safely reach each one.', doneWhen: 'Ten names with a channel each, approved by a parent.' },
+        { id: '1.2.3', label: 'Set up how money changes hands', minutes: 15, how: 'Cash box with float, a parent-held transfer, or your First Profit checkout link. Decide it now, before anyone says yes.', doneWhen: 'You can name exactly how a customer pays you and how they get the product.' },
+        { id: '1.2.4', label: 'Dress rehearse the whole sale', minutes: 15, how: 'A parent plays the buyer. Run it start to finish: greeting, ask, payment, delivery, thank-you. No stopping halfway.', doneWhen: 'The rehearsal ran all the way through without a restart.' },
+        { id: '1.2.5', label: 'Ask until one yes', minutes: 45, how: 'Work your list. Real asks, parent nearby. Keep going until one real person pays you real money. Then log the sale at the Market Stall.', doneWhen: 'A non-family customer has paid and the sale is in your ledger.' }
+      ]}
+    ];
+  }
+
+  get rooms() {
+    return [
+      { id: 'idea', name: 'The Idea Room', tagline: 'Pick one thing to sell. Say it in a sentence.', x: 6, y: 8, w: 25, h: 30, sign: '💡', lockedHint: 'Open from day one', steps: ['1.1'] },
+      { id: 'website', name: 'Your Site', tagline: 'Live already. Make it yours.', x: 37, y: 6, w: 26, h: 26, sign: '🌐', lockedHint: 'Open from day one', steps: [] },
+      { id: 'checkout', name: 'The Checkout Booth', tagline: 'Take real money. Backers get store credit.', x: 69, y: 8, w: 25, h: 30, sign: '💳', lockedHint: 'Open from day one', steps: [] },
+      { id: 'market', name: 'The Market Stall', tagline: 'Strangers, asks, yeses and nos.', x: 6, y: 45, w: 25, h: 24, sign: '🛒', unlockAfter: '1.1', lockedHint: 'Pitch to one adult first', steps: ['1.2'] },
+      { id: 'workshop', name: 'The Workshop Room', tagline: 'Short workshops. One skill each.', x: 36, y: 39, w: 28, h: 26, sign: '🎓', unlockAfter: '1.2', lockedHint: 'Make your first sale first', steps: [] },
+      { id: 'command', name: 'The Command Deck', tagline: 'Your dashboard, P&L and profit path.', x: 69, y: 45, w: 25, h: 24, sign: '📊', unlockAfter: '1.2', lockedHint: 'Make your first sale first', steps: [] },
+      { id: 'product', name: 'The Product Room', tagline: 'Unit economics and delivery.', x: 12, y: 76, w: 30, h: 20, sign: '📦', unlockAfter: '1.3', lockedHint: 'Collect three nos first', steps: [] },
+      { id: 'build', name: 'The Building Room', tagline: 'Ship the smallest thing that works.', x: 58, y: 76, w: 30, h: 20, sign: '🔨', unlockAfter: '1.5', lockedHint: 'Finish Sell to start building', steps: [] }
+    ];
+  }
+
+  isTaskDone(id, idx) {
+    const i = idx === undefined ? this.state.activeIdea : idx;
+    const idea = this.state.ideas[i];
+    return Boolean(idea && idea.done[id]);
+  }
+  isStepDone(id, idx) { const s = this.steps.find(x => x.id === id); return s ? s.tasks.every(t => this.isTaskDone(t.id, idx)) : false; }
+  nextUpFor(idx) {
+    for (const step of this.steps) {
+      const i = step.tasks.findIndex(t => !this.isTaskDone(t.id, idx));
+      if (i !== -1) return { step, task: step.tasks[i], index: i };
+    }
+    return null;
+  }
+  nextUp() { return this.nextUpFor(this.state.activeIdea); }
+  handle() { return (this.state.cFirst || '').trim().toLowerCase().replace(/[^a-z0-9]/g, '') || 'you'; }
+
+  startTyping() {
+    const sentence = "Hi, I'm " + this.state.cFirst.trim() + " and I'm " + this.state.cAge + " years old. This is the future site of my first $1,000 profit company.";
+    if (this._typeTimer) clearInterval(this._typeTimer);
+    let i = 0;
+    this.setState({ typed: '' });
+    this._typeTimer = setInterval(() => {
+      i += 2;
+      this.setState({ typed: sentence.slice(0, i) });
+      if (i >= sentence.length) clearInterval(this._typeTimer);
+    }, 18);
+  }
+  componentWillUnmount() { if (this._typeTimer) clearInterval(this._typeTimer); }
+
+  componentDidMount() {
+    const st = this.props.startStage;
+    if (st && st !== 'landing') {
+      const name = (this.props.testerName || 'Maya').trim();
+      this.setState({ stage: st, pName: 'Sam Rivera', pEmail: 'sam@example.com', pPass: 'password1', cFirst: st === 'parent' || st === 'child' ? this.state.cFirst : name });
+      if (st === 'onboard') setTimeout(() => this.startTyping(), 50);
+    }
+  }
+
+  renderVals() {
+    const s = this.state;
+    const phases = [
+      { id: 'sell', index: 1, name: 'Sell', promise: 'Learn to confidently sell anything.', color: 'hsl(14 78% 54%)', tint: 'hsl(14 78% 54% / .09)' },
+      { id: 'build', index: 2, name: 'Build', promise: 'Ship a real thing people can buy.', color: 'hsl(217 74% 56%)', tint: 'hsl(217 74% 56% / .09)' },
+      { id: 'validate', index: 3, name: 'Validate', promise: 'Prove it works before you scale it.', color: 'hsl(265 52% 58%)', tint: 'hsl(265 52% 58% / .09)' },
+      { id: 'grow', index: 4, name: 'Grow', promise: 'Get to your first $1,000 in sales.', color: 'hsl(150 52% 42%)', tint: 'hsl(150 52% 42% / .09)' },
+      { id: 'scale', index: 5, name: 'Scale', promise: 'Build the plan to $10,000 in profit.', color: 'hsl(41 88% 52%)', tint: 'hsl(41 88% 52% / .09)' }
+    ];
+    const next = this.nextUp();
+    const handle = this.handle();
+    const stepOf = id => this.steps.find(x => x.id === id);
+    const roomDefs = this.rooms;
+    const roomOf = id => roomDefs.find(r => r.id === id);
+    const nextRoom = next ? next.step.room : null;
+
+    const set = key => e => this.setState({ [key]: e.target.value });
+    const goto = stage => () => this.setState({ stage });
+    const walkThen = (e, fn) => {
+      if (e && e.stopPropagation) e.stopPropagation();
+      const floor = e && e.currentTarget ? e.currentTarget.closest('[data-floor]') : null;
+      if (floor) {
+        const fr = floor.getBoundingClientRect();
+        const cr = e.currentTarget.getBoundingClientRect();
+        this.setState({ avatar: { x: (cr.left + cr.width / 2 - fr.left) / fr.width * 100, y: (cr.bottom + 14 - fr.top) / fr.height * 100 } });
+        if (this._walkTimer) clearTimeout(this._walkTimer);
+        this._walkTimer = setTimeout(fn, 550);
+      } else fn();
+    };
+
+    // the Path floor: phase cards, then Sell criteria drill-down
+    const phaseList = [
+      { name: 'Sell', promise: 'Learn to confidently sell anything.' },
+      { name: 'Build', promise: 'Ship a real thing people can buy.' },
+      { name: 'Validate', promise: 'Prove it works before you scale it.' },
+      { name: 'Grow', promise: 'Get to your first $1,000 in sales.' },
+      { name: 'Scale', promise: 'Build the plan to $10,000 in profit.' }
+    ];
+    const phaseColors = ['hsl(14 78% 54%)', 'hsl(217 74% 56%)', 'hsl(265 52% 58%)', 'hsl(150 52% 42%)', 'hsl(41 88% 52%)'];
+    const phaseFaded = ['hsl(14 78% 54% / .3)', 'hsl(217 74% 56% / .3)', 'hsl(265 52% 58% / .3)', 'hsl(150 52% 42% / .3)', 'hsl(41 88% 52% / .3)'];
+    const sellDone = ['1.1', '1.2'].filter(id => this.isStepDone(id)).length;
+    const phaseCards = phaseList.map((p, i) => ({
+      index: i + 1, name: p.name, promise: p.promise,
+      color: phaseColors[i], fadedColor: phaseFaded[i],
+      unlocked: i === 0, locked: i !== 0,
+      hint: 'Complete ' + phaseList[i - 1 < 0 ? 0 : i - 1].name + ' first',
+      done: i === 0 ? sellDone : 0,
+      pips: [0, 1, 2, 3, 4].map(k => ({ color: i === 0 && k < sellDone ? phaseColors[0] : 'hsl(25 34% 20% / .12)' })),
+      open: e => walkThen(e, () => this.setState({ floorView: 'sell' }))
+    }));
+    const sellCrits = [
+      { id: '1.1', room: 'The Idea Room', sign: '💡', title: 'Pitch a product in 60 seconds, no notes', built: true },
+      { id: '1.2', room: 'The Sales Room', sign: '🛒', title: 'Make a real sale', built: true },
+      { id: '1.3', room: 'The Learning Room', sign: '🎓', title: 'Hear "no" 3 times and learn from the conversations', built: false },
+      { id: '1.4', room: 'The Pricing Room', sign: '🏷️', title: 'Explain cost, price and profit on one page', built: false },
+      { id: '1.5', room: 'The Outreach Room', sign: '📣', title: '25 supervised outreach attempts', built: false }
+    ];
+    const reached = (ci, ii) => ci === 0 ? true : (sellCrits[ci - 1].built && this.isStepDone(sellCrits[ci - 1].id, ii));
+    const ideaName = idea => {
+      const t = (idea.fields.oneLiner || '').trim();
+      return t ? (t.length > 42 ? t.slice(0, 42) + '…' : t) : 'Not named yet';
+    };
+    const sellCards = sellCrits.map((c, i) => {
+      const prev = i === 0 ? null : sellCrits[i - 1];
+      const unlocked = s.ideas.some((_, ii) => reached(i, ii));
+      const step = stepOf(c.id);
+      const doneTasks = step ? step.tasks.filter(t => this.isTaskDone(t.id)).length : 0;
+      const complete = step ? this.isStepDone(c.id) : false;
+      const isNext = Boolean(next && next.step.id === c.id);
+      const stop = e => { if (e && e.stopPropagation) e.stopPropagation(); };
+      return {
+        id: c.id, title: c.title, room: c.room, sign: c.sign,
+        unlocked, locked: !unlocked,
+        hint: 'Complete ' + (prev ? prev.id : '') + ' first',
+        isNext, complete,
+        border: isNext ? 'hsl(150 52% 40%)' : complete ? 'hsl(14 78% 54% / .5)' : 'hsl(25 34% 20% / .15)',
+        pips: [0, 1, 2, 3, 4].map(k => ({ color: k < doneTasks ? phaseColors[0] : 'hsl(25 34% 20% / .12)' })),
+        meta: step ? doneTasks + '/5 unit tasks · Idea #' + (s.activeIdea + 1) : 'Coming in the next build',
+        open: !c.built ? stop : e => {
+          const elig = s.ideas.map((_, ii) => ii).filter(ii => reached(i, ii) && !this.isStepDone(c.id, ii));
+          if (!elig.length) { stop(e); return; }
+          if (elig.length === 1) walkThen(e, () => this.setState({ activeIdea: elig[0], runnerOpen: true }));
+          else walkThen(e, () => this.setState({ pickFor: c.id }));
+        }
+      };
+    });
+    const ideaSlots = [0, 1, 2, 3, 4].map(n => {
+      if (n < s.ideas.length) {
+        const idea = s.ideas[n];
+        const total = this.steps.reduce((a, st) => a + st.tasks.filter(t => idea.done[t.id]).length, 0);
+        const nu = this.nextUpFor(n);
+        return {
+          num: n + 1, filled: true, create: false, future: false,
+          current: n === s.activeIdea,
+          border: n === s.activeIdea ? 'hsl(14 78% 54%)' : 'hsl(25 34% 20% / .15)',
+          name: ideaName(idea),
+          progress: total + '/10 tasks' + (nu ? ' · next ' + nu.task.id : ' · ready for Build'),
+          open: e => walkThen(e, () => this.setState(nu ? { activeIdea: n, runnerOpen: true } : { activeIdea: n }))
+        };
+      }
+      if (n === s.ideas.length) return {
+        num: n + 1, filled: false, create: true, future: false, empty: true,
+        open: e => walkThen(e, () => this.setState({ ideas: [...s.ideas, { fields: {}, done: {} }], activeIdea: n, runnerOpen: true }))
+      };
+      return { num: n + 1, filled: false, create: false, future: true, empty: true };
+    });
+    const pickIdx = s.pickFor ? sellCrits.findIndex(c => c.id === s.pickFor) : -1;
+    const pickCrit = pickIdx >= 0 ? sellCrits[pickIdx] : null;
+    const pickerOptions = pickCrit ? s.ideas.
+      map((idea, ii) => ({ idea, ii })).
+      filter(o => reached(pickIdx, o.ii) && !this.isStepDone(pickCrit.id, o.ii)).
+      map(o => ({
+        label: 'Idea #' + (o.ii + 1),
+        sub: ideaName(o.idea),
+        pick: () => this.setState({ activeIdea: o.ii, pickFor: null, runnerOpen: true })
+      })) : [];
+
+    // runner values
+    const rStep = next ? next.step : this.steps[1];
+    const rTask = next ? next.task : rStep.tasks[4];
+    const railSegs = rStep.tasks.map((t, i) => {
+      const done = this.isTaskDone(t.id);
+      const active = next && i === next.index;
+      return { label: t.label, color: done ? 'hsl(150 52% 40%)' : active ? 'hsl(14 78% 54%)' : 'hsl(25 34% 20% / .12)', textColor: active ? 'hsl(25 34% 20%)' : 'hsl(25 20% 38% / .7)', weight: active ? 600 : 400 };
+    });
+    const markDone = () => {
+      const cur = s.ideas[s.activeIdea];
+      const done = { ...cur.done, [rTask.id]: true };
+      const ideas = s.ideas.map((it, i) => i === s.activeIdea ? { ...it, done } : it);
+      const stepNowDone = rStep.tasks.every(t => done[t.id]);
+      if (stepNowDone) {
+        const opened = rStep.id === '1.1' ? [{ label: '1.2 · The Sales Room' }] : [{ label: '1.3 · The Learning Room' }];
+        this.setState({ ideas, celebrate: { title: rStep.title, xp: rStep.xp, opened } });
+      } else {
+        this.setState({ ideas });
+      }
+    };
+
+    // onboarding
+    const logoColors = ['hsl(14 78% 54%)', 'hsl(217 74% 56%)', 'hsl(265 52% 58%)', 'hsl(150 52% 42%)', 'hsl(41 88% 52%)'];
+    const dots = filled => logoColors.map((c, i) => ({ color: i < filled ? c : 'hsl(30 12% 12% / .15)' }));
+    const obCtas = ['My money booth next', 'Show me The Path', 'Start Unit Task #1'];
+    const obNext = () => {
+      if (s.ob >= 2) { this.setState({ stage: 'app', ob: 0 }); return; }
+      this.setState({ ob: s.ob + 1 });
+    };
+    const obPhases = phases.map((p, i) => ({
+      index: p.index, name: p.name, promise: p.promise,
+      border: i === 0 ? p.color : 'hsl(25 34% 20% / .1)', bg: i === 0 ? p.tint : 'transparent',
+      badge: i === 0 ? p.color : 'hsl(25 12% 68%)',
+      tag: i === 0 ? 'You start here' : '🔒', tagColor: i === 0 ? 'hsl(14 78% 44%)' : 'hsl(25 20% 38% / .6)'
+    }));
+
+    // money
+    const backing = s.sales.filter(x => x.kind === 'backing').reduce((a, b) => a + b.amount, 0);
+    const revenue = s.sales.filter(x => x.kind === 'sale').reduce((a, b) => a + b.amount, 0);
+    const xp = Math.round(s.ideas.reduce((tot, idea) => tot + this.steps.reduce((sum, st) => sum + st.xp * st.tasks.filter(t => idea.done[t.id]).length / st.tasks.length, 0), 0));
+    const af = s.ideas[s.activeIdea].fields;
+    const salesList = s.sales.map(x => ({ customer: x.customer, product: x.product, amount: x.amount, icon: x.kind === 'backing' ? '🤝' : '💵', iconBg: x.kind === 'backing' ? 'hsl(41 88% 52% / .18)' : 'hsl(150 52% 42% / .15)' }));
+
+    const payNow = () => {
+      const credit = s.payAmount * 2;
+      this.setState({
+        paid: true,
+        sales: [{ customer: s.payerName.trim(), product: 'Invest in me · store credit', amount: s.payAmount, kind: 'backing' }, ...s.sales]
+      });
+    };
+    const logSale = () => {
+      const amt = Math.max(0, Math.round(parseFloat(String(s.saleAmount || '').replace(/[^0-9.]/g, '')) || 0));
+      if (!String(s.saleName || '').trim() || !amt) return;
+      const sales = [{ customer: s.saleName.trim(), product: 'First sale', amount: amt, kind: 'sale' }, ...s.sales];
+      const cur = s.ideas[s.activeIdea];
+      const done = { ...cur.done, '1.2.5': true };
+      const ideas = s.ideas.map((it, i) => i === s.activeIdea ? { ...it, done } : it);
+      const stepDone = stepOf('1.2').tasks.every(t => done[t.id]);
+      const patch = { sales, ideas, saleName: '', saleAmount: '' };
+      if (stepDone && !this.isStepDone('1.2')) {
+        patch.celebrate = { title: 'Make a real sale', xp: 120, opened: [{ label: '1.3 · The Learning Room' }] };
+        patch.room = null;
+      }
+      this.setState(patch);
+    };
+
+    const curRoom = s.room ? roomOf(s.room) : null;
+    const payOptions = [10, 25, 50].map(amt => ({
+      amt,
+      border: s.payAmount === amt ? '2px solid hsl(217 74% 56%)' : '1px solid hsl(40 10% 80%)',
+      bg: s.payAmount === amt ? 'hsl(217 74% 56% / .08)' : '#fff',
+      pick: () => this.setState({ payAmount: amt })
+    }));
+
+    return {
+      // stages
+      isLanding: s.stage === 'landing', isParent: s.stage === 'parent', isChild: s.stage === 'child',
+      isOnboard: s.stage === 'onboard', isApp: s.stage === 'app',
+      goStart: goto('parent'), goLanding: goto('landing'),
+      phases,
+      // parent
+      pName: s.pName, pEmail: s.pEmail, pPass: s.pPass,
+      setPName: set('pName'), setPEmail: set('pEmail'), setPPass: set('pPass'),
+      parentDisabled: !(s.pName.trim() && /@/.test(s.pEmail) && s.pPass.length >= 8),
+      parentNext: goto('child'),
+      // child
+      cFirst: s.cFirst || 'Founder', cAge: s.cAge, setCFirst: set('cFirst'), setCAge: set('cAge'),
+      childDisabled: !(s.cFirst.trim() && s.cAge.trim()),
+      childNext: () => { this.setState({ stage: 'onboard', ob: 0 }); this.startTyping(); },
+      pDots: dots(1), cDots: dots(2),
+      handle,
+      // onboarding
+      ob0: s.ob === 0, ob1: s.ob === 1, ob2: s.ob === 2,
+      obDots: dots(s.ob + 3),
+      obNext, obCta: obCtas[s.ob], obPhases, typed: s.typed,
+      // app
+      backing, revenue, xp, phaseDone: [ '1.1', '1.2' ].filter(id => this.isStepDone(id)).length,
+      initial: (s.cFirst.trim()[0] || 'F').toUpperCase(),
+      avatarLeft: s.avatar.x + '%', avatarTop: s.avatar.y + '%',
+      floorClick: e => {
+        const rect = e.currentTarget.getBoundingClientRect();
+        this.setState({ avatar: { x: (e.clientX - rect.left) / rect.width * 100, y: (e.clientY - rect.top) / rect.height * 100 } });
+      },
+      floorBorder: s.floorView === 'sell' ? 'hsl(14 78% 54%)' : 'hsl(25 34% 20% / .1)',
+      floorPhases: (s.floorView || 'phases') === 'phases', floorSell: s.floorView === 'sell',
+      phaseCards, sellCards, ideaSlots,
+      activeIdeaNum: s.activeIdea + 1,
+      pickerOpen: Boolean(pickCrit), pickerRoom: pickCrit ? pickCrit.room : '', pickerOptions,
+      closePicker: () => this.setState({ pickFor: null }),
+      backToPhases: () => this.setState({ floorView: 'phases' }),
+      openWebsiteRoom: e => walkThen(e, () => this.setState({ room: 'website' })),
+      openCheckoutRoom: e => walkThen(e, () => this.setState({ room: 'checkout' })),
+      // coach
+      hasNext: Boolean(next), pathDone: !next,
+      coachOpen: s.coachOpen && Boolean(next), coachClosed: !s.coachOpen && Boolean(next),
+      hideCoach: () => this.setState({ coachOpen: false }), showCoach: () => this.setState({ coachOpen: true }),
+      coachIndex: next ? next.index + 1 : 5, coachTotal: 5,
+      coachLabel: next ? next.task.label : '', coachHow: next ? next.task.how : '',
+      coachMinutes: next ? next.task.minutes : 0, coachRoom: next ? roomOf(next.step.room).name : '',
+      goNextStep: () => {
+        const r = next ? roomOf(next.step.room) : null;
+        this.setState({ runnerOpen: true, avatar: r ? { x: r.x + r.w / 2, y: r.y + r.h + 3 } : s.avatar });
+      },
+      // runner
+      runnerOpen: s.runnerOpen && Boolean(next),
+      closeRunner: () => this.setState({ runnerOpen: false }),
+      runnerStepNum: rStep.id === '1.1' ? 1 : 2, runnerTitle: rStep.title,
+      railSegs, taskNum: next ? next.index + 1 : 5, taskTotal: 5,
+      taskLabel: rTask.label, taskHow: rTask.how, taskDoneWhen: rTask.doneWhen, taskMinutes: rTask.minutes,
+      taskHasInput: Boolean(rTask.input),
+      taskInputLong: Boolean(rTask.input && rTask.input.long), taskInputShort: Boolean(rTask.input && !rTask.input.long),
+      taskInputLabel: rTask.input ? rTask.input.label : '', taskInputPlaceholder: rTask.input ? rTask.input.placeholder : '',
+      taskInputValue: rTask.input ? (af[rTask.input.key] || '') : '',
+      onTaskInput: e => this.setState({ ideas: s.ideas.map((it, i) => i === s.activeIdea ? { ...it, fields: { ...it.fields, [rTask.input.key]: e.target.value } } : it) }),
+      markDone,
+      openTaskRoom: () => this.setState({ runnerOpen: false, room: rStep.room }),
+      taskRoomName: roomOf(rStep.room).name,
+      // celebrate
+      celebrateOpen: Boolean(s.celebrate),
+      celebrateTitle: s.celebrate ? s.celebrate.title : '', celebrateXp: s.celebrate ? s.celebrate.xp : 0,
+      celebrateHasOpened: Boolean(s.celebrate && s.celebrate.opened.length),
+      celebrateOpened: s.celebrate ? s.celebrate.opened : [],
+      closeCelebrate: () => this.setState({ celebrate: null, runnerOpen: false }),
+      // rooms
+      roomOpen: Boolean(curRoom),
+      roomSign: curRoom ? curRoom.sign : '', roomName: curRoom ? curRoom.name : '', roomTagline: curRoom ? curRoom.tagline : '',
+      closeRoom: () => this.setState({ room: null }),
+      roomIsWebsite: s.room === 'website', roomIsCheckout: s.room === 'checkout',
+      roomIsMarket: s.room === 'market',
+      roomIsIdea: Boolean(curRoom) && ['idea', 'workshop', 'command', 'product', 'build'].includes(s.room),
+      headline: s.headline || ("Hi, I'm " + (s.cFirst.trim() || 'Founder') + " and I'm " + s.cAge + " years old. This is the future site of my first $1,000 profit company."),
+      setHeadline: set('headline'),
+      hasOneLiner: Boolean(af.oneLiner), oneLiner: af.oneLiner || '',
+      oneLinerOrHint: af.oneLiner || 'Not written yet. Task 1 of The Path writes this.',
+      pitchOrHint: af.pitch || 'Not written yet. Task 2 of The Path writes this.',
+      // sales
+      hasSales: s.sales.length > 0, noSales: s.sales.length === 0, salesList,
+      saleName: s.saleName || '', saleAmount: s.saleAmount || '',
+      setSaleName: set('saleName'), setSaleAmount: set('saleAmount'),
+      saleDisabled: !(String(s.saleName || '').trim() && String(s.saleAmount || '').trim()),
+      logSale,
+      // checkout
+      checkoutOpen: s.checkoutOpen,
+      openCheckout: () => this.setState({ checkoutOpen: true, paid: false, payerName: '' }),
+      closeCheckout: () => this.setState({ checkoutOpen: false, paid: false }),
+      notPaid: !s.paid, isPaid: s.paid,
+      payAmount: s.payAmount, payCredit: s.payAmount * 2, payOptions,
+      payerName: s.payerName, setPayerName: set('payerName'),
+      payDisabled: !s.payerName.trim(), payNow
+    };
+  }
+}
+</script>
+</body>
+</html>

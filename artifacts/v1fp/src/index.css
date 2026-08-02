@@ -1,0 +1,41 @@
+/* @import url() FONT IMPORTS MUST ALWAYS BE AT THE VERY TOP OF THIS FILE, ABOVE THE TAILWIND IMPORTS — DO NOT DELETE THIS COMMENT */
+@import url('https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,400;0,9..144,600;0,9..144,700;1,9..144,600&family=Inter:wght@400;500;600&family=Caveat:wght@500;600;700&display=swap');
+
+/* CRITICAL: THE FOLLOWING TAILWIND IMPORTS MUST NEVER BE DELETED OR REORDERED — DO NOT DELETE THIS COMMENT */
+@import 'tailwindcss/base';
+@import 'tailwindcss/components';
+@import 'tailwindcss/utilities';
+
+/* END TAILWIND IMPORTS — ALL OTHER CSS MUST GO BELOW THIS LINE */
+
+html {
+  scroll-behavior: smooth;
+}
+body {
+  background-color: #fdfbf3;
+  color: #1f2937;
+  -webkit-font-smoothing: antialiased;
+}
+/* Faint ruled-paper texture used on planner surfaces */
+.paper-lines {
+  background-image: repeating-linear-gradient(
+    to bottom,
+    transparent 0px,
+    transparent 27px,
+    #e9e4d4 27px,
+    #e9e4d4 28px
+  );
+}
+.paper-grid {
+  background-image: linear-gradient(to right, #ebe6d6 1px, transparent 1px),
+    linear-gradient(to bottom, #ebe6d6 1px, transparent 1px);
+  background-size: 22px 22px;
+}
+.marker-underline {
+  background-image: linear-gradient(to top, rgba(242, 193, 78, 0.55) 0%, rgba(242, 193, 78, 0.55) 38%, transparent 38%);
+  padding: 0 0.1em;
+}
+*:focus-visible {
+  outline: 2px solid #e0603a;
+  outline-offset: 2px;
+}
