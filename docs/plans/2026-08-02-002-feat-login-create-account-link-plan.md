@@ -72,7 +72,10 @@ creation**, so a new student has no way in. The in-SPA signup flow stays dormant
 ## Open Questions
 
 ### Resolved During Planning
-- Same-tab vs `target="_blank"`: **same-tab** plain anchor (see Key Technical Decisions).
+- Same-tab vs `target="_blank"`: initially shipped **same-tab**, then **reversed to
+  `target="_blank"` + `rel="noopener noreferrer"`** (new tab) at owner request
+  2026-08-02 — keeps the First Profit login tab open while the120 onboarding runs in
+  a new tab; `rel` blocks reverse-tabnabbing, attribution still rides `?src=fplogin`.
 - Copy + placement: **below the "Log in" button**, secondary link, wording per above.
 
 ### Deferred to Implementation

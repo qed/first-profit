@@ -3,9 +3,9 @@
  * Login screen "Create Account" link-out (feat: login-create-account-link).
  * Account creation lives at the120's /start; the login page links out to it so a
  * new student can reach onboarding. Proves: the link points at
- * https://the120.school/start?src=fplogin, is a same-tab external anchor (no
- * target=_blank), carries a >=44px tap target, has no em dash, and the existing
- * username/password login form is unaffected.
+ * https://the120.school/start?src=fplogin, opens in a new tab with
+ * rel="noopener noreferrer" (no reverse tabnabbing), carries a >=44px tap target,
+ * has no em dash, and the existing username/password login form is unaffected.
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, render, screen } from "@testing-library/react";
@@ -29,10 +29,15 @@ describe("Login Create Account link-out", () => {
     expect(link.getAttribute("href")).toBe("https://the120.school/start?src=fplogin");
   });
 
-  it("is a same-tab external anchor (no target=_blank)", () => {
+  it("opens in a new tab with a safe rel (no reverse tabnabbing)", () => {
     render(<Login />);
     const link = screen.getByRole("link", { name: /create an account/i });
-    expect(link.getAttribute("target")).toBeNull();
+    expect(link.getAttribute("target")).toBe("_blank");
+    // target=_blank to an external origin MUST carry noopener (block window.opener
+    // reverse-tabnabbing); noreferrer strips the Referer (attribution rides ?src).
+    const rel = link.getAttribute("rel") ?? "";
+    expect(rel).toContain("noopener");
+    expect(rel).toContain("noreferrer");
   });
 
   it("carries a >=44px tap target and no em dash", () => {

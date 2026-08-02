@@ -122,6 +122,8 @@ export function Login() {
             New to First Profit?{" "}
             <a
               href={CREATE_ACCOUNT_URL}
+              target="_blank"
+              rel="noopener noreferrer"
               className="inline-flex min-h-[44px] items-center font-bold text-sell underline decoration-2 underline-offset-2 hover:text-sell/80"
             >
               Create an account
