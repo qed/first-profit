@@ -38,14 +38,23 @@ _Last updated: 2026-08-02_
 
 ## Active side-tracks (not roadmap pieces)
 
-- **fpv2 user-flow testing milestone** — get a walkable signup→child→play flow on
-  firstprofit.school for testing. the120-side handoff:
-  `docs/handoffs/2026-08-02-the120-enable-fpv2-signup-testing.md`. First Profit side:
-  flip `VITE_ENABLE_SIGNUP` for the test window.
-- **Slice B go-live remainder** (piece #2 → live): flip `VITE_ENABLE_SIGNUP`, RLS
-  re-probe, live-Workspace acceptance run. Mostly credential-gated / human-owned.
+- **FP login + account-creation link-out** (achieves the user-flow testing goal) —
+  account model decided 2026-08-02: fpv2 = game + login (username/password) only;
+  account creation lives at the120 `/start`. Retire the redundant in-SPA signup flow
+  + add a "Create Account" link on the login page →
+  `https://the120.school/start?src=fplogin`. Requirements:
+  `docs/brainstorms/2026-08-02-fp-login-account-creation-requirements.md`.
+  (Supersedes the old flag-flip "testing milestone" + the the120 signup-enable
+  handoff, both now marked superseded.)
+- **Slice B go-live remainder** — with the in-SPA signup retired, the FP CTA cutover
+  is moot; any remaining go-live items (RLS re-probe, etc.) live on the120 side.
 
 ## Notes
 
+- **Piece #2 reframe (2026-08-02):** the Slice B *in-SPA signup front-end* is being
+  retired — account creation moved to the120 `/start`; fpv2 keeps username/password
+  login + a "Create Account" link out. The signup *backend* (`/api/fp/signup*`) and
+  username login remain. "Awaiting flag flip" no longer applies. See the login
+  link-out side-track above.
 - Pieces #4 and #5 are the open, sequenceable work; **#6 is blocked behind #5**.
 - Legend: ✅ shipped · 📝 requirements parked · ⬜ not started (needs its own plan).

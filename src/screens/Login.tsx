@@ -14,6 +14,12 @@ import { useGame } from "../state/GameContext";
 const GENERIC_ERROR =
   "Hmm, that username and password do not match. Check the spelling and try again, or ask your grown-up.";
 
+// Account creation lives at the120's /start onboarding (fpv2 is game + login only).
+// This is the120's MARKETING/web origin, deliberately distinct from the API origin
+// in src/config.ts (VITE_T120_API_URL, used only for /api/fp/* calls). `src=fplogin`
+// attributes signups that originated from the First Profit login.
+const CREATE_ACCOUNT_URL = "https://the120.school/start?src=fplogin";
+
 export function Login() {
   const { login, dispatch } = useGame();
   const [identifier, setIdentifier] = useState("");
@@ -111,6 +117,16 @@ export function Login() {
               {loading ? "Logging in..." : "Log in"}
             </button>
           </form>
+
+          <p className="mt-5 border-t border-[hsl(40_14%_89%)] pt-4 text-center text-sm leading-relaxed text-ink/70">
+            New to First Profit?{" "}
+            <a
+              href={CREATE_ACCOUNT_URL}
+              className="inline-flex min-h-[44px] items-center font-bold text-sell underline decoration-2 underline-offset-2 hover:text-sell/80"
+            >
+              Create an account
+            </a>
+          </p>
         </div>
 
         <p className="mt-4 text-center font-mono text-[11px] uppercase tracking-wider text-ink/50">
