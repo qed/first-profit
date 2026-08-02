@@ -252,6 +252,42 @@ describe("Checkout Booth — provider choice", () => {
     );
   });
 
+  it("shows a light 'subscription so far' estimate for a subscription provider (R24.8)", async () => {
+    renderBooth();
+    await waitFor(() => expect(api?.stage).toBe("landing"));
+    // Chosen a while ago so the directional estimate is a positive number.
+    const twoMonthsAgo = Date.now() - 2 * 30 * 24 * 60 * 60 * 1000;
+    act(() => getApi().dispatch({ type: "SET_PROVIDER", providerId: "shopify", chosenAt: twoMonthsAgo }));
+
+    await waitFor(() => expect(document.body.textContent).toMatch(/You chose this/));
+    // The directional estimate line is present + labeled as an estimate.
+    expect(document.body.textContent).toMatch(/Subscription so far \(estimate\)/);
+    expect(document.body.textContent).toMatch(/so far/);
+  });
+
+  it("omits the 'subscription so far' estimate for First Profit Pay (no subscription)", async () => {
+    renderBooth();
+    await waitFor(() => expect(api?.stage).toBe("landing"));
+    act(() => getApi().dispatch({ type: "SET_PROVIDER", providerId: "first_profit_pay", chosenAt: 1 }));
+
+    await waitFor(() => expect(document.body.textContent).toMatch(/You chose this/));
+    expect(document.body.textContent).not.toMatch(/Subscription so far/);
+  });
+
+  it("'Set it up for real' opens the SetupGuide dialog for the chosen provider (R24.10)", async () => {
+    renderBooth();
+    await waitFor(() => expect(api?.stage).toBe("landing"));
+    act(() => getApi().dispatch({ type: "SET_PROVIDER", providerId: "replit", chosenAt: 1 }));
+
+    await waitFor(() => expect(document.body.textContent).toMatch(/You chose this/));
+    // No dialog until the affordance is used.
+    expect(document.querySelector('[role="dialog"]')).toBeNull();
+
+    act(() => fireEvent.click(button((b) => b.textContent === "Set it up for real")));
+    await waitFor(() => expect(document.querySelector('[role="dialog"]')).toBeTruthy());
+    expect(document.body.textContent).toMatch(/Go live with Replit/);
+  });
+
   it("switching to a DIFFERENT provider shows the coach beat; dismissing lands on the new provider (R24.6)", async () => {
     renderBooth();
     await waitFor(() => expect(api?.stage).toBe("landing"));

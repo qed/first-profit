@@ -27,7 +27,7 @@ export function feeLabel(provider: Provider): string {
 }
 
 /** "$25/mo" for a subscription, or "No monthly fee" when there is none. */
-function subscriptionLabel(provider: Provider): string {
+export function subscriptionLabel(provider: Provider): string {
   if (provider.subscriptionCents == null) return "No monthly fee";
   return `$${provider.subscriptionCents / 100}/mo`;
 }
