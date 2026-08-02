@@ -192,6 +192,40 @@ describe("ADD_LEDGER", () => {
     expect(salesSumCents(s)).toBe(1500);
   });
 
+  it("a mock sale (mock:true) lands in the ledger/HUD but does NOT complete 1.2 or celebrate", () => {
+    // REAL in-game state the Checkout Booth mock is reachable at: 1.1 done, 1.2
+    // unlocked but NOT complete, an active idea. This is the path the mock's
+    // "Invest in me -> Pay" hits — it must preserve pre-Unit-3 `backing` behavior
+    // (row lands + HUD updates) without firing the real first sale.
+    let s = withOneIdea();
+    s = completeCriterion(s, 0, "1.1");
+    s = reducer(s, { type: "DISMISS_CELEBRATION" });
+    for (let i = 0; i < LAST_1_2_INDEX; i++) {
+      s = reducer(s, { type: "COMPLETE_TASK", ideaIndex: 0, stepId: "1.2", index: i });
+    }
+    expect(isStepUnlocked(s, 0, "1.2")).toBe(true);
+    expect(isCriterionDone(s, 0, "1.2")).toBe(false);
+    const before = s.ideas[0];
+
+    s = reducer(s, {
+      type: "ADD_LEDGER",
+      id: "mock-pay",
+      kind: "sale",
+      mock: true,
+      payer: "A backer",
+      amountCents: 2500,
+      createdAt: "2026-07-31T00:04:00.000Z",
+    });
+    // Row + HUD stat land (cosmetic success preserved)...
+    expect(s.ledger).toHaveLength(1);
+    expect(salesSumCents(s)).toBe(2500);
+    // ...but 1.2's final pip stays dark and no first-sale celebration fires.
+    expect(isTaskDone(s, 0, "1.2", LAST_1_2_INDEX)).toBe(false);
+    expect(isCriterionDone(s, 0, "1.2")).toBe(false);
+    expect(s.celebrate).toBeNull();
+    expect(s.ideas[0]).toBe(before); // done map untouched (referentially)
+  });
+
   it("a bare sale row defaults its fee snapshot (gross=net=amount, fee=0, provider=null)", () => {
     // Reach a state where a sale is allowed (1.1 complete) but is NOT the 1.2
     // completing sale, so we can inspect the defaulted fee fields on the row.
@@ -804,6 +838,38 @@ describe("chosenProvider persistence (additive-optional, NO DOC_VERSION bump)", 
     expect(parsed.ok).toBe(true);
     if (!parsed.ok) return;
     expect(parsed.doc.chosenProvider).toBeNull();
+  });
+
+  it("a valid providerId with a non-finite/negative/missing chosenAt defaults to null (no half-broken object)", () => {
+    // NaN is the dangerous one: JSON.stringify(NaN) === 'null', so a persisted
+    // NaN chosenAt would round-trip to a dropped field on the next load. Guard
+    // rejects it (and Infinity / negative / missing) so the whole leaf is null.
+    const base = {
+      docVersion: 1,
+      ideas: [],
+      activeIdea: 0,
+      siteHeadline: "",
+      onboardingComplete: false,
+    };
+    for (const chosenAt of [NaN, Infinity, -Infinity, -1] as unknown[]) {
+      const parsed = fromSaveDoc({
+        ...base,
+        chosenProvider: { providerId: "replit", chosenAt },
+      });
+      expect(parsed.ok).toBe(true);
+      if (!parsed.ok) return;
+      expect(parsed.doc.chosenProvider).toBeNull();
+    }
+    // Missing chosenAt entirely -> also null (not { providerId, chosenAt: undefined }).
+    const missing = fromSaveDoc({ ...base, chosenProvider: { providerId: "replit" } });
+    expect(missing.ok).toBe(true);
+    if (!missing.ok) return;
+    expect(missing.doc.chosenProvider).toBeNull();
+    // Sanity: a valid finite chosenAt (including 0) DOES survive.
+    const ok = fromSaveDoc({ ...base, chosenProvider: { providerId: "replit", chosenAt: 0 } });
+    expect(ok.ok).toBe(true);
+    if (!ok.ok) return;
+    expect(ok.doc.chosenProvider).toEqual({ providerId: "replit", chosenAt: 0 });
   });
 });
 

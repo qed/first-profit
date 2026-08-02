@@ -10,7 +10,7 @@
  * adds new code.
  */
 import { parseTask, stepById, type RoomId } from "../data/path";
-import type { ProviderId } from "../data/providers";
+import { PROVIDER_IDS, type ProviderId } from "../data/providers";
 
 /** Schema version stored inside every serialized save doc. Bump on shape change. */
 export const DOC_VERSION = 1;
@@ -193,18 +193,23 @@ function coerceIdea(value: unknown): Idea {
   return { fields, done };
 }
 
-const PROVIDER_IDS: readonly ProviderId[] = ["first_profit_pay", "replit", "shopify"];
-
 // Coerce a persisted chosenProvider leaf. ADDITIVE OPTIONAL: an existing v1 doc
 // has no such field (or a malformed one), which DEFAULTS to null — never a
 // discard. Only a well-formed {providerId, chosenAt} with a known id survives.
+// Validated against the canonical PROVIDER_IDS from ../data/providers, so a new
+// provider is never silently rejected on load. chosenAt must be a FINITE, non-
+// negative number: NaN/Infinity/negative are rejected (NaN would otherwise
+// JSON.stringify to null and drop the whole provider on the next load), so a
+// malformed timestamp defaults the whole leaf to null rather than half-breaking.
 function coerceChosenProvider(value: unknown): ChosenProvider | null {
   if (!isRecord(value)) return null;
   const { providerId, chosenAt } = value;
   if (
     typeof providerId === "string" &&
     (PROVIDER_IDS as readonly string[]).includes(providerId) &&
-    typeof chosenAt === "number"
+    typeof chosenAt === "number" &&
+    Number.isFinite(chosenAt) &&
+    chosenAt >= 0
   ) {
     return { providerId: providerId as ProviderId, chosenAt };
   }
@@ -372,7 +377,7 @@ export type Action =
   | { type: "OPEN_ROOM"; room: RoomId }
   | { type: "CLOSE_ROOM" }
   | { type: "SET_PICK_FOR"; pickFor: string | null }
-  | ({ type: "ADD_LEDGER" } & LedgerEntry)
+  | ({ type: "ADD_LEDGER"; mock?: boolean } & LedgerEntry)
   | { type: "SET_LEDGER"; ledger: LedgerEntry[] }
   | { type: "DISMISS_CELEBRATION" }
   | { type: "OPEN_CHECKOUT" }
@@ -498,7 +503,10 @@ export function reducer(state: GameState, action: Action): GameState {
       if (state.ledger.some((row) => row.id === action.id)) return state;
       // Carry the fee snapshot through when supplied (Unit 5 computes it); a bare
       // sale with no snapshot defaults gross = net = amountCents, fee = 0,
-      // providerId = null so the net/gross sums stay consistent.
+      // providerId = null so the net/gross sums stay consistent. The snapshot is
+      // ALL-OR-NOTHING: supply gross+fee+net together (computeFee guarantees
+      // gross = fee + net). A partial snapshot (e.g. feeCents without netCents)
+      // would default the omitted parts independently and break that identity.
       const entry: LedgerEntry = {
         id: action.id,
         kind: action.kind,
@@ -511,10 +519,14 @@ export function reducer(state: GameState, action: Action): GameState {
         createdAt: action.createdAt,
       };
       let next: GameState = { ...state, ledger: [...state.ledger, entry] };
-      if (action.kind === "sale") {
-        // A logged sale auto-completes the LAST task of 1.2 for the active idea,
-        // but only when 1.2 is unlocked for it (1.1 complete). A stray sale event
-        // before then must not light 1.2's final pip while earlier pips are dark.
+      if (action.kind === "sale" && !action.mock) {
+        // A REAL logged sale auto-completes the LAST task of 1.2 for the active
+        // idea, but only when 1.2 is unlocked for it (1.1 complete). A stray sale
+        // event before then must not light 1.2's final pip while earlier pips are
+        // dark. The `mock` opt-out lets the cosmetic Checkout Booth overlay log a
+        // ledger/HUD row (preserving pre-Unit-3 behavior) WITHOUT completing the
+        // real first sale or firing the first-sale celebration; the real sale
+        // path (Unit 5 Sales Room / booth log-a-sale) omits `mock` and completes.
         const saleStep = stepById("1.2");
         if (
           saleStep &&

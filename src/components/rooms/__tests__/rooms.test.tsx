@@ -198,6 +198,35 @@ describe("Mock checkout — Pay", () => {
     );
   });
 
+  it("at real in-game state, Pay does NOT complete 1.2 or fire the first-sale celebration", async () => {
+    // Regression guard (PP2 U3): the Checkout Booth is reachable in normal play,
+    // so at real state (1.1 done, 1.2 unlocked-but-open, an active idea) the mock
+    // "Invest in me -> Pay" must NOT complete the REAL first sale. The mock row is
+    // flagged mock:true so ADD_LEDGER skips 1.2's auto-completion + celebration.
+    renderAll();
+    await waitFor(() => expect(api?.stage).toBe("landing"));
+    setupIdeaAtLastSaleTask();
+    // Preconditions: 1.2 unlocked, not complete, no celebration pending.
+    expect(getApi().isStepUnlocked(0, "1.2")).toBe(true);
+    expect(getApi().isCriterionDone(0, "1.2")).toBe(false);
+    expect(getApi().celebrate).toBeNull();
+
+    act(() => getApi().dispatch({ type: "OPEN_CHECKOUT" }));
+    act(() => fireEvent.click(button((b) => Boolean(b.textContent?.startsWith("Pay $")))));
+
+    const after = getApi();
+    // Cosmetic success preserved: the row lands and feeds the HUD Sales stat.
+    expect(after.ledger.filter((r) => r.kind === "sale")).toHaveLength(1);
+    expect(after.salesSumCents()).toBe(2500);
+    // But the real first sale did NOT complete and no celebration fired.
+    expect(after.isCriterionDone(0, "1.2")).toBe(false);
+    expect(after.celebrate).toBeNull();
+    // Success stamp still renders (mock is purely cosmetic).
+    await waitFor(() =>
+      expect(Array.from(document.querySelectorAll("h2")).some((h) => /backed/.test(h.textContent || ""))).toBe(true),
+    );
+  });
+
   it("a fast double-click pays only once (no double-counted row)", async () => {
     renderAll();
     await waitFor(() => expect(api?.stage).toBe("landing"));

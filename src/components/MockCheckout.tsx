@@ -8,10 +8,12 @@
  *   right = card form: name on card (editable); test card 4242 fields read-only.
  *
  * On Pay: a success state (stamp-in checkmark, "<payer> backed <name>.", credit
- * line) AND a caller-minted ADD_LEDGER {kind:'backing'} row — the id + timestamp
- * are stamped HERE, never in gameCore. The backing lands in the ledger and, via
- * backingSumCents, updates the HUD Sales stat. The sync layer persists it with
- * source='mock'.
+ * line) AND a caller-minted ADD_LEDGER {kind:'sale', mock:true} row — the id +
+ * timestamp are stamped HERE, never in gameCore. The `mock:true` opt-out keeps
+ * this cosmetic row from completing criterion 1.2 or firing the first-sale
+ * celebration (that is the REAL Sales Room's job in Unit 5); it still lands in
+ * the ledger and, via salesSumCents, updates the HUD Sales stat — preserving the
+ * pre-Unit-3 `backing` behavior. The sync layer persists it with source='mock'.
  *
  * This is clearly a MOCK: the "Test mode · powered by Stripe · no real charge"
  * label is REQUIRED and must stay. CLOSE_CHECKOUT dismisses.
@@ -79,12 +81,16 @@ export function MockCheckout() {
     submittingRef.current = true;
     setProcessing(true);
     // PP2 Unit 3 retired the `backing` ledger kind; the mock overlay itself is
-    // retired in Unit 4. Until then it logs a plain `sale` row so the type stays
-    // consistent (behavior otherwise unchanged: the id/timestamp are minted here).
+    // retired in Unit 4. Until then it logs a `sale` row flagged `mock:true` so
+    // the type stays consistent WITHOUT completing the real first sale: `mock`
+    // opts this cosmetic row out of criterion 1.2's auto-completion and the
+    // first-sale celebration (see ADD_LEDGER in gameCore), preserving the
+    // pre-Unit-3 `backing` behavior. The id/timestamp are minted here.
     dispatch({
       type: "ADD_LEDGER",
       id: crypto.randomUUID(),
       kind: "sale",
+      mock: true,
       payer: backerLabel,
       amountCents: amount * 100,
       createdAt: new Date().toISOString(),
