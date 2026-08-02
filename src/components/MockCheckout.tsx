@@ -78,10 +78,13 @@ export function MockCheckout() {
     if (submittingRef.current) return;
     submittingRef.current = true;
     setProcessing(true);
+    // PP2 Unit 3 retired the `backing` ledger kind; the mock overlay itself is
+    // retired in Unit 4. Until then it logs a plain `sale` row so the type stays
+    // consistent (behavior otherwise unchanged: the id/timestamp are minted here).
     dispatch({
       type: "ADD_LEDGER",
       id: crypto.randomUUID(),
-      kind: "backing",
+      kind: "sale",
       payer: backerLabel,
       amountCents: amount * 100,
       createdAt: new Date().toISOString(),

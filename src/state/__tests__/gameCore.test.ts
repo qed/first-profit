@@ -6,8 +6,8 @@ import {
   PLAYABLE_STEPS,
   type Action,
   type GameState,
-  backingSumCents,
   fromSaveDoc,
+  grossSalesSumCents,
   ideasEligibleFor,
   initialState,
   isCriterionDone,
@@ -192,19 +192,53 @@ describe("ADD_LEDGER", () => {
     expect(salesSumCents(s)).toBe(1500);
   });
 
-  it("a checkout backing adds a kind:'backing' row and completes no task", () => {
-    const s = reducer(withOneIdea(), {
+  it("a bare sale row defaults its fee snapshot (gross=net=amount, fee=0, provider=null)", () => {
+    // Reach a state where a sale is allowed (1.1 complete) but is NOT the 1.2
+    // completing sale, so we can inspect the defaulted fee fields on the row.
+    let s = withOneIdea();
+    s = completeCriterion(s, 0, "1.1");
+    s = reducer(s, { type: "DISMISS_CELEBRATION" });
+    s = reducer(s, {
       type: "ADD_LEDGER",
-      id: "back-1",
-      kind: "backing",
+      id: "sale-bare",
+      kind: "sale",
       payer: "Helen",
       amountCents: 2500,
       createdAt: "2026-07-31T00:01:00.000Z",
     });
-    expect(s.ledger).toHaveLength(1);
-    expect(s.ledger[0].kind).toBe("backing");
-    expect(backingSumCents(s)).toBe(2500);
-    expect(isCriterionDone(s, 0, "1.2")).toBe(false);
+    const row = s.ledger[0];
+    expect(row.kind).toBe("sale");
+    expect(row.grossCents).toBe(2500);
+    expect(row.feeCents).toBe(0);
+    expect(row.netCents).toBe(2500);
+    expect(row.providerId).toBeNull();
+  });
+
+  it("carries a supplied fee snapshot through onto the row", () => {
+    let s = withOneIdea();
+    s = completeCriterion(s, 0, "1.1");
+    s = reducer(s, { type: "DISMISS_CELEBRATION" });
+    s = reducer(s, {
+      type: "ADD_LEDGER",
+      id: "sale-fee",
+      kind: "sale",
+      payer: "Nadia",
+      amountCents: 2000,
+      grossCents: 2000,
+      feeCents: 88,
+      netCents: 1912,
+      providerId: "replit",
+      createdAt: "2026-07-31T00:02:00.000Z",
+    });
+    expect(s.ledger[0]).toMatchObject({
+      grossCents: 2000,
+      feeCents: 88,
+      netCents: 1912,
+      providerId: "replit",
+    });
+    // Net (fee felt) drives salesSumCents; gross is exposed separately.
+    expect(salesSumCents(s)).toBe(1912);
+    expect(grossSalesSumCents(s)).toBe(2000);
   });
 
   it("a sale before 1.2 is unlocked appends the row but completes no task", () => {
@@ -231,7 +265,7 @@ describe("ADD_LEDGER", () => {
     const row: Extract<Action, { type: "ADD_LEDGER" }> = {
       type: "ADD_LEDGER",
       id: "dup",
-      kind: "backing",
+      kind: "sale",
       payer: "Sam",
       amountCents: 1000,
       createdAt: "2026-07-31T00:02:00.000Z",
@@ -385,7 +419,7 @@ describe("immutability", () => {
     const afterLedger = reducer(s, {
       type: "ADD_LEDGER",
       id: "imm-1",
-      kind: "backing",
+      kind: "sale",
       payer: "Q",
       amountCents: 100,
       createdAt: "2026-07-31T00:04:00.000Z",
@@ -475,33 +509,82 @@ describe("selectors: pips and progress", () => {
   });
 });
 
-describe("selectors: ledger sums", () => {
-  it("count only their own kind, and empty ledger sums to 0", () => {
-    expect(backingSumCents(withOneIdea())).toBe(0);
+describe("selectors: ledger sums (net vs gross)", () => {
+  it("empty ledger sums to 0 for both net and gross", () => {
     expect(salesSumCents(withOneIdea())).toBe(0);
+    expect(grossSalesSumCents(withOneIdea())).toBe(0);
+  });
 
-    // Reach a state where a sale is allowed (1.1 complete) so both kinds land.
+  it("salesSumCents sums net (fee felt); grossSalesSumCents sums gross", () => {
+    // A 50% fee halves the net contribution, while gross is unchanged.
     let s = withOneIdea();
     s = completeCriterion(s, 0, "1.1");
     s = reducer(s, { type: "DISMISS_CELEBRATION" });
     s = reducer(s, {
       type: "ADD_LEDGER",
-      id: "b1",
-      kind: "backing",
+      id: "s1",
+      kind: "sale",
       payer: "A",
-      amountCents: 2500,
+      amountCents: 2000,
+      grossCents: 2000,
+      feeCents: 1000,
+      netCents: 1000,
+      providerId: "first_profit_pay",
       createdAt: "2026-07-31T00:05:00.000Z",
     });
+    // A bare sale with no snapshot counts at gross for BOTH sums (net default).
     s = reducer(s, {
       type: "ADD_LEDGER",
-      id: "s1",
+      id: "s2",
       kind: "sale",
       payer: "B",
       amountCents: 1500,
       createdAt: "2026-07-31T00:06:00.000Z",
     });
-    expect(backingSumCents(s)).toBe(2500);
-    expect(salesSumCents(s)).toBe(1500);
+    expect(salesSumCents(s)).toBe(1000 + 1500);
+    expect(grossSalesSumCents(s)).toBe(2000 + 1500);
+  });
+
+  it("counts a legacy amount-only row (no fee fields) at gross for both sums", () => {
+    // Mirrors a sync.ts loadLedger legacy default arriving via SET_LEDGER.
+    let s = withOneIdea();
+    s = reducer(s, {
+      type: "SET_LEDGER",
+      ledger: [
+        { id: "legacy", kind: "sale", payer: "C", amountCents: 900, createdAt: "2026-07-31T00:07:00.000Z" },
+      ],
+    });
+    expect(salesSumCents(s)).toBe(900);
+    expect(grossSalesSumCents(s)).toBe(900);
+  });
+});
+
+describe("SET_PROVIDER (chosen payment provider)", () => {
+  it("records the provider id + chosenAt", () => {
+    const s = reducer(withOneIdea(), {
+      type: "SET_PROVIDER",
+      providerId: "replit",
+      chosenAt: 1_722_000_000_000,
+    });
+    expect(s.chosenProvider).toEqual({ providerId: "replit", chosenAt: 1_722_000_000_000 });
+  });
+
+  it("a switch replaces the provider with a fresh chosenAt (no history rewrite)", () => {
+    let s = withOneIdea();
+    s = reducer(s, { type: "SET_PROVIDER", providerId: "first_profit_pay", chosenAt: 1 });
+    s = reducer(s, { type: "SET_PROVIDER", providerId: "shopify", chosenAt: 2 });
+    expect(s.chosenProvider).toEqual({ providerId: "shopify", chosenAt: 2 });
+  });
+
+  it("initial state has no chosen provider", () => {
+    expect(initialState().chosenProvider).toBeNull();
+  });
+
+  it("RESET_SESSION clears the chosen provider (shared-device safety)", () => {
+    let s = withOneIdea();
+    s = reducer(s, { type: "SET_PROVIDER", providerId: "replit", chosenAt: 1 });
+    const reset = reducer(s, { type: "RESET_SESSION" });
+    expect(reset.chosenProvider).toBeNull();
   });
 });
 
@@ -517,7 +600,7 @@ describe("RESET_SESSION (shared-device state clear)", () => {
     s = reducer(s, {
       type: "ADD_LEDGER",
       id: "l1",
-      kind: "backing",
+      kind: "sale",
       payer: "Pat",
       amountCents: 2500,
       createdAt: "2026-07-31T00:00:00.000Z",
@@ -571,12 +654,13 @@ describe("SET_LEDGER (server read-back fill)", () => {
     let s = withOneIdea();
     const rows = [
       { id: "s1", kind: "sale" as const, payer: "A", amountCents: 1500, createdAt: "2026-07-31T00:00:00.000Z" },
-      { id: "b1", kind: "backing" as const, payer: "B", amountCents: 2500, createdAt: "2026-07-31T00:01:00.000Z" },
+      { id: "s2", kind: "sale" as const, payer: "B", amountCents: 2500, createdAt: "2026-07-31T00:01:00.000Z" },
     ];
     s = reducer(s, { type: "SET_LEDGER", ledger: rows });
     expect(s.ledger).toEqual(rows);
-    expect(salesSumCents(s)).toBe(1500);
-    expect(backingSumCents(s)).toBe(2500);
+    // Both rows are bare (no fee snapshot) so net counts at gross.
+    expect(salesSumCents(s)).toBe(4000);
+    expect(grossSalesSumCents(s)).toBe(4000);
 
     // REPLACES (not appends): a later fill with fewer rows wins outright.
     s = reducer(s, { type: "SET_LEDGER", ledger: [] });
@@ -626,7 +710,7 @@ describe("serialization round-trip", () => {
     s = reducer(s, {
       type: "ADD_LEDGER",
       id: "l1",
-      kind: "backing",
+      kind: "sale",
       payer: "Pat",
       amountCents: 1000,
       createdAt: "2026-07-31T00:00:00.000Z",
@@ -666,6 +750,60 @@ describe("serialization round-trip", () => {
     expect(fromSaveDoc({ ideas: [], activeIdea: 0 }).ok).toBe(false);
     expect(fromSaveDoc(null).ok).toBe(false);
     expect(fromSaveDoc("nonsense").ok).toBe(false);
+  });
+});
+
+describe("chosenProvider persistence (additive-optional, NO DOC_VERSION bump)", () => {
+  it("toSaveDoc/fromSaveDoc/HYDRATE round-trips a chosen provider", () => {
+    let s = withOneIdea();
+    s = reducer(s, { type: "SET_PROVIDER", providerId: "replit", chosenAt: 1_722_000_000_000 });
+
+    const doc = toSaveDoc(s);
+    expect(doc.docVersion).toBe(DOC_VERSION); // still 1: additive-optional field
+    expect(doc.chosenProvider).toEqual({ providerId: "replit", chosenAt: 1_722_000_000_000 });
+
+    const parsed = fromSaveDoc(JSON.parse(JSON.stringify(doc)));
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    const hydrated = reducer(initialState(), { type: "HYDRATE", doc: parsed.doc });
+    expect(hydrated.chosenProvider).toEqual({ providerId: "replit", chosenAt: 1_722_000_000_000 });
+  });
+
+  it("an existing v1 doc WITHOUT chosenProvider loads with null, NOT discarded, DOC_VERSION unchanged", () => {
+    // The pre-PP2 save shape: no chosenProvider key at all.
+    const legacyDoc = {
+      docVersion: 1,
+      ideas: [{ fields: {}, done: {} }],
+      activeIdea: 0,
+      siteHeadline: "",
+      onboardingComplete: true,
+    };
+    const parsed = fromSaveDoc(legacyDoc);
+    expect(parsed.ok).toBe(true); // NOT discarded
+    if (!parsed.ok) return;
+    expect(parsed.doc.docVersion).toBe(1); // no bump
+    expect(parsed.doc.chosenProvider).toBeNull(); // defaulted
+
+    const hydrated = reducer(initialState(), { type: "HYDRATE", doc: parsed.doc });
+    expect(hydrated.chosenProvider).toBeNull();
+  });
+
+  it("DOC_VERSION stays 1 (a bump would discard in-flight outbox entries)", () => {
+    expect(DOC_VERSION).toBe(1);
+  });
+
+  it("a malformed chosenProvider (bad id / missing chosenAt) defaults to null, doc still ok", () => {
+    const parsed = fromSaveDoc({
+      docVersion: 1,
+      ideas: [],
+      activeIdea: 0,
+      siteHeadline: "",
+      onboardingComplete: false,
+      chosenProvider: { providerId: "not_a_provider", chosenAt: 5 },
+    });
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    expect(parsed.doc.chosenProvider).toBeNull();
   });
 });
 

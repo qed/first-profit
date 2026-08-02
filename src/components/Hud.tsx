@@ -45,7 +45,7 @@ function SaveIndicator({ status }: { status: SyncStatus }) {
 }
 
 export function Hud() {
-  const { profile, activeIdea, isCriterionDone, backingSumCents, salesSumCents, syncStatus, logout } = useGame();
+  const { profile, activeIdea, isCriterionDone, grossSalesSumCents, salesSumCents, syncStatus, logout } = useGame();
   const phaseDone = PLAYABLE_STEPS.filter((id) => isCriterionDone(activeIdea, id)).length;
   const founder = profile.firstName || profile.handle || "Founder";
 
@@ -67,10 +67,10 @@ export function Hud() {
       <div className="ml-auto flex items-center gap-3 sm:gap-4">
         <div className="text-right">
           <p className="font-mono text-[9.5px] uppercase tracking-[0.08em] text-[hsl(25_20%_38%)]">Sales</p>
-          <p className="font-mono text-[16px] font-bold leading-tight">${dollars(backingSumCents())}</p>
+          <p className="font-mono text-[16px] font-bold leading-tight">${dollars(grossSalesSumCents())}</p>
         </div>
         <div className="text-right">
-          <p className="font-mono text-[9.5px] uppercase tracking-[0.08em] text-[hsl(25_20%_38%)]">Profit</p>
+          <p className="font-mono text-[9.5px] uppercase tracking-[0.08em] text-[hsl(25_20%_38%)]">Net of fees</p>
           <p className="font-mono text-[16px] font-bold leading-tight">
             ${dollars(salesSumCents())} <span className="text-[10px] font-normal text-[hsl(25_20%_38%)]">of $1,000</span>
           </p>

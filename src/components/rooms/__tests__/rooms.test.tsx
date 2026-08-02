@@ -7,8 +7,9 @@
 //   - The Sales Room "Log a sale" form appends a {kind:'sale'} row and completes
 //     1.2's last task for the active idea (firing the 1.2 celebration when it is
 //     the last remaining task).
-//   - The mock checkout "Pay" appends a {kind:'backing'} row that feeds the HUD
-//     Sales stat (backingSumCents).
+//   - The mock checkout "Pay" appends a ledger row that feeds the HUD Sales
+//     stat. (PP2 Unit 3 retired the `backing` kind; the row is now a `sale`
+//     until the overlay itself is retired in Unit 4.)
 import { describe, it, expect, vi, beforeEach, afterEach, beforeAll } from "vitest";
 import React from "react";
 import { render, act, fireEvent, waitFor, cleanup } from "@testing-library/react";
@@ -171,7 +172,7 @@ describe("Sales Room — Log a sale", () => {
 });
 
 describe("Mock checkout — Pay", () => {
-  it("appends a backing ledger row that feeds the Sales stat", async () => {
+  it("appends a ledger row that feeds the Sales stat", async () => {
     renderAll();
     await waitFor(() => expect(api?.stage).toBe("landing"));
     act(() => getApi().dispatch({ type: "OPEN_CHECKOUT" }));
@@ -182,20 +183,22 @@ describe("Mock checkout — Pay", () => {
     act(() => fireEvent.click(payBtn));
 
     const after = getApi();
-    const backings = after.ledger.filter((r) => r.kind === "backing");
-    expect(backings).toHaveLength(1);
-    expect(backings[0]).toMatchObject({ kind: "backing", amountCents: 2500 });
-    expect(backings[0].id).toBeTruthy();
-    expect(backings[0].createdAt).toBeTruthy();
-    // HUD Sales stat = sum of backings.
-    expect(after.backingSumCents()).toBe(2500);
+    // PP2 Unit 3: the overlay now logs a `sale` row (the `backing` kind is gone).
+    const rows = after.ledger.filter((r) => r.kind === "sale");
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ kind: "sale", amountCents: 2500 });
+    expect(rows[0].id).toBeTruthy();
+    expect(rows[0].createdAt).toBeTruthy();
+    // HUD Sales stat = sum of ledger rows (no fee snapshot -> counts at gross).
+    expect(after.grossSalesSumCents()).toBe(2500);
+    expect(after.salesSumCents()).toBe(2500);
     // Success state rendered.
     await waitFor(() =>
       expect(Array.from(document.querySelectorAll("h2")).some((h) => /backed/.test(h.textContent || ""))).toBe(true),
     );
   });
 
-  it("a fast double-click pays only once (no double-counted backing)", async () => {
+  it("a fast double-click pays only once (no double-counted row)", async () => {
     renderAll();
     await waitFor(() => expect(api?.stage).toBe("landing"));
     act(() => getApi().dispatch({ type: "OPEN_CHECKOUT" }));
@@ -207,7 +210,7 @@ describe("Mock checkout — Pay", () => {
     });
 
     const after = getApi();
-    expect(after.ledger.filter((r) => r.kind === "backing")).toHaveLength(1);
-    expect(after.backingSumCents()).toBe(2500);
+    expect(after.ledger.filter((r) => r.kind === "sale")).toHaveLength(1);
+    expect(after.grossSalesSumCents()).toBe(2500);
   });
 });

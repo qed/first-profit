@@ -192,15 +192,27 @@ describe("GameProvider boot", () => {
     });
     syncMock.loadLedger.mockResolvedValue([
       { id: "s1", kind: "sale", payer: "Mom", amountCents: 1500, createdAt: "2026-07-31T00:00:00.000Z" },
-      { id: "b1", kind: "backing", payer: "Dad", amountCents: 2500, createdAt: "2026-07-31T00:01:00.000Z" },
+      {
+        id: "s2",
+        kind: "sale",
+        payer: "Dad",
+        amountCents: 2500,
+        grossCents: 2500,
+        feeCents: 100,
+        netCents: 2400,
+        providerId: "replit",
+        createdAt: "2026-07-31T00:01:00.000Z",
+      },
     ]);
     renderProvider();
 
     await waitFor(() => expect(api?.stage).toBe("app"));
     // Server rows survive the session boundary: totals + list are populated.
     await waitFor(() => expect(api?.ledger).toHaveLength(2));
-    expect(api?.salesSumCents()).toBe(1500);
-    expect(api?.backingSumCents()).toBe(2500);
+    // Net (fee felt): s1 has no snapshot so it counts at gross; s2 counts at net.
+    expect(api?.salesSumCents()).toBe(1500 + 2400);
+    // Gross exposes the pre-fee total.
+    expect(api?.grossSalesSumCents()).toBe(1500 + 2500);
 
     // The just-loaded rows must NOT be forwarded to the engine for (re-)insert:
     // knownLedgerIdsRef was seeded from them before SET_LEDGER dispatched.
@@ -209,7 +221,7 @@ describe("GameProvider boot", () => {
       ([r]) => (r as { id: string }).id,
     );
     expect(forwardedIds).not.toContain("s1");
-    expect(forwardedIds).not.toContain("b1");
+    expect(forwardedIds).not.toContain("s2");
   });
 
   it("notifyLedger forwards the per-sale fee fields (gross/fee/net/providerId) to the engine", async () => {

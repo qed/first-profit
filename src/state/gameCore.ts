@@ -10,6 +10,7 @@
  * adds new code.
  */
 import { parseTask, stepById, type RoomId } from "../data/path";
+import type { ProviderId } from "../data/providers";
 
 /** Schema version stored inside every serialized save doc. Bump on shape change. */
 export const DOC_VERSION = 1;
@@ -34,7 +35,8 @@ export const taskKey = (stepId: string, index: number): string => `${stepId}#${i
  */
 export type Stage = "boot" | "landing" | "login" | "signup" | "onboard" | "app";
 
-export type LedgerKind = "sale" | "backing";
+/** Ledger rows are all `sale` now — the `backing` mock kind is retired (PP2). */
+export type LedgerKind = "sale";
 
 export interface LedgerEntry {
   id: string;
@@ -43,16 +45,26 @@ export interface LedgerEntry {
   /** Kept = gross for back-compat. */
   amountCents: number;
   /**
-   * Per-sale fee snapshot (Payment Phase 2). Optional here: Unit 3 finalizes the
-   * reducer's ADD_LEDGER fee modeling and Unit 5 wires computeFee. The
-   * persistence layer (sync.ts) already reads/writes them and defaults legacy
-   * rows (grossCents/netCents -> amountCents, feeCents -> 0, providerId -> null).
+   * Per-sale fee snapshot (Payment Phase 2). Optional on the TYPE so a legacy /
+   * server-mapped row (sync.ts loadLedger already defaults these) and older
+   * callers stay assignable, but ADD_LEDGER always POPULATES all four with
+   * per-row defaults (gross = net = amountCents, fee = 0, providerId = null)
+   * when no snapshot is supplied, so the net/gross sums are always consistent.
+   * Fee COMPUTATION (computeFee) is wired in Unit 5; Unit 3 only carries the
+   * fields through.
    */
   grossCents?: number;
   feeCents?: number;
   netCents?: number;
   providerId?: string | null;
   createdAt: string;
+}
+
+/** The provider the student has chosen to collect their money (PP2). */
+export interface ChosenProvider {
+  providerId: ProviderId;
+  /** Caller-stamped epoch ms of the choice (module stays Date.now()-free). */
+  chosenAt: number;
 }
 
 export interface Idea {
@@ -90,6 +102,8 @@ export interface GameState {
   room: RoomId | null;
   /** Mock-checkout overlay visibility. */
   checkoutOpen: boolean;
+  /** The chosen payment provider (durable, in the save doc), or null. */
+  chosenProvider: ChosenProvider | null;
   /** True once onboarding screens 2..5 are complete (persisted in the save doc). */
   onboardingComplete: boolean;
   docVersion: number;
@@ -110,6 +124,7 @@ export function initialState(): GameState {
     celebrate: null,
     room: null,
     checkoutOpen: false,
+    chosenProvider: null,
     onboardingComplete: false,
     docVersion: DOC_VERSION,
   };
@@ -123,6 +138,12 @@ export interface SaveDoc {
   activeIdea: number;
   siteHeadline: string;
   onboardingComplete: boolean;
+  /**
+   * The chosen payment provider (PP2). ADDITIVE OPTIONAL: existing v1 docs have
+   * no such field (hence optional here), so fromSaveDoc DEFAULTS it to null and
+   * DOC_VERSION stays 1 (a bump would discard in-flight outbox entries).
+   */
+  chosenProvider?: ChosenProvider | null;
 }
 
 /**
@@ -139,6 +160,7 @@ export function toSaveDoc(state: GameState): SaveDoc {
     activeIdea: state.activeIdea,
     siteHeadline: state.profile.siteHeadline,
     onboardingComplete: state.onboardingComplete,
+    chosenProvider: state.chosenProvider,
   };
 }
 
@@ -171,6 +193,24 @@ function coerceIdea(value: unknown): Idea {
   return { fields, done };
 }
 
+const PROVIDER_IDS: readonly ProviderId[] = ["first_profit_pay", "replit", "shopify"];
+
+// Coerce a persisted chosenProvider leaf. ADDITIVE OPTIONAL: an existing v1 doc
+// has no such field (or a malformed one), which DEFAULTS to null — never a
+// discard. Only a well-formed {providerId, chosenAt} with a known id survives.
+function coerceChosenProvider(value: unknown): ChosenProvider | null {
+  if (!isRecord(value)) return null;
+  const { providerId, chosenAt } = value;
+  if (
+    typeof providerId === "string" &&
+    (PROVIDER_IDS as readonly string[]).includes(providerId) &&
+    typeof chosenAt === "number"
+  ) {
+    return { providerId: providerId as ProviderId, chosenAt };
+  }
+  return null;
+}
+
 /**
  * Parse a loaded save doc into a validated `SaveDoc`, or signal that the caller
  * should DISCARD it. An unknown/absent docVersion is signaled for discard so a
@@ -183,9 +223,18 @@ export function fromSaveDoc(raw: unknown): FromSaveResult {
   const activeIdea = typeof raw.activeIdea === "number" ? raw.activeIdea : 0;
   const siteHeadline = typeof raw.siteHeadline === "string" ? raw.siteHeadline : "";
   const onboardingComplete = raw.onboardingComplete === true;
+  // Additive-optional field: absent in existing v1 docs -> null, NOT a discard.
+  const chosenProvider = coerceChosenProvider(raw.chosenProvider);
   return {
     ok: true,
-    doc: { docVersion: DOC_VERSION, ideas, activeIdea, siteHeadline, onboardingComplete },
+    doc: {
+      docVersion: DOC_VERSION,
+      ideas,
+      activeIdea,
+      siteHeadline,
+      onboardingComplete,
+      chosenProvider,
+    },
   };
 }
 
@@ -286,18 +335,25 @@ export function ideasEligibleFor(state: GameState, stepId: string): number[] {
   return result;
 }
 
-/** Total of all `backing` ledger rows, in cents. */
-export function backingSumCents(state: GameState): number {
-  return state.ledger
-    .filter((row) => row.kind === "backing")
-    .reduce((sum, row) => sum + row.amountCents, 0);
-}
-
-/** Total of all `sale` ledger rows, in cents. */
+/**
+ * Total NET of all `sale` ledger rows, in cents (the provider fee is felt). A
+ * row with no fee snapshot (legacy / no-provider) counts at its gross amount via
+ * the `netCents ?? amountCents` default.
+ */
 export function salesSumCents(state: GameState): number {
   return state.ledger
     .filter((row) => row.kind === "sale")
-    .reduce((sum, row) => sum + row.amountCents, 0);
+    .reduce((sum, row) => sum + (row.netCents ?? row.amountCents), 0);
+}
+
+/**
+ * Total GROSS of all `sale` ledger rows, in cents (before the provider fee), so
+ * the fee is visible next to net. Same per-row default at gross.
+ */
+export function grossSalesSumCents(state: GameState): number {
+  return state.ledger
+    .filter((row) => row.kind === "sale")
+    .reduce((sum, row) => sum + (row.grossCents ?? row.amountCents), 0);
 }
 
 // ── Reducer ──────────────────────────────────────────────────────────────
@@ -321,6 +377,7 @@ export type Action =
   | { type: "DISMISS_CELEBRATION" }
   | { type: "OPEN_CHECKOUT" }
   | { type: "CLOSE_CHECKOUT" }
+  | { type: "SET_PROVIDER"; providerId: ProviderId; chosenAt: number }
   | { type: "RESET_SESSION" }
   | { type: "HYDRATE"; doc: SaveDoc };
 
@@ -439,11 +496,18 @@ export function reducer(state: GameState, action: Action): GameState {
     case "ADD_LEDGER": {
       // Idempotent on id (retried outbox inserts must not double-append).
       if (state.ledger.some((row) => row.id === action.id)) return state;
+      // Carry the fee snapshot through when supplied (Unit 5 computes it); a bare
+      // sale with no snapshot defaults gross = net = amountCents, fee = 0,
+      // providerId = null so the net/gross sums stay consistent.
       const entry: LedgerEntry = {
         id: action.id,
         kind: action.kind,
         payer: action.payer,
         amountCents: action.amountCents,
+        grossCents: action.grossCents ?? action.amountCents,
+        feeCents: action.feeCents ?? 0,
+        netCents: action.netCents ?? action.amountCents,
+        providerId: action.providerId ?? null,
         createdAt: action.createdAt,
       };
       let next: GameState = { ...state, ledger: [...state.ledger, entry] };
@@ -496,6 +560,15 @@ export function reducer(state: GameState, action: Action): GameState {
     case "CLOSE_CHECKOUT":
       return { ...state, checkoutOpen: false };
 
+    case "SET_PROVIDER":
+      // Record (or switch to) the chosen provider. The choice is durable (rides
+      // the save doc); a switch stamps a fresh chosenAt. Past ledger rows keep
+      // their own fee snapshot, so a switch never rewrites history (R24.6).
+      return {
+        ...state,
+        chosenProvider: { providerId: action.providerId, chosenAt: action.chosenAt },
+      };
+
     case "RESET_SESSION": {
       // Clear all per-account business/financial + UI state so no previous
       // child's ideas/ledger can leak into the next session on a shared device.
@@ -521,6 +594,8 @@ export function reducer(state: GameState, action: Action): GameState {
         ledger: [],
         activeIdea: doc.activeIdea,
         profile: { ...state.profile, siteHeadline: doc.siteHeadline },
+        // Additive-optional: an existing v1 doc may omit it -> null.
+        chosenProvider: doc.chosenProvider ?? null,
         onboardingComplete: doc.onboardingComplete,
         docVersion: DOC_VERSION,
         stage: doc.onboardingComplete ? "app" : "onboard",
