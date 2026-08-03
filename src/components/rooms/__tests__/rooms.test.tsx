@@ -192,8 +192,8 @@ describe("Checkout Booth — provider choice", () => {
     );
     expect(chooseButtons.map((b) => b.textContent)).toEqual([
       "Choose First Profit Pay",
+      "Choose Shopify Starter Plan",
       "Choose Replit",
-      "Choose Shopify",
     ]);
 
     // First Profit Pay is present + pickable, framed AS A PROVIDER (not "the course").
@@ -203,11 +203,14 @@ describe("Checkout Booth — provider choice", () => {
     expect(document.body.textContent).toMatch(/50% of every sale/);
     // The real options' fee copy is shown too.
     expect(document.body.textContent).toMatch(/2\.9% \+ 30c per sale/);
-    // Each card's subscription line (subscriptionLabel) is shown: FPP has none,
-    // Replit is $25/mo, Shopify is $39/mo.
-    expect(document.body.textContent).toMatch(/No monthly fee/);
+    // Each card's cost line (costLine): FPP has no subscription suffix,
+    // Replit adds $25/mo, Shopify Starter adds $5/mo.
     expect(document.body.textContent).toMatch(/\$25\/mo/);
-    expect(document.body.textContent).toMatch(/\$39\/mo/);
+    expect(document.body.textContent).toMatch(/\$5\/mo/);
+    // And each card's one-line pitch.
+    expect(document.body.textContent).toMatch(/Works right now/);
+    expect(document.body.textContent).toMatch(/Sell online quickly/);
+    expect(document.body.textContent).toMatch(/Build your own store/);
   });
 
   it("choosing a provider dispatches SET_PROVIDER with the id and shows the summary", async () => {
@@ -264,8 +267,8 @@ describe("Checkout Booth — provider choice", () => {
     // Freeze the wall clock so the CONCRETE dollar figure is deterministic:
     // ChosenSummary reads Date.now() at render, so a frozen now makes elapsed
     // exactly two months. Spying only Date.now (not full fake timers) keeps
-    // waitFor's real-timer polling working. Shopify is 3900c/mo, so two months
-    // -> Math.round(3900 * 2) = 7800c -> formatWholeDollars -> "$78".
+    // waitFor's real-timer polling working. Shopify Starter is 500c/mo, so two months
+    // -> Math.round(500 * 2) = 1000c -> formatWholeDollars -> "$10".
     const NOW = 1_700_000_000_000;
     const nowSpy = vi.spyOn(Date, "now").mockReturnValue(NOW);
     try {
@@ -278,9 +281,9 @@ describe("Checkout Booth — provider choice", () => {
       // The directional estimate line is present + labeled as an estimate.
       expect(document.body.textContent).toMatch(/Subscription so far \(estimate\)/);
       // ...and its CONCRETE value renders through the summary, not just the label:
-      // 2 months of Shopify's $39/mo = $78. (A $0 / wrong-multiplier / cents-as-
+      // 2 months of Shopify Starter's $5/mo = $10. (A $0 / wrong-multiplier / cents-as-
       // dollars bug would slip past a bare /\$/ check; this pins the real figure.)
-      expect(document.body.textContent).toMatch(/about \$78 so far/);
+      expect(document.body.textContent).toMatch(/about \$10 so far/);
     } finally {
       nowSpy.mockRestore();
     }
@@ -301,7 +304,7 @@ describe("Checkout Booth — provider choice", () => {
     await waitFor(() => expect(api?.stage).toBe("landing"));
     act(() => getApi().dispatch({ type: "SET_PROVIDER", providerId: "shopify", chosenAt: 1 }));
     await waitFor(() => expect(document.body.textContent).toMatch(/You chose this/));
-    expect(document.body.textContent).toMatch(/\$39\/mo/);
+    expect(document.body.textContent).toMatch(/\$5\/mo/);
     shopify.unmount();
 
     renderBooth();

@@ -122,10 +122,14 @@ export function CheckoutBooth() {
         </>
       )}
 
-      <div className="mt-4">
-        <p className="font-mono text-[10.5px] uppercase tracking-[0.08em] text-[hsl(25_20%_38%)]">Ledger</p>
-        <LedgerList ledger={ledger} emptyText="Empty so far. The first row is the whole point of Phase 1." />
-      </div>
+      {/* The ledger only appears once there is a row to show; the empty state is
+          deliberately silent (owner request, 2026-08-02). */}
+      {ledger.length > 0 && (
+        <div className="mt-4">
+          <p className="font-mono text-[10.5px] uppercase tracking-[0.08em] text-[hsl(25_20%_38%)]">Ledger</p>
+          <LedgerList ledger={ledger} emptyText="" />
+        </div>
+      )}
     </div>
   );
 }

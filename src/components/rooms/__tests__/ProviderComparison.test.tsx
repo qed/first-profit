@@ -82,13 +82,16 @@ describe("ProviderComparison", () => {
     await waitFor(() => expect(api?.stage).toBe("landing"));
 
     const text = document.body.textContent || "";
-    // First Profit Pay: 50% strawman, no subscription.
+    // First Profit Pay: 50% strawman, no subscription suffix.
     expect(text).toMatch(/50% of every sale/);
-    expect(text).toMatch(/No monthly fee/);
-    // Replit + Shopify: 2.9% + 30c, with their subscriptions.
+    // Replit + Shopify Starter: 2.9% + 30c, with their subscriptions in the cost line.
     expect(text).toMatch(/2\.9% \+ 30c per sale/);
     expect(text).toMatch(/\$25\/mo/); // Replit
-    expect(text).toMatch(/\$39\/mo/); // Shopify
+    expect(text).toMatch(/\$5\/mo/); // Shopify Starter
+    // Each card's one-line pitch.
+    expect(text).toMatch(/Works right now/);
+    expect(text).toMatch(/Sell online quickly/);
+    expect(text).toMatch(/Build your own store/);
   });
 
   it("choosing a provider dispatches SET_PROVIDER with the id + a chosenAt", async () => {
@@ -130,7 +133,7 @@ describe("ProviderComparison", () => {
     );
     await waitFor(() => expect(api?.stage).toBe("landing"));
 
-    act(() => fireEvent.click(button((b) => b.textContent === "Choose Shopify")));
+    act(() => fireEvent.click(button((b) => b.textContent === "Choose Shopify Starter Plan")));
     expect(onChoose).toHaveBeenCalledWith("shopify");
   });
 });

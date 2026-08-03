@@ -12,7 +12,7 @@ const ALL: Provider[] = PROVIDER_IDS.map(providerById);
 
 describe("provider set", () => {
   it("has exactly the three expected ids", () => {
-    expect(PROVIDER_IDS).toEqual(["first_profit_pay", "replit", "shopify"]);
+    expect(PROVIDER_IDS).toEqual(["first_profit_pay", "shopify", "replit"]);
     expect(Object.keys(PROVIDERS).sort()).toEqual(
       ["first_profit_pay", "replit", "shopify"].sort(),
     );
@@ -24,7 +24,7 @@ describe("provider set", () => {
     }
     expect(PROVIDERS.first_profit_pay.name).toBe("First Profit Pay");
     expect(PROVIDERS.replit.name).toBe("Replit");
-    expect(PROVIDERS.shopify.name).toBe("Shopify");
+    expect(PROVIDERS.shopify.name).toBe("Shopify Starter Plan");
   });
 
   it("fee models match the plan", () => {
@@ -41,7 +41,7 @@ describe("subscriptions", () => {
 
   it("replit and shopify have present, positive subscription cents", () => {
     expect(PROVIDERS.replit.subscriptionCents).toBe(2500);
-    expect(PROVIDERS.shopify.subscriptionCents).toBe(3900);
+    expect(PROVIDERS.shopify.subscriptionCents).toBe(500);
     for (const p of [PROVIDERS.replit, PROVIDERS.shopify]) {
       expect(p.subscriptionCents).not.toBeNull();
       expect(p.subscriptionCents as number).toBeGreaterThan(0);

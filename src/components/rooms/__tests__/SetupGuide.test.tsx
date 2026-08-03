@@ -121,9 +121,9 @@ describe("estimateSubscriptionSoFarCents — the light 'subscription so far' pro
   it("scales the monthly subscription by whole months elapsed for a subscription provider", () => {
     const chosenAt = 1_000_000_000_000;
     const threeMonths = 3 * 30 * 24 * 60 * 60 * 1000;
-    // Shopify = 3900c/mo. 3 months elapsed -> ~11700c.
+    // Shopify Starter = 500c/mo. 3 months elapsed -> ~1500c.
     const cents = estimateSubscriptionSoFarCents(PROVIDERS.shopify, chosenAt, chosenAt + threeMonths);
-    expect(cents).toBe(3900 * 3);
+    expect(cents).toBe(500 * 3);
   });
 
   it("is null for a no-subscription provider (First Profit Pay)", () => {

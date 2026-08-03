@@ -18,6 +18,7 @@
  */
 import { useGame } from "../../state/GameContext";
 import { PROVIDER_IDS, PROVIDERS, type Provider, type ProviderId } from "../../data/providers";
+import { ProviderLogo } from "./ProviderLogo";
 
 /** "50% of every sale" (no flat) or "2.9% + 30c per sale" (percent + flat). */
 export function feeLabel(provider: Provider): string {
@@ -32,14 +33,10 @@ export function subscriptionLabel(provider: Provider): string {
   return `$${provider.subscriptionCents / 100}/mo`;
 }
 
-/** One stacked label/value fact. Stacks vertically so long copy never overflows 390px. */
-function Fact({ label, value }: { label: string; value: string }) {
-  return (
-    <div>
-      <dt className="font-mono text-[10px] uppercase tracking-[0.08em] text-[hsl(25_20%_38%)]">{label}</dt>
-      <dd className="mt-0.5 text-[13px] leading-[1.45] text-[hsl(25_34%_20%)]">{value}</dd>
-    </div>
-  );
+/** The card's single cost line: "50% of every sale" or "2.9% + 30c per sale + $5/mo". */
+export function costLine(provider: Provider): string {
+  if (provider.subscriptionCents == null) return feeLabel(provider);
+  return `${feeLabel(provider)} + ${subscriptionLabel(provider)}`;
 }
 
 export function ProviderComparison({ onChoose }: { onChoose?: (id: ProviderId) => void }) {
@@ -53,12 +50,7 @@ export function ProviderComparison({ onChoose }: { onChoose?: (id: ProviderId) =
 
   return (
     <div>
-      <p className="text-[13.5px] leading-[1.5] text-[hsl(25_20%_38%)]">
-        Your first money decision: who collects your money and gets it to your parent. Compare the
-        three, then pick one. You can switch later.
-      </p>
-
-      <div className="mt-3.5 flex flex-col gap-3">
+      <div className="flex flex-col gap-3">
         {PROVIDER_IDS.map((id) => {
           const provider: Provider = PROVIDERS[id];
           return (
@@ -66,19 +58,18 @@ export function ProviderComparison({ onChoose }: { onChoose?: (id: ProviderId) =
               key={id}
               className="w-full rounded-[16px] border-2 border-[hsl(25_34%_20%/0.15)] bg-white p-4"
             >
-              <p className="font-display text-[18px] font-black text-[hsl(25_34%_20%)]">
-                {provider.name}
+              <div className="flex items-center gap-3">
+                <ProviderLogo id={id} className="h-8 w-8 shrink-0" />
+                <p className="font-display text-[18px] font-black text-[hsl(25_34%_20%)]">
+                  {provider.name}
+                </p>
+              </div>
+              <p className="mt-2 text-[14px] font-semibold text-[hsl(25_34%_20%)]">
+                {costLine(provider)}
               </p>
-              <p className="mt-1 text-[12.5px] leading-[1.5] text-[hsl(25_20%_38%)]">
-                {provider.tagline}
+              <p className="mt-0.5 text-[12.5px] leading-[1.5] text-[hsl(25_20%_38%)]">
+                {provider.pitch}
               </p>
-
-              <dl className="mt-3 flex flex-col gap-2.5">
-                <Fact label="Per sale" value={feeLabel(provider)} />
-                <Fact label="Monthly" value={subscriptionLabel(provider)} />
-                <Fact label="Effort" value={provider.ease} />
-                <Fact label="Who holds the money" value={provider.whoOwnsAccount} />
-              </dl>
 
               <button
                 type="button"

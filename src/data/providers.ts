@@ -26,6 +26,8 @@ export interface Provider {
   name: string;
   /** One-line framing of what the provider is. */
   tagline: string;
+  /** The comparison card's one-line benefit, e.g. "Works right now". */
+  pitch: string;
   fee: FeeModel;
   /** Monthly software subscription in cents. `null` = no subscription. */
   subscriptionCents: number | null;
@@ -43,6 +45,7 @@ export const PROVIDERS: Record<ProviderId, Provider> = {
     name: 'First Profit Pay',
     tagline:
       'The easy button that takes half of every sale. Nothing to set up, but it costs you the most.',
+    pitch: 'Works right now',
     fee: { percentBps: 5000, flatCents: 0 },
     subscriptionCents: null,
     ease: 'Instant. There is nothing to build and no account to open.',
@@ -55,6 +58,7 @@ export const PROVIDERS: Record<ProviderId, Provider> = {
     name: 'Replit',
     tagline:
       'Build the store yourself with an AI agent. Your parent owns the Stripe account that collects the money.',
+    pitch: 'Build your own store',
     fee: { percentBps: 290, flatCents: 30 },
     subscriptionCents: 2500,
     ease: 'A weekend project. More setup than Shopify, but building the store is the lesson.',
@@ -105,11 +109,12 @@ export const PROVIDERS: Record<ProviderId, Provider> = {
   },
   shopify: {
     id: 'shopify',
-    name: 'Shopify',
+    name: 'Shopify Starter Plan',
     tagline:
       'The fastest way to open a real store. Guided setup, no code, shipping and tax built in.',
+    pitch: 'Sell online quickly',
     fee: { percentBps: 290, flatCents: 30 },
-    subscriptionCents: 3900,
+    subscriptionCents: 500,
     ease: 'One afternoon. A guided wizard with zero code. Shipping labels and tax are handled inside.',
     whoOwnsAccount:
       'Your parent owns the Shopify account and Shopify Payments. Money settles into their bank account.',
@@ -117,7 +122,7 @@ export const PROVIDERS: Record<ProviderId, Provider> = {
       {
         title: 'Parent creates the account',
         detail:
-          'Sign up with the parent email, start on the trial, then pick the Basic plan at about 39 dollars a month.',
+          'Sign up with the parent email, start on the trial, then pick the Starter plan at about 5 dollars a month.',
       },
       {
         title: 'Add the two products',
@@ -153,7 +158,7 @@ export const PROVIDERS: Record<ProviderId, Provider> = {
 };
 
 /** The three providers in display order (strawman first, then the real options). */
-export const PROVIDER_IDS: ProviderId[] = ['first_profit_pay', 'replit', 'shopify'];
+export const PROVIDER_IDS: ProviderId[] = ['first_profit_pay', 'shopify', 'replit'];
 
 export const providerById = (id: ProviderId): Provider => PROVIDERS[id];
 
