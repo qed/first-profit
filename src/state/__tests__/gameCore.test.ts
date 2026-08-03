@@ -2344,8 +2344,8 @@ describe("UNION_REMOTE (FIX 1: the rebased doc feeds back into live state)", () 
 
 // ── Site slice (real-public-site plan, Unit 4) ───────────────────────────────
 describe("site slice (SET_SITE / RESET_SESSION / save-doc exclusion)", () => {
-  it("initial state is the honest unknown: no handle, status 'unknown'", () => {
-    expect(initialState().site).toEqual({ handle: null, status: "unknown" });
+  it("initial state is the honest unknown: no handle, status 'unknown', no projection", () => {
+    expect(initialState().site).toEqual({ handle: null, status: "unknown", projected: null });
   });
 
   it("SET_SITE adopts the read-back (every server status value round-trips)", () => {
@@ -2353,28 +2353,54 @@ describe("site slice (SET_SITE / RESET_SESSION / save-doc exclusion)", () => {
     for (const status of ["none", "claimed", "published", "offline", "unknown"] as const) {
       const handle = status === "none" || status === "unknown" ? null : "cedric";
       s = reducer(s, { type: "SET_SITE", handle, status });
-      expect(s.site).toEqual({ handle, status });
+      expect(s.site).toEqual({ handle, status, projected: null });
     }
   });
 
+  it("SET_SITE projected semantics (Unit 7): explicit object/null ADOPTS, absent PRESERVES (claim/publish must not clobber the last-known projection)", () => {
+    // The refresh path adopts a projection.
+    let s = reducer(initialState(), {
+      type: "SET_SITE",
+      handle: "cedric",
+      status: "claimed",
+      projected: { headline: "", oneLiner: "I walk dogs" },
+    });
+    expect(s.site.projected).toEqual({ headline: "", oneLiner: "I walk dogs" });
+    // A claim/publish-style dispatch (no projected field) preserves it.
+    s = reducer(s, { type: "SET_SITE", handle: "cedric", status: "published" });
+    expect(s.site).toEqual({
+      handle: "cedric",
+      status: "published",
+      projected: { headline: "", oneLiner: "I walk dogs" },
+    });
+    // An explicit null clears it (failed refresh / no row).
+    s = reducer(s, { type: "SET_SITE", handle: null, status: "unknown", projected: null });
+    expect(s.site.projected).toBeNull();
+  });
+
   it("RESET_SESSION round-trip: written in session 1, ABSENT after logout, repopulated by session 2's read-back", () => {
-    // Session 1: hydrate's read-back populates the slice.
+    // Session 1: hydrate's read-back populates the slice (projection included).
     let s = reducer(initialState(), {
       type: "SET_SITE",
       handle: "cedric",
       status: "published",
+      projected: { headline: "Dog walking", oneLiner: "" },
     });
-    expect(s.site).toEqual({ handle: "cedric", status: "published" });
+    expect(s.site).toEqual({
+      handle: "cedric",
+      status: "published",
+      projected: { headline: "Dog walking", oneLiner: "" },
+    });
 
     // Logout (shared-device learning): the slice must not survive the boundary
-    // — the next child must never see the previous child's handle or a false
-    // "published".
+    // — the next child must never see the previous child's handle, a false
+    // "published", or the previous child's projected content.
     s = reducer(s, { type: "RESET_SESSION" });
-    expect(s.site).toEqual({ handle: null, status: "unknown" });
+    expect(s.site).toEqual({ handle: null, status: "unknown", projected: null });
 
     // Session 2: the next hydrate's read-back repopulates it fresh.
     s = reducer(s, { type: "SET_SITE", handle: "sibling", status: "claimed" });
-    expect(s.site).toEqual({ handle: "sibling", status: "claimed" });
+    expect(s.site).toEqual({ handle: "sibling", status: "claimed", projected: null });
   });
 
   it("the site slice is NOT in the save doc (no docVersion change, no new field)", () => {
@@ -2398,9 +2424,9 @@ describe("site slice (SET_SITE / RESET_SESSION / save-doc exclusion)", () => {
     // after HYDRATE. A read-back that landed first must survive the hydrate.
     let s = reducer(initialState(), { type: "SET_SITE", handle: "cedric", status: "claimed" });
     s = reducer(s, { type: "HYDRATE", doc: toSaveDoc(withOneIdea()) });
-    expect(s.site).toEqual({ handle: "cedric", status: "claimed" });
+    expect(s.site).toEqual({ handle: "cedric", status: "claimed", projected: null });
     // And a fresh state hydrating stays at the honest unknown (never a fake).
     const fresh = reducer(initialState(), { type: "HYDRATE", doc: toSaveDoc(withOneIdea()) });
-    expect(fresh.site).toEqual({ handle: null, status: "unknown" });
+    expect(fresh.site).toEqual({ handle: null, status: "unknown", projected: null });
   });
 });

@@ -187,21 +187,38 @@ describe("hydrate populates the site slice (split-storage read-back)", () => {
     });
     await bootToApp();
     await waitFor(() =>
-      expect(api?.site).toEqual({ handle: "cedric", status: "published" }),
+      expect(api?.site).toEqual({ handle: "cedric", status: "published", projected: null }),
     );
     expect(authMock.fetchSiteStatus).toHaveBeenCalledTimes(1);
+  });
+
+  it("the refresh adopts the self-read's projected content into the slice (Unit 7 divergence fix)", async () => {
+    authMock.fetchSiteStatus.mockResolvedValue({
+      ok: true,
+      handle: "cedric",
+      status: "published",
+      projected: { headline: "", oneLiner: "I walk dogs" },
+    });
+    await bootToApp();
+    await waitFor(() =>
+      expect(api?.site).toEqual({
+        handle: "cedric",
+        status: "published",
+        projected: { headline: "", oneLiner: "I walk dogs" },
+      }),
+    );
   });
 
   it("no site yet -> slice adopts none with a null handle (never a fake /you)", async () => {
     authMock.fetchSiteStatus.mockResolvedValue({ ok: true, handle: null, status: "none" });
     await bootToApp();
-    await waitFor(() => expect(api?.site).toEqual({ handle: null, status: "none" }));
+    await waitFor(() => expect(api?.site).toEqual({ handle: null, status: "none", projected: null }));
   });
 
   it("fetch failure -> slice stays the honest 'unknown', hydrate neither crashes nor stalls", async () => {
     authMock.fetchSiteStatus.mockResolvedValue({ ok: false });
     await bootToApp(); // stage reached app: routing was not blocked
-    expect(getApi().site).toEqual({ handle: null, status: "unknown" });
+    expect(getApi().site).toEqual({ handle: null, status: "unknown", projected: null });
   });
 
   it("even a REJECTING fetch cannot crash hydrate (fire-and-forget seam)", async () => {
@@ -210,7 +227,7 @@ describe("hydrate populates the site slice (split-storage read-back)", () => {
     // as 'unknown', never an unhandled rejection or a stalled hydrate.
     authMock.fetchSiteStatus.mockRejectedValue(new Error("build skew"));
     await bootToApp();
-    await waitFor(() => expect(api?.site).toEqual({ handle: null, status: "unknown" }));
+    await waitFor(() => expect(api?.site).toEqual({ handle: null, status: "unknown", projected: null }));
     expect(getApi().stage).toBe("app");
   });
 });
@@ -240,7 +257,7 @@ describe("same-session response ordering (per-call sequence guard)", () => {
       d2.resolve({ ok: true, handle: "cedric", status: "published" });
       await r2;
     });
-    expect(getApi().site).toEqual({ handle: "cedric", status: "published" });
+    expect(getApi().site).toEqual({ handle: "cedric", status: "published", projected: null });
 
     // …then the STALE call's late 'none' arrives and must be dropped, never
     // overwriting the newer 'published'.
@@ -248,7 +265,7 @@ describe("same-session response ordering (per-call sequence guard)", () => {
       d1.resolve({ ok: true, handle: null, status: "none" });
       await r1;
     });
-    expect(getApi().site).toEqual({ handle: "cedric", status: "published" });
+    expect(getApi().site).toEqual({ handle: "cedric", status: "published", projected: null });
   });
 });
 
@@ -259,19 +276,19 @@ describe("session boundary round-trip (shared-device learning)", () => {
     // Session 1: hydrate read-back answers claimed.
     authMock.fetchSiteStatus.mockResolvedValue({ ok: true, handle: "cedric", status: "claimed" });
     await loginAs("user-A");
-    await waitFor(() => expect(api?.site).toEqual({ handle: "cedric", status: "claimed" }));
+    await waitFor(() => expect(api?.site).toEqual({ handle: "cedric", status: "claimed", projected: null }));
 
     // Logout: the slice must NOT survive the boundary.
     await act(async () => {
       await getApi().logout();
     });
-    expect(getApi().site).toEqual({ handle: null, status: "unknown" });
+    expect(getApi().site).toEqual({ handle: null, status: "unknown", projected: null });
 
     // Session 2 (sibling on the same device): repopulated from THEIR registry
     // row — the none shape (no handle) in the real contract.
     authMock.fetchSiteStatus.mockResolvedValue({ ok: true, handle: null, status: "none" });
     await loginAs("user-B");
-    await waitFor(() => expect(api?.site).toEqual({ handle: null, status: "none" }));
+    await waitFor(() => expect(api?.site).toEqual({ handle: null, status: "none", projected: null }));
   });
 });
 
@@ -284,7 +301,7 @@ describe("claim / publish slice adoption + generation guard", () => {
       result = await getApi().claimSite("Cedric");
     });
     expect(result).toEqual({ ok: true, handle: "cedric", status: "claimed" });
-    expect(getApi().site).toEqual({ handle: "cedric", status: "claimed" });
+    expect(getApi().site).toEqual({ handle: "cedric", status: "claimed", projected: null });
   });
 
   it("a designed refusal (taken) passes through WITHOUT touching the slice", async () => {
@@ -299,14 +316,14 @@ describe("claim / publish slice adoption + generation guard", () => {
       result = await getApi().claimSite("cedric");
     });
     expect(result).toEqual({ ok: false, reason: "taken", suggestions: ["cedric2"] });
-    expect(getApi().site).toEqual({ handle: null, status: "unknown" });
+    expect(getApi().site).toEqual({ handle: null, status: "unknown", projected: null });
   });
 
   it("STALE GENERATION: a claim resolving after logout/login is DISCARDED — no state mutation, no leak", async () => {
     await bootToLanding();
     authMock.fetchSiteStatus.mockResolvedValue({ ok: true, handle: null, status: "none" });
     await loginAs("user-A");
-    await waitFor(() => expect(api?.site).toEqual({ handle: null, status: "none" }));
+    await waitFor(() => expect(api?.site).toEqual({ handle: null, status: "none", projected: null }));
 
     // Child A's claim goes in flight…
     const claim = deferred<{ ok: true; handle: string; status: "claimed" }>();
@@ -363,7 +380,7 @@ describe("claim / publish slice adoption + generation guard", () => {
       firstPublish: true,
       parentNotified: true,
     });
-    expect(getApi().site).toEqual({ handle: "cedric", status: "published" });
+    expect(getApi().site).toEqual({ handle: "cedric", status: "published", projected: null });
 
     // Operator-locked: nothing became visible — no surface may render "live".
     authMock.publishSite.mockResolvedValue({ ok: false, reason: "locked" });
@@ -371,7 +388,7 @@ describe("claim / publish slice adoption + generation guard", () => {
       result = await getApi().publishSite();
     });
     expect(result).toEqual({ ok: false, reason: "locked" });
-    expect(getApi().site).toEqual({ handle: "cedric", status: "offline" });
+    expect(getApi().site).toEqual({ handle: "cedric", status: "offline", projected: null });
   });
 
   it("publish stamps the handle CAPTURED AT CALL TIME, not a mid-flight slice rewrite", async () => {
@@ -403,7 +420,7 @@ describe("claim / publish slice adoption + generation guard", () => {
       pub.resolve({ ok: true, status: "published", firstPublish: false, parentNotified: false });
       await done;
     });
-    expect(getApi().site).toEqual({ handle: "cedric", status: "published" });
+    expect(getApi().site).toEqual({ handle: "cedric", status: "published", projected: null });
   });
 });
 
@@ -539,13 +556,13 @@ describe("claim/publish invalidate an in-flight status refresh (Unit 6 review, P
     await act(async () => {
       await getApi().claimSite("cedric");
     });
-    expect(getApi().site).toEqual({ handle: "cedric", status: "claimed" });
+    expect(getApi().site).toEqual({ handle: "cedric", status: "claimed", projected: null });
     // ...then the STALE refresh resolves with pre-claim state: dropped.
     await act(async () => {
       refreshGate.resolve({ ok: true, handle: null, status: "none" });
       await refreshDone;
     });
-    expect(getApi().site).toEqual({ handle: "cedric", status: "claimed" });
+    expect(getApi().site).toEqual({ handle: "cedric", status: "claimed", projected: null });
   });
 
   it("a refresh resolving AFTER a publish cannot clobber 'published'", async () => {
@@ -569,12 +586,12 @@ describe("claim/publish invalidate an in-flight status refresh (Unit 6 review, P
     await act(async () => {
       await getApi().publishSite();
     });
-    expect(getApi().site).toEqual({ handle: "cedric", status: "published" });
+    expect(getApi().site).toEqual({ handle: "cedric", status: "published", projected: null });
     await act(async () => {
       refreshGate.resolve({ ok: true, handle: "cedric", status: "claimed" });
       await refreshDone;
     });
     // The pre-publish 'claimed' answer is stale: the slice keeps 'published'.
-    expect(getApi().site).toEqual({ handle: "cedric", status: "published" });
+    expect(getApi().site).toEqual({ handle: "cedric", status: "published", projected: null });
   });
 });

@@ -169,8 +169,14 @@ export function useClaimFlow({ game, firstName, active, onClaimed }: UseClaimFlo
         case "already-claimed":
           // The account holds a handle this slice had not adopted yet (a
           // stale read-back). Adopt via the registry read — never a second
-          // claim — and continue.
-          void gameRef.current.refreshSiteStatus();
+          // claim — and continue. AWAITED before the continuation (Unit 7
+          // review P3): onboarding's screen 3 renders the slice's handle, so
+          // firing the continuation before the refresh lands would flash the
+          // fabricated first-name fallback until the real handle arrives.
+          // refreshSiteStatus never throws (fetchSiteStatus is flat-failure
+          // by contract and the provider belt-and-braces catches), so the
+          // continuation below always runs.
+          await gameRef.current.refreshSiteStatus();
           onClaimedRef.current();
           break;
         case "outage":

@@ -86,7 +86,12 @@ describe("NextStepCoach — promote CTA + full-path walking (Unit 8)", () => {
 describe("NextStepCoach — one-shot claim hint for handle-less accounts (Unit 6)", () => {
   /** Seed with the registry read-back answering "no handle" (status none). */
   function handleLess(seed: GameState): GameState {
-    return { ...seed, site: { handle: null, status: "none" } };
+    return { ...seed, site: { handle: null, status: "none", projected: null } };
+  }
+
+  /** Seed stuck at "claimed": the go-live (flush→publish) never landed. */
+  function stuckClaimed(seed: GameState): GameState {
+    return { ...seed, site: { handle: "maya", status: "claimed", projected: null } };
   }
 
   /** Mount the coach plus a dispatch probe (drives the REAL reducer). */
@@ -134,7 +139,10 @@ describe("NextStepCoach — one-shot claim hint for handle-less accounts (Unit 6
 
   it("never fires on the neutral 'unknown' status (failed read is not a nudge)", () => {
     publicSiteFlag = true;
-    const seed = { ...withIdeas(1), site: { handle: null, status: "unknown" as const } };
+    const seed = {
+      ...withIdeas(1),
+      site: { handle: null, status: "unknown" as const, projected: null },
+    };
     mountWithDispatch(seed);
     expect(screen.queryByText("Claim your page in Your Site")).toBeNull();
     expect(screen.getByText(/Take me to /)).toBeTruthy();
@@ -148,16 +156,41 @@ describe("NextStepCoach — one-shot claim hint for handle-less accounts (Unit 6
     expect(screen.getByText("Take me to The Idea Room")).toBeTruthy();
   });
 
-  it.each(["claimed", "offline", "published"] as const)(
-    "never fires once the account holds a handle (status %s)",
+  it.each(["offline", "published"] as const)(
+    "never fires once the page reached a live/parent-controlled state (status %s)",
     (status) => {
       publicSiteFlag = true;
-      const seed = { ...withIdeas(1), site: { handle: "maya", status } };
+      const seed = { ...withIdeas(1), site: { handle: "maya", status, projected: null } };
       mountWithDispatch(seed);
       expect(screen.queryByText("Claim your page in Your Site")).toBeNull();
+      expect(screen.queryByText(/Finish making your page live/)).toBeNull();
       expect(screen.getByText(/Take me to /)).toBeTruthy();
     },
   );
+
+  // ── Stuck-'claimed' nudge (Unit 7 review P2): a parked completion flush
+  // leaves an account at "claimed" with no route back to the room whose open
+  // retries flush→publish. The same one-shot hint covers it, with its own
+  // copy — never the claim copy (the account already holds a handle).
+  it("fires for a stuck-'claimed' account with the go-live copy (not the claim copy)", () => {
+    publicSiteFlag = true;
+    const { walks } = mountWithDispatch(stuckClaimed(withIdeas(1)));
+    expect(screen.getByText("Finish making your page live in Your Site")).toBeTruthy();
+    expect(screen.queryByText("Claim your page in Your Site")).toBeNull();
+    fireEvent.click(screen.getByText("Next Step"));
+    expect(walks).toEqual([{ kind: "openRoom", room: "website" }]);
+  });
+
+  it("the claimed-state hint is consumed once the room opens, same one-shot mechanics", () => {
+    publicSiteFlag = true;
+    const { dispatch } = mountWithDispatch(stuckClaimed(withIdeas(1)));
+    expect(screen.getByText("Finish making your page live in Your Site")).toBeTruthy();
+    act(() => dispatch({ type: "OPEN_ROOM", room: "website" }));
+    expect(screen.queryByText("Next Step")).toBeNull();
+    act(() => dispatch({ type: "CLOSE_ROOM" }));
+    expect(screen.queryByText(/Finish making your page live/)).toBeNull();
+    expect(screen.getByText(/Take me to /)).toBeTruthy();
+  });
 
   it("flag off: no hint even for a handle-less account (pre-Unit-6 behavior)", () => {
     publicSiteFlag = false;

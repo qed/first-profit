@@ -296,6 +296,37 @@ describe("screen 2 · claim on the CTA (R2/R3/R23)", () => {
     expect(refreshSiteStatus).toHaveBeenCalledTimes(1);
     expect(claimSite).toHaveBeenCalledTimes(1);
   });
+
+  it("already-claimed AWAITS the read-back before advancing, so screen 3 shows the REAL handle, never the first-name fallback (Unit 7 review P3)", async () => {
+    // The account's real handle differs from the fabricated first-name slug
+    // ("maya"): advancing before the refresh lands would flash the fallback.
+    claimSite.mockResolvedValue({ ok: false, reason: "already-claimed", handle: "cedric-77" });
+    const refresh = deferred<void>();
+    refreshSiteStatus.mockImplementation(() => {
+      // The read-back adopts the REAL slice when (and only when) it resolves.
+      return refresh.promise.then(() => {
+        siteValue = { handle: "cedric-77", status: "claimed" };
+      });
+    });
+    renderAt(2);
+    fireEvent.click(screen.getByText("Claim my page →"));
+    // The refresh is in flight: the continuation must NOT have fired yet.
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(refreshSiteStatus).toHaveBeenCalledTimes(1);
+    expect(dispatch).not.toHaveBeenCalledWith({ type: "SET_OB", ob: 3 });
+    // The refresh lands → the slice is fresh → THEN the advance fires.
+    await act(async () => {
+      refresh.resolve();
+    });
+    await waitFor(() => expect(dispatch).toHaveBeenCalledWith({ type: "SET_OB", ob: 3 }));
+    // Screen 3 renders the refreshed slice's handle, never the fallback.
+    cleanup();
+    renderAt(3);
+    expect(screen.getByText("firstprofit.school/cedric-77")).toBeTruthy();
+    expect(screen.queryByText("firstprofit.school/maya")).toBeNull();
+  });
 });
 
 describe("screen 2 · claimed resume pass-through", () => {

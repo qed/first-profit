@@ -122,17 +122,27 @@ otherwise). This executes the PREVIEW-DEPLOY CHECKLIST pinned in
       exposure is recorded and accepted in the R20 record (2026-08-03
       re-check).
 
-## 6. Cedric test family end-to-end (production, scoped) — OPERATOR-ACTION
+## 6. Cedric test family end-to-end (PREVIEW client, allowlisted backend) — OPERATOR-ACTION
 
-Per the plan's gate decision: the120's allowlist gate permits a
-production-scoped test instead of a preview-only one; the client flag can be
-enabled on a PREVIEW env (preview envs build their own bundle) pointing at
-production the120, or per the gate decision made on the day.
+REQUIRED MECHANISM (Unit 7 review): the driving client is a PREVIEW
+deployment with `VITE_ENABLE_PUBLIC_SITE=true` in the PREVIEW env only —
+preview envs build their own bundle — pointed at production the120, whose
+gate is scoped by the allowlist. **`VITE_ENABLE_PUBLIC_SITE` stays OFF in
+production until step 9.**
+
+> STRUCK ALTERNATIVE — "run the test in production scoped by the allowlist"
+> (the plan's original either/or): the VITE flag is GLOBAL (baked into the one
+> production bundle), so enabling it in production for a scoped test would
+> show EVERY child the live claim UI while every non-allowlisted claim dies
+> on the server's generic 401 — rendered client-side as retry-inviting
+> "outage" copy. A client bundle cannot scope per-account. Revisit only if a
+> client-visible gate state (server-driven "not for you yet" signal) ever
+> ships.
 
 - [ ] the120 production env: `FP_SITE_TEST_ONLY` left ON (default) and
       `FP_SITE_TEST_ALLOWLIST=<cedric family fp_usernames, comma-separated>`
-- [ ] `VITE_ENABLE_PUBLIC_SITE=true` in a preview env (or per the gate
-      decision) for the driving client
+- [ ] `VITE_ENABLE_PUBLIC_SITE=true` in the PREVIEW env for the driving
+      client (production VITE flag stays unset/false)
 - [ ] Full loop (republish legs are ACTOR-SPECIFIC — the asymmetry is by
       design and must be asserted, not assumed):
       claim → publish → **parent email received** → page renders at the real

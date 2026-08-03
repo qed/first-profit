@@ -53,8 +53,13 @@ const flushNow = vi.fn();
 const publishSite = vi.fn();
 const claimSite = vi.fn();
 
+/** Seed shape: `projected` optional (defaults null) so the many pre-Unit-7
+ *  literals stay untouched; the divergence tests pass it explicitly. */
+type SiteSeed = Omit<SiteState, "projected"> & { projected?: SiteState["projected"] };
+const withProjected = (s: SiteSeed): SiteState => ({ projected: null, ...s });
+
 /** The harness's live slice setter (mimics GameContext SET_SITE adoption). */
-let setSite: (s: SiteState) => void = () => {
+let setSite: (s: SiteSeed) => void = () => {
   throw new Error("harness not mounted");
 };
 
@@ -69,12 +74,12 @@ function Harness({
   initialSite,
   headline = "",
 }: {
-  initialSite: SiteState;
+  initialSite: SiteSeed;
   headline?: string;
 }) {
-  const [site, setSiteState] = React.useState(initialSite);
+  const [site, setSiteState] = React.useState(withProjected(initialSite));
   const [siteHeadline, setHeadline] = React.useState(headline);
-  setSite = setSiteState;
+  setSite = (s) => setSiteState(withProjected(s));
   const value = {
     profile: { firstName: "Maya", handle: "", siteHeadline, grade: null },
     ideas: [] as unknown[],
@@ -99,7 +104,7 @@ function Harness({
   );
 }
 
-function mount(initialSite: SiteState, headline = "") {
+function mount(initialSite: SiteSeed, headline = "") {
   return render(<Harness initialSite={initialSite} headline={headline} />);
 }
 
@@ -374,6 +379,43 @@ describe("room open + headline editor", () => {
         "Your page shows your headline plus the one-liner from the idea you are working on right now. Switch ideas and the page follows.",
       ),
     ).toBeTruthy();
+  });
+});
+
+// ── Honest-divergence note (Unit 7 review): blocked text stored empty ────────
+
+describe("blocked-text divergence note", () => {
+  const NOTE = "Part of your page text can't be shown on your public page. Try different words.";
+
+  it("shows the note when the typed headline is non-empty but the server's projected headline is EMPTY", () => {
+    mount(
+      { handle: "maya", status: "published", projected: { headline: "", oneLiner: "" } },
+      "f-u-c-k the rules",
+    );
+    expect(screen.getByText(NOTE)).toBeTruthy();
+    // The softened parity copy no longer claims the preview IS what goes live.
+    expect(screen.queryByText(/Your parent sees everything that goes live/)).toBeNull();
+  });
+
+  it("no note when the projected content matches the typed text", () => {
+    mount(
+      {
+        handle: "maya",
+        status: "published",
+        projected: { headline: "Dog walking for busy neighbors", oneLiner: "" },
+      },
+      "Dog walking for busy neighbors",
+    );
+    expect(screen.queryByText(NOTE)).toBeNull();
+  });
+
+  it("no note without projection data (null): a block is never inferred from data we do not have", () => {
+    mount({ handle: "maya", status: "published", projected: null }, "f-u-c-k the rules");
+    expect(screen.queryByText(NOTE)).toBeNull();
+    // And an untyped (empty) local headline never trips it either.
+    cleanup();
+    mount({ handle: "maya", status: "published", projected: { headline: "", oneLiner: "" } }, "");
+    expect(screen.queryByText(NOTE)).toBeNull();
   });
 });
 

@@ -229,6 +229,21 @@ export interface SiteState {
   /** The claimed handle, or null while none/unknown. */
   handle: string | null;
   status: SiteStatus;
+  /**
+   * The OWN row's server-sanitized (projected) public content — exactly what
+   * the public page renders (Unit 7 review, cross-repo divergence fix). Null
+   * while no row exists or the read-back has not answered. The room compares
+   * it against the locally-typed strings to say honestly when a blocklisted
+   * edit was stored empty (public page shows default copy) instead of
+   * previewing raw text forever.
+   */
+  projected: SiteProjected | null;
+}
+
+/** The self-read's `projected` payload (the120 route.ts contract). */
+export interface SiteProjected {
+  headline: string;
+  oneLiner: string;
 }
 
 export interface Profile {
@@ -300,7 +315,7 @@ export function initialState(): GameState {
     celebrate: null,
     room: null,
     chosenProvider: null,
-    site: { handle: null, status: "unknown" },
+    site: { handle: null, status: "unknown", projected: null },
     onboardingComplete: false,
     docVersion: DOC_VERSION,
   };
@@ -1095,7 +1110,20 @@ export type Action =
    * publish) — a stale-generation response is discarded there and never
    * reaches this action. Not persisted (see SiteState).
    */
-  | { type: "SET_SITE"; handle: string | null; status: SiteStatus }
+  | {
+      type: "SET_SITE";
+      handle: string | null;
+      status: SiteStatus;
+      /**
+       * The projected-content payload (Unit 7): an object/null ADOPTS it;
+       * UNDEFINED (absent) PRESERVES the current value — claim/publish adopt a
+       * fresh status without a projection read, and clobbering the last-known
+       * projection there would flicker the room's honest-divergence note. The
+       * refresh path always passes it explicitly (object on success, null on
+       * failure/none).
+       */
+      projected?: SiteProjected | null;
+    }
   | { type: "RESET_SESSION" }
   /**
    * Feed a committed CAS-rebased (merged) save doc back into live state so
@@ -1501,7 +1529,16 @@ export function reducer(state: GameState, action: Action): GameState {
       };
 
     case "SET_SITE":
-      return { ...state, site: { handle: action.handle, status: action.status } };
+      return {
+        ...state,
+        site: {
+          handle: action.handle,
+          status: action.status,
+          // undefined = preserve (claim/publish carry no projection read);
+          // null/object = adopt (the refresh path is always explicit).
+          projected: action.projected === undefined ? state.site.projected : action.projected,
+        },
+      };
 
     case "RESET_SESSION": {
       // Clear all per-account business/financial + UI state so no previous

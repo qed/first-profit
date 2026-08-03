@@ -56,12 +56,17 @@ import {
 
 // ── Serialized fixtures (copied from the the120 route headers) ───────────────
 
-// app/api/fp/site/route.ts: 200 {ok:true, handle: string|null, status} |
-// 200 {ok:false, reason:"outage"}; status is none|claimed|published|offline.
-const SITE_READ_PUBLISHED = '{"ok":true,"handle":"cedric","status":"published"}';
-const SITE_READ_NONE = '{"ok":true,"handle":null,"status":"none"}';
-const SITE_READ_CLAIMED = '{"ok":true,"handle":"cedric","status":"claimed"}';
-const SITE_READ_OFFLINE = '{"ok":true,"handle":"cedric","status":"offline"}';
+// app/api/fp/site/route.ts: 200 {ok:true, handle: string|null, status,
+// projected: {headline, oneLiner} | null} | 200 {ok:false, reason:"outage"};
+// status is none|claimed|published|offline. `projected` (Unit 7) is the OWN
+// row's server-sanitized public content — null when no row exists.
+const SITE_READ_PUBLISHED =
+  '{"ok":true,"handle":"cedric","status":"published","projected":{"headline":"Dog walking","oneLiner":"I walk dogs"}}';
+const SITE_READ_NONE = '{"ok":true,"handle":null,"status":"none","projected":null}';
+const SITE_READ_CLAIMED =
+  '{"ok":true,"handle":"cedric","status":"claimed","projected":{"headline":"","oneLiner":""}}';
+const SITE_READ_OFFLINE =
+  '{"ok":true,"handle":"cedric","status":"offline","projected":{"headline":"Dog walking","oneLiner":""}}';
 
 // app/api/fp/site/availability/route.ts: 200 {ok:true, verdict, suggestions:
 // string[]}; verdict is available|taken|yours|invalid.
@@ -170,16 +175,47 @@ describe("fetchSiteStatus (self-read contract)", () => {
     );
   });
 
-  it("pins the full status vocabulary: none / claimed / published / offline", async () => {
-    const cases: Array<[string, { handle: string | null; status: string }]> = [
-      [SITE_READ_NONE, { handle: null, status: "none" }],
-      [SITE_READ_CLAIMED, { handle: "cedric", status: "claimed" }],
-      [SITE_READ_PUBLISHED, { handle: "cedric", status: "published" }],
-      [SITE_READ_OFFLINE, { handle: "cedric", status: "offline" }],
+  it("pins the full status vocabulary: none / claimed / published / offline (with the projected payload)", async () => {
+    const cases: Array<
+      [string, { handle: string | null; status: string; projected: { headline: string; oneLiner: string } | null }]
+    > = [
+      [SITE_READ_NONE, { handle: null, status: "none", projected: null }],
+      [SITE_READ_CLAIMED, { handle: "cedric", status: "claimed", projected: { headline: "", oneLiner: "" } }],
+      [
+        SITE_READ_PUBLISHED,
+        { handle: "cedric", status: "published", projected: { headline: "Dog walking", oneLiner: "I walk dogs" } },
+      ],
+      [
+        SITE_READ_OFFLINE,
+        { handle: "cedric", status: "offline", projected: { headline: "Dog walking", oneLiner: "" } },
+      ],
     ];
     for (const [body, expected] of cases) {
       mockFetch(serializedResponse(200, body));
       expect(await fetchSiteStatus()).toEqual({ ok: true, ...expected });
+    }
+  });
+
+  it("tolerates an ABSENT or malformed projected field (older backend build) as null — never a fabricated projection", async () => {
+    // Absent (pre-Unit-7 backend): still a usable read, projected null.
+    mockFetch(serializedResponse(200, '{"ok":true,"handle":"cedric","status":"claimed"}'));
+    expect(await fetchSiteStatus()).toEqual({
+      ok: true,
+      handle: "cedric",
+      status: "claimed",
+      projected: null,
+    });
+    // Malformed shapes collapse to null without failing the whole read.
+    for (const bad of ['"str"', "42", '{"headline":7,"oneLiner":""}', '{"headline":"x"}']) {
+      mockFetch(
+        serializedResponse(200, `{"ok":true,"handle":"cedric","status":"claimed","projected":${bad}}`),
+      );
+      expect(await fetchSiteStatus()).toEqual({
+        ok: true,
+        handle: "cedric",
+        status: "claimed",
+        projected: null,
+      });
     }
   });
 

@@ -344,13 +344,20 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
     if (gen !== sessionGenRef.current) return; // stale session: discard
     if (seq !== siteFetchSeqRef.current) return; // a newer refresh started: drop
     if (result.ok) {
-      dispatch({ type: "SET_SITE", handle: result.handle, status: result.status });
+      // The refresh path is the ONE explicit projected writer (object or
+      // null); claim/publish omit the field and the reducer preserves.
+      dispatch({
+        type: "SET_SITE",
+        handle: result.handle,
+        status: result.status,
+        projected: result.projected,
+      });
     } else {
       // Failed read (outage/refusal/offline/flag off): the honest `unknown` —
       // neutral render, never a fake handle, never a false "live". Also
       // OVERWRITES a previously-good slice on a room-open refresh failure, so
       // the room can never keep showing "live" on data it could not confirm.
-      dispatch({ type: "SET_SITE", handle: null, status: "unknown" });
+      dispatch({ type: "SET_SITE", handle: null, status: "unknown", projected: null });
     }
   }, []);
 

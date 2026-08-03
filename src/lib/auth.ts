@@ -540,9 +540,26 @@ async function currentAccessToken(): Promise<string | null> {
   }
 }
 
+/** The self-read's projected (server-sanitized) own-row content — exactly
+ *  what the public page renders (the120 route.ts contract, Unit 7). */
+export interface SiteProjectedContent {
+  headline: string;
+  oneLiner: string;
+}
+
 export type FetchSiteStatusResult =
-  | { ok: true; handle: string | null; status: SiteApiStatus }
+  | { ok: true; handle: string | null; status: SiteApiStatus; projected: SiteProjectedContent | null }
   | { ok: false };
+
+/** Parse the self-read's `projected` field: an object with two strings, else
+ *  null (absent field, older backend build, or malformed shape — the caller
+ *  renders "no projection known", never a fabricated one). */
+function asProjected(value: unknown): SiteProjectedContent | null {
+  if (typeof value !== "object" || value === null) return null;
+  const v = value as { headline?: unknown; oneLiner?: unknown };
+  if (typeof v.headline !== "string" || typeof v.oneLiner !== "string") return null;
+  return { headline: v.headline, oneLiner: v.oneLiner };
+}
 
 /**
  * The account's OWN registry-row status (GET /api/fp/site) — the read-back the
@@ -567,7 +584,12 @@ export async function fetchSiteStatus(): Promise<FetchSiteStatusResult> {
     });
     if (!res.ok) return { ok: false };
 
-    const parsed = (await res.json()) as { ok?: unknown; handle?: unknown; status?: unknown };
+    const parsed = (await res.json()) as {
+      ok?: unknown;
+      handle?: unknown;
+      status?: unknown;
+      projected?: unknown;
+    };
     if (parsed.ok !== true) return { ok: false };
     const status = asSiteApiStatus(parsed.status);
     if (!status) return { ok: false };
@@ -576,7 +598,7 @@ export async function fetchSiteStatus(): Promise<FetchSiteStatusResult> {
     // otherwise is malformed — refuse it rather than surface a handle-less
     // "published" (the never-a-fake-handle rule).
     if (status !== "none" && handle === null) return { ok: false };
-    return { ok: true, handle, status };
+    return { ok: true, handle, status, projected: asProjected(parsed.projected) };
   } catch {
     return { ok: false };
   }

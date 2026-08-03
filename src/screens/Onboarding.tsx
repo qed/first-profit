@@ -80,7 +80,7 @@ export function Onboarding() {
   const siteEnabled = isPublicSiteEnabled();
   // The site slice (Unit 4 read-back). Defensive default: legacy flag-off
   // stubs/providers without the slice must render exactly as before.
-  const site = game.site ?? { handle: null, status: "unknown" as const };
+  const site = game.site ?? { handle: null, status: "unknown" as const, projected: null };
   /** The account already holds a handle: resume/claimed pass-through (R3). */
   const alreadyClaimed =
     site.handle !== null &&

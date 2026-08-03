@@ -233,15 +233,25 @@ export function NextStepCoach({
   }, [roomOpen]);
   if (overlayOpen || game.runnerOpen || game.room || game.celebrate || game.pickFor) return null;
 
+  // "none" → invite the claim; "claimed" → the go-live never landed (a parked
+  // completion flush, Unit 7 review P2: without a nudge back to the room —
+  // whose open retries flush→publish — a stuck-'claimed' account had no route
+  // to live, ever). Same one-shot mechanics, different copy per state.
+  const siteHintStatus = game.site?.status;
   const siteHint =
     isPublicSiteEnabled() &&
     !siteHintUsed &&
-    game.site?.status === "none" &&
+    (siteHintStatus === "none" || siteHintStatus === "claimed") &&
     game.ideas.length > 0;
   if (siteHint) {
+    const roomName = ROOM_META.website?.name ?? "Your Site";
     return (
       <CoachButton
-        label={`Claim your page in ${ROOM_META.website?.name ?? "Your Site"}`}
+        label={
+          siteHintStatus === "claimed"
+            ? `Finish making your page live in ${roomName}`
+            : `Claim your page in ${roomName}`
+        }
         onClick={() => onWalk({ kind: "openRoom", room: "website" })}
       />
     );

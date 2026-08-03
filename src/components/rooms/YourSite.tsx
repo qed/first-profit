@@ -44,7 +44,11 @@
  * layer (blocked strings are stored empty, so the public page falls back to
  * the default copy) — this room's job is the input cap (R6), the PII nudge
  * (R23's accepted-limit copy), and honest state display. No client blocklist
- * corpus (see src/lib/handleRules.ts).
+ * corpus (see src/lib/handleRules.ts). Honesty about screening (Unit 7
+ * review): the self-read's `projected` payload is what the public page
+ * actually renders — when a typed headline/one-liner sits beside an EMPTY
+ * projected value, the room shows the kid-friendly blocked-text note instead
+ * of previewing raw text forever.
  */
 import { useEffect, useRef } from "react";
 import { isPublicSiteEnabled } from "../../config";
@@ -140,6 +144,13 @@ const STATE_COPY = {
 const PII_NUDGE =
   "Your page is public. Don't put your phone number, address, school, or last name on it.";
 
+/** The honest-divergence note (Unit 7 review): shown when a locally-typed
+ *  headline/one-liner was stored EMPTY by the server's word check, so the
+ *  public page shows default copy while this preview shows the typed text.
+ *  Kid-friendly, no scolding, actionable. NO em dashes (product rule). */
+const BLOCKED_TEXT_NOTE =
+  "Part of your page text can't be shown on your public page. Try different words.";
+
 /** The designed active-idea behavior, made visible so it reads as a feature,
  *  not a data bug (Unit 6 copy note). */
 const ONE_LINER_NOTE =
@@ -186,11 +197,24 @@ function RealYourSite() {
   const { profile, activeIdea, dispatch, refreshSiteStatus, flushNow, publishSite } = game;
   // Defensive default (mirrors Onboarding): a legacy stub/provider without the
   // slice renders the neutral unknown state, never a fake handle.
-  const site = game.site ?? { handle: null, status: "unknown" as const };
+  const site = game.site ?? { handle: null, status: "unknown" as const, projected: null };
   const view = roomViewFor(site.status);
   const oneLiner = ideaOneLiner(game, activeIdea);
   const headline =
     profile.siteHeadline || defaultSiteHeadline(profile.firstName || "Founder");
+
+  // ── Honest-divergence check (Unit 7 review): the self-read's `projected`
+  // is what the public page actually renders. A NON-EMPTY local string beside
+  // an EMPTY projected one means the server's word check stored it empty (the
+  // page shows default copy) — say so, instead of previewing raw text forever.
+  // `projected` null (no row / read not answered) shows nothing: we never
+  // infer a block from data we do not have. Bounded staleness: the projection
+  // refreshes with the room-open read-back, same as the status itself.
+  const projected = site.projected ?? null;
+  const blockedTextNote =
+    projected !== null &&
+    ((profile.siteHeadline !== "" && projected.headline === "") ||
+      (oneLiner !== "" && projected.oneLiner === ""));
 
   // ── Room open = the deferred registry read-back (bounded staleness for a
   // parent unpublish reaching a playing child). refreshSiteStatus is stable
@@ -390,9 +414,14 @@ function RealYourSite() {
         />
         <p className="mt-2 text-[12px] text-[hsl(25_20%_38%)]">
           {site.status === "published"
-            ? "Edits go live in a few seconds. Your parent sees everything that goes live."
-            : "Edits save now and show up as soon as your page is live. Your parent sees everything that goes live."}
+            ? "Edits go live in a few seconds. Your parent can see your page too."
+            : "Edits save now and show up as soon as your page is live. Your parent can see your page too."}
         </p>
+        {blockedTextNote ? (
+          <p className="mt-1.5 text-[12px] font-semibold text-[hsl(14_78%_44%)]">
+            {BLOCKED_TEXT_NOTE}
+          </p>
+        ) : null}
         <p className="mt-1.5 text-[12px] font-semibold text-[hsl(25_20%_38%)]">{PII_NUDGE}</p>
         <p className="mt-1.5 text-[12px] text-[hsl(25_20%_38%)]">{ONE_LINER_NOTE}</p>
       </div>
