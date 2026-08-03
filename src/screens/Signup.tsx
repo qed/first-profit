@@ -114,6 +114,15 @@ export type CompleteVerificationResult = {
    *  confirmation so the parent learns the login key (the recap email also states
    *  it). May be empty when the mint could not surface it. */
   username?: string;
+  /**
+   * The consent policy moved on between the consent screen and this submit
+   * (dormant-flow fix): `finishSignup` re-fetched it and it no longer matches
+   * what was echoed. `policy` carries the CURRENT rendered policy so the
+   * verify-return can show it and let the parent re-attest, instead of
+   * retrying the same stale echo forever.
+   */
+  staleConsent?: boolean;
+  policy?: RenderedConsentPolicy;
 };
 
 export interface CompleteVerificationRequest {
@@ -434,6 +443,12 @@ function VerifyReturn({
   const mountedRef = useRef(true);
   const [show, setShow] = useState(false);
   const [showChild, setShowChild] = useState(false);
+  // Stale-consent retry (dormant-flow fix): the policy moved on between the
+  // consent screen and this submit. `stalePolicy` is the freshly re-fetched
+  // policy `finishSignup` surfaced; the parent must tick the checkbox again
+  // (a fresh attestation to the NEW text) before the retry is allowed to fire.
+  const [stalePolicy, setStalePolicy] = useState<RenderedConsentPolicy | null>(null);
+  const [reattested, setReattested] = useState(false);
 
   useEffect(() => {
     mountedRef.current = true;
@@ -453,6 +468,7 @@ function VerifyReturn({
     busyRef.current = true;
     setBusy(true);
     setError(false);
+    setStalePolicy(null);
     try {
       const res = await onComplete({
         token,
@@ -476,7 +492,27 @@ function VerifyReturn({
       if (res.ok && res.outcome === "confirmation") {
         setUsername(res.username ?? "");
         setConfirmed(true);
-      } else if (!res.ok) setError(true);
+      } else if (!res.ok && res.staleConsent && res.policy) {
+        // The policy moved on between the consent screen and this submit. Carry
+        // the FRESHLY fetched version/hash forward on the in-memory pending copy
+        // (mirrors FIX 2: no password rides this, only the non-secret consent
+        // echo) so the re-attest retry echoes the CURRENT policy, not the stale
+        // one that just got refused — otherwise the retry loop never converges.
+        pendingRef.current = pendingRef.current
+          ? {
+              ...pendingRef.current,
+              consent: {
+                policyVersion: res.policy.version,
+                policyHash: res.policy.hash,
+                method: res.policy.method,
+              },
+            }
+          : pendingRef.current;
+        setReattested(false);
+        setStalePolicy(res.policy);
+      } else if (!res.ok) {
+        setError(true);
+      }
     } catch {
       if (mountedRef.current) setError(true);
     } finally {
@@ -578,6 +614,65 @@ function VerifyReturn({
   // the render below reads `pending` without a non-null assertion.
   if (!pending) return null;
 
+  // Stale-consent retry (dormant-flow fix): the permission text changed while
+  // this page sat open. Show the CURRENT text, require a fresh tick, then let
+  // `finish` re-run — it will echo the version/hash we just stashed on
+  // `pendingRef.current`, so this converges instead of looping on the old echo.
+  if (stalePolicy) {
+    return (
+      <SignupShell filled={CONFIRM_EMAIL_SEGMENT}>
+        <p className="font-mono text-[11px] uppercase tracking-[0.14em]" style={{ color: "hsl(14 78% 44%)" }}>
+          One quick check
+        </p>
+        <h2 className="mt-2 font-display text-[26px] font-black leading-[1.15] text-[hsl(25_34%_20%)]">
+          Please review this again.
+        </h2>
+        <p className="mt-2 break-words text-sm leading-[1.6] text-[hsl(25_20%_38%)]">
+          The permission text was updated while this page was open. Take a look and confirm again before
+          we finish setting up the account.
+        </p>
+
+        <div className="mt-5 rounded-2xl border-2 border-[hsl(25_34%_20%/0.15)] bg-white">
+          <div className="flex items-center justify-between border-b-2 border-[hsl(25_34%_20%/0.1)] px-4 py-2.5">
+            <p className="font-display text-[15px] font-bold text-[hsl(25_34%_20%)]">{stalePolicy.title}</p>
+            <span className="ml-3 shrink-0 font-mono text-[10px] uppercase tracking-[0.06em] text-[hsl(25_20%_38%)]">
+              v{stalePolicy.version}
+            </span>
+          </div>
+          <div className="max-h-56 overflow-y-auto px-4 py-3.5">
+            <p className="text-[13px] leading-[1.6] text-[hsl(25_20%_38%)]">{stalePolicy.text}</p>
+          </div>
+        </div>
+
+        <label className="mt-4 flex cursor-pointer items-start gap-3 rounded-xl border-2 border-[hsl(25_34%_20%/0.15)] bg-white px-4 py-3.5">
+          <input
+            type="checkbox"
+            checked={reattested}
+            onChange={(e) => setReattested(e.target.checked)}
+            className="mt-0.5 h-6 w-6 shrink-0 accent-verified"
+          />
+          <span className="text-[13.5px] font-semibold leading-[1.5] text-[hsl(25_34%_20%)]">
+            I am the parent or legal guardian, and I consent to the updated terms above for my child.
+          </span>
+        </label>
+
+        {error ? (
+          <p
+            role="alert"
+            className="mt-3 rounded-xl border-l-4 border-goldleaf bg-goldleaf/10 px-3.5 py-3 text-sm leading-relaxed text-ink"
+          >
+            We couldn't finish setting up the account. Check your details and try again.
+          </p>
+        ) : null}
+
+        <GreenCta onClick={finish} disabled={busy || !reattested}>
+          {busy ? "Finishing..." : "Confirm and continue →"}
+        </GreenCta>
+        <BackLink onClick={() => onExit?.()} />
+      </SignupShell>
+    );
+  }
+
   return (
     <SignupShell filled={CONFIRM_EMAIL_SEGMENT}>
       <p className="font-mono text-[11px] uppercase tracking-[0.14em]" style={{ color: "hsl(150 52% 32%)" }}>
@@ -650,12 +745,24 @@ function VerifyReturn({
       </div>
 
       {error ? (
-        <p
-          role="alert"
-          className="mt-3 rounded-xl border-l-4 border-goldleaf bg-goldleaf/10 px-3.5 py-3 text-sm leading-relaxed text-ink"
-        >
-          We couldn't finish setting up the account. Check your details and try again.
-        </p>
+        <>
+          <p
+            role="alert"
+            className="mt-3 rounded-xl border-l-4 border-goldleaf bg-goldleaf/10 px-3.5 py-3 text-sm leading-relaxed text-ink"
+          >
+            We couldn't finish setting up the account. Check your details and try again.
+          </p>
+          <p className="mt-2 text-center text-[12.5px] leading-[1.5] text-[hsl(25_20%_38%)]">
+            Still stuck?{" "}
+            <button
+              type="button"
+              onClick={() => onExit?.()}
+              className="inline-flex min-h-[44px] items-center px-1 font-semibold text-[hsl(25_34%_20%)] underline hover:text-ink"
+            >
+              Start again
+            </button>
+          </p>
+        </>
       ) : null}
 
       <GreenCta onClick={finish} disabled={busy || !canSubmit}>
