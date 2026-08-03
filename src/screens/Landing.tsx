@@ -203,9 +203,6 @@ export function Landing({ signupEnabled = isSignupEnabled() }: { signupEnabled?:
           <span className="text-[15px] font-extrabold tracking-[0.02em]">FIRST PROFIT</span>
         </div>
         <div className="flex items-center gap-3 sm:gap-5">
-          <span className="hidden text-[13px] text-[hsl(30_6%_52%)] sm:inline">
-            Home Study Edition · v1 tester preview
-          </span>
           <button
             type="button"
             onClick={onStartBuilding}
@@ -234,7 +231,7 @@ export function Landing({ signupEnabled = isSignupEnabled() }: { signupEnabled?:
             <StartBuildingButton onClick={onStartBuilding} />
           </div>
           <p className="mt-3.5 font-mono text-[11px] text-[hsl(30_6%_52%)]">
-            Free while we test · a parent sets up every account
+            Free while we test
           </p>
         </div>
 
@@ -347,8 +344,12 @@ export function Landing({ signupEnabled = isSignupEnabled() }: { signupEnabled?:
       </section>
 
       <footer className="mx-auto flex max-w-[1120px] flex-col gap-2 px-5 py-5 font-mono text-[11px] text-[hsl(30_6%_52%)] sm:flex-row sm:justify-between sm:px-8">
-        <span>First Profit · Home Study Edition</span>
-        <span>Sell → Build → Validate → Grow → Scale</span>
+        <span>First Profit</span>
+        <span>
+          <span className="text-sell">Sell</span> → <span className="text-build">Build</span> →{" "}
+          <span className="text-validate">Validate</span> → <span className="text-grow">Grow</span> →{" "}
+          <span className="text-scale">Scale</span>
+        </span>
       </footer>
     </main>
   );
