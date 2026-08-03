@@ -10,6 +10,7 @@ symptoms:
   - "The migration's stale-tab recovery could not help - the clobbered completion was absent from the overwriting doc, so no later union had anything to recover"
 root_cause: async_timing
 resolution_type: code_fix
+last_updated: 2026-08-03
 tags: [cas, rebase, last-writer-wins, union, monotonic, save-doc, sync, concurrency, data-loss]
 ---
 
@@ -61,6 +62,33 @@ mixed-build window (the old build's replace can still drop new-shape maps, but
 the next new-build session's rebase or load re-unions them from wherever they
 survive). Latest-intent fields keep the old contract because for them
 last-writer-wins IS the right semantics.
+
+## Round 2 (Unit 7, same day): three more halves of the same guarantee
+
+The business-model review found the union alone still left split-brain:
+
+1. **Merged docs must flow BACK into live state.** The rebase union wrote the
+   merged doc to the server but never fed it to the merging tab's reducer —
+   each tab kept re-asserting its own stale state on every flush, so the
+   persisted "active business" flapped forever. Fix: an `onRebasedDoc`
+   callback fires after the rebased save commits (generation-guarded) and a
+   `UNION_REMOTE` action unions the merged doc's monotonic state into live
+   state (marks state only — never closes dialogs or fires celebrations).
+   A union with no feedback loop converges the DATABASE, not the SESSIONS.
+2. **Union entity lists by ID, never by index.** Two tabs concurrently
+   creating an idea at the same array position got FUSED by the index-matched
+   union — one idea's completions grafted onto the other's fields, and the
+   second identity silently dropped. Ids existed on the records; the union
+   just didn't use them. Match by id when present, append the unmatched,
+   reserve index-matching for deterministic-id legacy rows.
+3. **Scalar conflicts need ACTION timestamps, not save timestamps.**
+   "Local wins" for `archived` let a stale tab's unrelated write resurrect a
+   business another tab had just archived — the local value was carried-over
+   state, not fresh intent, and the union couldn't tell. Fix: stamp the
+   ACTION (`archiveStateAt`), resolve by larger stamp (last-action-wins),
+   and add a pure normalization (`normalizeBusinesses`: earliest-promoted
+   active, rest archived) applied on load and after every union so the
+   one-active invariant is restored deterministically no matter what merges.
 
 ## Prevention
 
