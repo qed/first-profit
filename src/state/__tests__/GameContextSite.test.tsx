@@ -58,6 +58,8 @@ interface FakeEngine {
   notifySnapshotChange: ReturnType<typeof vi.fn>;
   flushPending: ReturnType<typeof vi.fn>;
   flushOnHide: ReturnType<typeof vi.fn>;
+  /** The deps GameContext handed createSyncEngine (getSnapshot etc.). */
+  deps?: { getSnapshot: () => { doc: { siteHeadline: string }; revision: number } };
 }
 const engines: FakeEngine[] = [];
 const syncMock = {
@@ -79,7 +81,7 @@ vi.mock("../../lib/sync", () => ({
   utcDayToday: () => new Date().toISOString().slice(0, 10),
   FEEDBACK_DAILY_CAP: 50,
   FEEDBACK_BODY_MAX: 1000,
-  createSyncEngine: () => {
+  createSyncEngine: (deps: FakeEngine["deps"]) => {
     const engine: FakeEngine = {
       start: vi.fn().mockResolvedValue(undefined),
       stop: vi.fn(),
@@ -88,6 +90,7 @@ vi.mock("../../lib/sync", () => ({
       notifySnapshotChange: vi.fn(),
       flushPending: vi.fn().mockResolvedValue("landed"),
       flushOnHide: vi.fn(),
+      deps,
     };
     engines.push(engine);
     return engine;
@@ -438,5 +441,55 @@ describe("flushNow (surfaced flush outcome)", () => {
     engines[0].flushPending.mockResolvedValue("landed");
     await expect(getApi().flushNow()).resolves.toBe("landed");
     expect(engines[0].flushPending).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("flushNow marks the snapshot pending BEFORE flushing (Unit 5 review, P1)", () => {
+  it("calls notifySnapshotChange synchronously before flushPending, even with no prior change", async () => {
+    // A caller may invoke flushNow in the same task as a dispatch, before the
+    // passive [state] subscription effect has notified the engine. flushNow
+    // must therefore mark the snapshot itself — otherwise flushOnce's
+    // nothing-pending fast path could answer a FALSE "landed" for content the
+    // engine never read.
+    await bootToApp();
+    const engine = engines[0];
+    engine.notifySnapshotChange.mockClear();
+    await expect(getApi().flushNow()).resolves.toBe("landed");
+    expect(engine.notifySnapshotChange).toHaveBeenCalledTimes(1);
+    expect(engine.notifySnapshotChange.mock.invocationCallOrder[0]).toBeLessThan(
+      engine.flushPending.mock.invocationCallOrder[0],
+    );
+  });
+
+  it("dispatch then flushNow: the snapshot the engine reads carries the dispatched change", async () => {
+    await bootToApp();
+    const engine = engines[0];
+    await act(async () => {
+      getApi().dispatch({ type: "SET_PROFILE", patch: { siteHeadline: "Fresh lemonade" } });
+    });
+    await act(async () => {
+      await expect(getApi().flushNow()).resolves.toBe("landed");
+    });
+    // getSnapshot reads live state (stateRef) at save time: the doc the engine
+    // would persist carries the just-dispatched headline.
+    expect(engine.deps?.getSnapshot().doc.siteHeadline).toBe("Fresh lemonade");
+    // And the pending mark preceded the flush.
+    const lastNotify = Math.max(...engine.notifySnapshotChange.mock.invocationCallOrder);
+    const lastFlush = Math.max(...engine.flushPending.mock.invocationCallOrder);
+    expect(lastNotify).toBeLessThan(lastFlush);
+  });
+});
+
+describe("getSessionGen (screen-layer async guard input, Unit 5 review, P1)", () => {
+  it("is bumped by a session boundary so a captured generation goes stale", async () => {
+    await bootToLanding();
+    const before = getApi().getSessionGen();
+    await loginAs("user-B");
+    expect(getApi().getSessionGen()).toBeGreaterThan(before);
+    const captured = getApi().getSessionGen();
+    await act(async () => {
+      await getApi().logout();
+    });
+    expect(getApi().getSessionGen()).toBeGreaterThan(captured);
   });
 });

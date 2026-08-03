@@ -118,6 +118,70 @@ function deriveHandle(rawHandle: string, firstName: string): string {
   return rawHandle || firstName.trim().toLowerCase().replace(/[^a-z0-9]/g, "") || "you";
 }
 
+/**
+ * Availability badge states for the REAL claim UI (Unit 5; R1). `none` renders
+ * an empty (but mounted) live region — a failed availability check never
+ * blocks typing, so it simply says nothing. `short` is the local
+ * mid-typing state (under 3 characters), kept apart from the server's
+ * `invalid` verdict so a kid mid-word never reads a punitive rejection.
+ */
+export type ClaimBadge =
+  | "none"
+  | "pending"
+  | "short"
+  | "available"
+  | "taken"
+  | "yours"
+  | "invalid";
+
+/** Inline claim notices (R3 race retry, R23 server-verdict refusal, outage). */
+export type ClaimNotice = "race" | "invalid" | "outage" | null;
+
+/**
+ * The live claim wiring for screen 2 (real-public-site plan, Unit 5),
+ * container-injected so this screen stays PURE. Absent → the screen renders
+ * its original static preview (flag off / signup reuse), byte-identical to
+ * the pre-Unit-5 markup.
+ */
+export interface FounderProfileClaim {
+  /** The normalized handle shown in the URL input (container-owned; R15). */
+  handleValue: string;
+  /** Raw keystrokes out; the container normalizes and echoes back. */
+  onHandleChange: (value: string) => void;
+  badge: ClaimBadge;
+  /** Server-authored free variants, shown when the handle is taken (R2).
+   *  Rendered through React's default escaping ONLY — never as markup. */
+  suggestions: string[];
+  /** One-tap pick: the container claims the suggestion immediately (R2). */
+  onPickSuggestion: (handle: string) => void;
+  notice: ClaimNotice;
+  /** The account already holds a handle (resume): URL locked, no spinner,
+   *  the CTA advances WITHOUT re-claiming (R3 idempotence lives server-side,
+   *  but the resume path never even asks). */
+  claimed: boolean;
+  /** A claim request is in flight: CTA shows busy and further taps drop. */
+  claiming: boolean;
+}
+
+/** Kid-friendly badge copy + tone per state (announced via the live region). */
+const CLAIM_BADGE_COPY: Record<Exclude<ClaimBadge, "none">, { text: string; tone: string }> = {
+  pending: { text: "checking…", tone: "text-[hsl(25_20%_38%)]" },
+  short: { text: "keep typing", tone: "text-[hsl(25_20%_38%)]" },
+  available: { text: "available", tone: "text-verified" },
+  yours: { text: "yours", tone: "text-verified" },
+  taken: { text: "taken", tone: "text-[hsl(14_78%_44%)]" },
+  invalid: { text: "can't use that one", tone: "text-[hsl(14_78%_44%)]" },
+};
+
+/** Inline notice copy: short, warm, never a dead end (R3/R19b/R23). The
+ *  `invalid` copy renders the SERVER's claim refusal (format, reserved, or
+ *  blocklisted — the client holds no term list; see src/lib/handleRules.ts). */
+const CLAIM_NOTICE_COPY: Record<NonNullable<ClaimNotice>, string> = {
+  race: "Oh no, someone just grabbed that name. Pick one that's still free, or type a new one.",
+  invalid: "That name can't be used for your page. Try a different one.",
+  outage: "We couldn't claim your page right now. Give it a moment and tap again.",
+};
+
 export interface FounderProfileProps {
   /** Current first name (controlled). */
   firstName: string;
@@ -125,14 +189,25 @@ export interface FounderProfileProps {
   handle: string;
   /** Called on every keystroke with the new first name. */
   onFirstNameChange: (value: string) => void;
-  /** Advance to screen 3. Only fired once a non-empty first name is entered. */
+  /** Advance to screen 3. Only fired once a non-empty first name is entered.
+   *  With `claim` wiring present the container claims first and advances
+   *  itself on success — this screen just reports the tap. */
   onNext: () => void;
+  /** Real claim wiring (Unit 5). Absent → original static preview. */
+  claim?: FounderProfileClaim;
 }
 
 /** Screen 2 · Founder profile. */
-export function FounderProfile({ firstName, handle, onFirstNameChange, onNext }: FounderProfileProps) {
+export function FounderProfile({
+  firstName,
+  handle,
+  onFirstNameChange,
+  onNext,
+  claim,
+}: FounderProfileProps) {
   const displayHandle = deriveHandle(handle, firstName);
   const canClaim = firstName.trim().length > 0;
+  const badge = claim && claim.badge !== "none" ? CLAIM_BADGE_COPY[claim.badge] : null;
 
   return (
     <>
@@ -154,19 +229,96 @@ export function FounderProfile({ firstName, handle, onFirstNameChange, onNext }:
         />
       </label>
 
-      <div className="mt-4 flex items-center gap-2 rounded-xl border-2 border-dashed border-[hsl(25_34%_20%/0.15)] bg-white px-3.5 py-3">
-        <span aria-hidden className="text-sm">
-          🌐
-        </span>
-        <p className="min-w-0 truncate font-mono text-[12.5px] text-[hsl(25_20%_38%)]">
-          firstprofit.school/<b className="text-[hsl(25_34%_20%)]">{displayHandle}</b>
-        </p>
-        <span className="ml-auto shrink-0 font-mono text-[10px] uppercase tracking-[0.08em] text-verified">
-          available
-        </span>
-      </div>
+      {claim ? (
+        <>
+          <div className="mt-4 flex items-center gap-2 rounded-xl border-2 border-dashed border-[hsl(25_34%_20%/0.15)] bg-white px-3.5 py-3">
+            <span aria-hidden className="text-sm">
+              🌐
+            </span>
+            <span className="shrink-0 font-mono text-[12.5px] text-[hsl(25_20%_38%)]">
+              firstprofit.school/
+            </span>
+            {claim.claimed ? (
+              <b className="min-w-0 flex-1 truncate font-mono text-[12.5px] text-[hsl(25_34%_20%)]">
+                {claim.handleValue}
+              </b>
+            ) : (
+              <input
+                value={claim.handleValue}
+                onChange={(e) => claim.onHandleChange(e.target.value)}
+                aria-label="Page name"
+                autoCapitalize="none"
+                autoCorrect="off"
+                spellCheck={false}
+                // Frozen while a claim is in flight: a claim must never land
+                // for text the learner has already retyped past.
+                disabled={claim.claiming}
+                className="min-w-0 flex-1 border-0 bg-transparent p-0 font-mono text-[12.5px] font-bold text-[hsl(25_34%_20%)] outline-none disabled:opacity-60"
+              />
+            )}
+            {/* The live region stays mounted across badge changes so state
+                transitions are actually announced (R1 accessibility). */}
+            <span
+              role="status"
+              aria-live="polite"
+              className={`ml-auto shrink-0 font-mono text-[10px] uppercase tracking-[0.08em] ${badge ? badge.tone : ""}`}
+            >
+              {badge ? badge.text : ""}
+            </span>
+          </div>
+          {claim.claimed ? (
+            <p className="mt-2 text-[12.5px] leading-[1.5] text-[hsl(25_20%_38%)]">
+              This page is yours. Let's keep going.
+            </p>
+          ) : (
+            <p className="mt-2 text-[12.5px] leading-[1.5] text-[hsl(25_20%_38%)]">
+              Tip: first names work best. Your page name is public, so skip your full name.
+            </p>
+          )}
+          {claim.notice ? (
+            <p className="mt-2 rounded-lg bg-[hsl(14_78%_54%/0.08)] px-3 py-2 text-[12.5px] font-semibold leading-[1.5] text-[hsl(14_78%_38%)]">
+              {CLAIM_NOTICE_COPY[claim.notice]}
+            </p>
+          ) : null}
+          {!claim.claimed && claim.suggestions.length > 0 ? (
+            <div className="mt-2.5">
+              <p className="font-mono text-[10px] uppercase tracking-[0.08em] text-[hsl(25_20%_38%)]">
+                Still free
+              </p>
+              <div className="mt-1.5 flex flex-wrap gap-2">
+                {claim.suggestions.map((suggestion) => (
+                  <button
+                    key={suggestion}
+                    type="button"
+                    onClick={() => claim.onPickSuggestion(suggestion)}
+                    // Busy-consistent with the CTA/input: one claim at a time.
+                    disabled={claim.claiming}
+                    className="inline-flex min-h-[44px] items-center rounded-full border-2 border-[hsl(150_52%_42%/0.4)] bg-[hsl(150_52%_42%/0.08)] px-3.5 font-mono text-xs font-semibold text-[hsl(150_52%_32%)] disabled:opacity-50"
+                  >
+                    {suggestion}
+                  </button>
+                ))}
+              </div>
+            </div>
+          ) : null}
+        </>
+      ) : (
+        <div className="mt-4 flex items-center gap-2 rounded-xl border-2 border-dashed border-[hsl(25_34%_20%/0.15)] bg-white px-3.5 py-3">
+          <span aria-hidden className="text-sm">
+            🌐
+          </span>
+          <p className="min-w-0 truncate font-mono text-[12.5px] text-[hsl(25_20%_38%)]">
+            firstprofit.school/<b className="text-[hsl(25_34%_20%)]">{displayHandle}</b>
+          </p>
+          <span className="ml-auto shrink-0 font-mono text-[10px] uppercase tracking-[0.08em] text-verified">
+            available
+          </span>
+        </div>
+      )}
 
-      <GreenCta onClick={() => canClaim && onNext()}>Claim my page →</GreenCta>
+      <GreenCta onClick={() => canClaim && !claim?.claiming && onNext()} disabled={claim?.claiming}>
+        {claim?.claiming ? "Claiming…" : claim?.claimed ? "Keep going →" : "Claim my page →"}
+      </GreenCta>
     </>
   );
 }
@@ -180,10 +332,19 @@ export interface WebsiteRevealProps {
   onNext: () => void;
   /** Return to screen 2. */
   onBack: () => void;
+  /**
+   * Real publish state (Unit 5; R19). Absent → the original static "● live"
+   * chip (flag off / signup preview), unchanged. "going-live" renders the
+   * honest not-live-yet framing: the URL stays displayed but the chip reads
+   * "going live…" and there is NO share encouragement (the page is not
+   * fetchable until the completion publish lands). "live" adds the share
+   * line. Either real state also shows the R20 headline soft nudge.
+   */
+  liveState?: "live" | "going-live";
 }
 
 /** Screen 3 · Website reveal (typed headline). */
-export function WebsiteReveal({ firstName, handle, onNext, onBack }: WebsiteRevealProps) {
+export function WebsiteReveal({ firstName, handle, onNext, onBack, liveState }: WebsiteRevealProps) {
   const reduceMotion = useReducedMotion();
   const name = firstName.trim() || "Founder";
   const displayHandle = deriveHandle(handle, name);
@@ -225,8 +386,12 @@ export function WebsiteReveal({ firstName, handle, onNext, onBack }: WebsiteReve
           <span className="ml-2 min-w-0 truncate rounded-md bg-white px-2.5 py-0.5 font-mono text-[10.5px] text-[hsl(25_20%_38%)]">
             firstprofit.school/{displayHandle}
           </span>
-          <span className="ml-auto shrink-0 font-mono text-[9.5px] uppercase tracking-[0.08em] text-verified">
-            ● live
+          <span
+            className={`ml-auto shrink-0 font-mono text-[9.5px] uppercase tracking-[0.08em] ${
+              liveState === "going-live" ? "text-[hsl(41_74%_38%)]" : "text-verified"
+            }`}
+          >
+            {liveState === "going-live" ? "going live…" : "● live"}
           </span>
         </div>
         <div className="px-6 py-10 text-center">
@@ -240,6 +405,22 @@ export function WebsiteReveal({ firstName, handle, onNext, onBack }: WebsiteReve
           </p>
         </div>
       </div>
+
+      {liveState === "going-live" ? (
+        <p className="mt-3 rounded-xl bg-[hsl(41_88%_52%/0.12)] px-3.5 py-2.5 text-[12.5px] leading-[1.5] text-[hsl(25_20%_38%)]">
+          Your page is going live. In a minute or two it will be real at that link.
+        </p>
+      ) : null}
+      {liveState === "live" ? (
+        <p className="mt-3 rounded-xl bg-[hsl(150_52%_40%/0.1)] px-3.5 py-2.5 text-[12.5px] leading-[1.5] text-[hsl(25_20%_38%)]">
+          It's real. Anyone you send that link to can see your page.
+        </p>
+      ) : null}
+      {liveState ? (
+        <p className="mt-2 text-[12.5px] leading-[1.5] text-[hsl(25_20%_38%)]">
+          Tip: write your own headline in your Site room, so your page sounds like you.
+        </p>
+      ) : null}
 
       <GreenCta onClick={onNext}>My money booth next →</GreenCta>
       <BackLink onClick={onBack} />

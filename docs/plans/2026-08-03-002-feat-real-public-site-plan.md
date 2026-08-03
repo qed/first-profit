@@ -271,7 +271,7 @@ Publish lifecycle: `unclaimed → claimed (not published) → published ⇄ unpu
 
 **Verification:** vitest suite green; manual: login as Cedric test child → room shows real (or none) state, never `/you`.
 
-- [ ] **Unit 5: Onboarding claim step + completion publish**
+- [x] **Unit 5: Onboarding claim step + completion publish** — shipped (real availability/claim in screen 2, flushNow-gated completion publish, generation-guarded finally; blocklist corpus removed from client per review — UX rides server verdicts; 390px pass done locally, live re-check in Unit 7; compounded)
 
 **Goal:** onboarding claims for real (live availability, suggestions, race handling) and the page is live by completion.
 

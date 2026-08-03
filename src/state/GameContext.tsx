@@ -156,10 +156,22 @@ export interface GameApi extends GameState {
    * Force the pending snapshot flush NOW (no 3s debounce wait) and surface the
    * engine's honest outcome — landed / parked / cas-rescheduled — by
    * delegating to the sync engine's flushPending. With no live engine the
-   * answer is "parked" (nothing can land). Called on headline/one-liner commit
-   * and before publish (R11 / "edit→refresh within seconds").
+   * answer is "parked" (nothing can land). Marks the current snapshot pending
+   * synchronously first (see the implementation) so a caller who dispatched in
+   * the same task can never be answered a false "landed" via the engine's
+   * nothing-pending fast path. Called on headline/one-liner commit and before
+   * publish (R11 / "edit→refresh within seconds").
    */
   flushNow: () => Promise<FlushOutcome>;
+  /**
+   * The live session generation (bumped by every login/logout). Long-running
+   * async UI flows (Unit 5's completion publish) capture it BEFORE their first
+   * await and compare after: a mismatch means the session ended mid-flight and
+   * NO further dispatch may run — the async-writer-generation-token learning
+   * applied at the screen layer (a completion that outlives a logout must not
+   * resurrect the app stage over the wiped session on a shared device).
+   */
+  getSessionGen: () => number;
 
   // Auth / session actions.
   login: (identifier: string, password: string) => Promise<boolean>;
@@ -371,11 +383,25 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
     const engine = engineRef.current;
     // No live engine (logged out / torn down): nothing can land.
     if (!engine) return "parked";
+    // Mark the current snapshot pending SYNCHRONOUSLY before flushing (Unit 5
+    // review, P1): callers may invoke flushNow in the same task as a dispatch,
+    // before the passive [state] subscription effect has notified the engine.
+    // Without this, flushOnce's nothing-pending fast path could answer
+    // "landed" for content the engine never read. notifySnapshotChange only
+    // marks pending + schedules; the flush below reads the doc LIVE via
+    // getSnapshot(stateRef), so the extra mark is at worst an idempotent save
+    // of unchanged content — never a wrong doc. (stateRef currency across a
+    // just-dispatched update remains the caller's job: yield to let React
+    // commit first — see Onboarding's completion sequence.)
+    engine.notifySnapshotChange();
     // Deliberately NO sessionGenRef guard here: the engine owns its own
     // generation internally (stop() supersedes it, and a superseded flush
     // answers "parked") — a second guard would only shadow that contract.
     return engine.flushPending();
   }, []);
+
+  /** Live session generation for screen-layer async guards (see GameApi doc). */
+  const getSessionGen = useCallback((): number => sessionGenRef.current, []);
 
   /**
    * Shared post-auth hydration: resolve the caller's profile (RLS "own row"),
@@ -798,6 +824,7 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
       claimSite,
       publishSite: publishSiteNow,
       flushNow,
+      getSessionGen,
       login,
       logout,
       submitFeedback,
@@ -817,6 +844,7 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
       claimSite,
       publishSiteNow,
       flushNow,
+      getSessionGen,
       login,
       logout,
       submitFeedback,
