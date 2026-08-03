@@ -1,7 +1,7 @@
 /**
  * Generate the committed path-content module from the curriculum brief.
  *
- *   npx tsx scripts/build-path-content.ts
+ *   npm run build:path-content   (npx tsx scripts/build-path-content.ts)
  *
  * Parses `src/docs/first-profit-home-study-curriculum-brief.md` (the canonical
  * source for the SPA), asserts it against PATH_MANIFEST, and writes
@@ -14,6 +14,11 @@
  *   - No markdown parsing in the app bundle, and no way for a formatting quirk
  *     to break a child's session at runtime — the build fails instead.
  *
+ * `scripts/check-path-content.ts` (the `npm run build` preflight) re-renders
+ * the module via the SAME `renderPathContentModule` exported here and
+ * byte-compares it against the committed file, so a stale regeneration can
+ * never deploy.
+ *
  * Mirrors The120's `scripts/build-path-content.ts`, which builds the same
  * brief for the program site. A meaning-changing edit to the brief must be
  * coordinated with The120's version-pinning policy (the drift test warns when
@@ -22,18 +27,48 @@
 
 import { readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import {
   PATH_MANIFEST,
   assertMatchesManifest,
   parseCurriculum,
+  type PathContent,
 } from "../src/data/parseCurriculum";
 
-const SOURCE_PATH = path.resolve(
+export const SOURCE_PATH = path.resolve(
   process.cwd(),
   "src/docs/first-profit-home-study-curriculum-brief.md",
 );
 
-const OUT_PATH = path.resolve(process.cwd(), "src/data/pathContent.generated.ts");
+export const OUT_PATH = path.resolve(
+  process.cwd(),
+  "src/data/pathContent.generated.ts",
+);
+
+/** Render the generated module's full text (LF line endings, byte-stable). */
+export function renderPathContentModule(content: PathContent): string {
+  const banner = `/**
+ * GENERATED — do not edit by hand.
+ *
+ * Source: src/docs/first-profit-home-study-curriculum-brief.md (canonical)
+ * Built by: scripts/build-path-content.ts (npx tsx scripts/build-path-content.ts)
+ * Version: ${PATH_MANIFEST.versionId}
+ * Totals: ${PATH_MANIFEST.phases} phases, ${PATH_MANIFEST.criteria} criteria, ${PATH_MANIFEST.tasks} tasks (${PATH_MANIFEST.tasksPerPhase.join("/")})
+ *
+ * Behavior hooks (artifact auto-complete, the real-sale target, authored input
+ * fields) do NOT live here — they live in src/data/pathHooks.ts keyed by task
+ * id, so regenerating this module can never silently drop behavior.
+ */`;
+
+  return `${banner}
+
+import type { PathContent } from "./parseCurriculum";
+
+export const PATH_CONTENT: PathContent = ${JSON.stringify(content, null, 2)};
+
+export default PATH_CONTENT;
+`.replace(/\r\n/g, "\n");
+}
 
 function main() {
   let source: string;
@@ -54,29 +89,7 @@ function main() {
   const criteria = content.phases.flatMap((p) => p.criteria);
   const tasks = criteria.flatMap((c) => c.tasks);
 
-  const banner = `/**
- * GENERATED — do not edit by hand.
- *
- * Source: src/docs/first-profit-home-study-curriculum-brief.md (canonical)
- * Built by: scripts/build-path-content.ts (npx tsx scripts/build-path-content.ts)
- * Version: ${PATH_MANIFEST.versionId}
- * Totals: ${PATH_MANIFEST.phases} phases, ${PATH_MANIFEST.criteria} criteria, ${PATH_MANIFEST.tasks} tasks (${PATH_MANIFEST.tasksPerPhase.join("/")})
- *
- * Behavior hooks (artifact auto-complete, the real-sale target, authored input
- * fields) do NOT live here — they live in src/data/pathHooks.ts keyed by task
- * id, so regenerating this module can never silently drop behavior.
- */`;
-
-  const body = `${banner}
-
-import type { PathContent } from "./parseCurriculum";
-
-export const PATH_CONTENT: PathContent = ${JSON.stringify(content, null, 2)};
-
-export default PATH_CONTENT;
-`.replace(/\r\n/g, "\n");
-
-  writeFileSync(OUT_PATH, body, "utf8");
+  writeFileSync(OUT_PATH, renderPathContentModule(content), "utf8");
 
   console.log(
     `[build-path-content] wrote ${path.relative(process.cwd(), OUT_PATH)}\n` +
@@ -88,4 +101,11 @@ export default PATH_CONTENT;
   );
 }
 
-main();
+// Run only when executed directly (`tsx scripts/build-path-content.ts`), not
+// when imported by the preflight check for `renderPathContentModule`.
+if (
+  process.argv[1] &&
+  path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)
+) {
+  main();
+}

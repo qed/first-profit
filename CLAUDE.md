@@ -36,6 +36,21 @@ Every UI change MUST look good and work well on mobile before it is considered d
   on with `sm:`/`lg:` variants. When fixing mobile, don't silently change desktop —
   re-assert desktop values at the appropriate breakpoint.
 
+## Content pipeline (path/task content)
+
+- `src/docs/first-profit-home-study-curriculum-brief.md` is the **source of truth** for
+  all step/task content. It compiles to the committed `src/data/pathContent.generated.ts`
+  via `npm run build:path-content` (parse-or-throw parser in `src/data/parseCurriculum.ts`);
+  a drift test and the `npm run build` preflight (`scripts/check-path-content.ts`, run
+  before vite, so Vercel can never deploy a stale or broken regeneration) both fail if the
+  brief and the generated module fall out of sync. Never hand-edit the generated module.
+- Behavior lives in `src/data/pathHooks.ts` (artifact auto-complete, the real-sale target,
+  authored input fields), keyed by stable task id — regenerating content can never
+  silently drop behavior, and `src/data/path.ts` asserts every hook resolves.
+- Editorial rule: a **copy tweak** to the brief keeps the task id; a **meaning change or
+  structural edit** mints a new id and needs a deliberate remap of any hooks on the old id
+  (see docs/plans/2026-08-03-001-feat-full-path-cohort-readiness-plan.md).
+
 ## Documented Solutions
 
 `docs/solutions/` — documented solutions to past problems (bugs, patterns), organized

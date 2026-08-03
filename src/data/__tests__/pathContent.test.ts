@@ -32,6 +32,8 @@ import {
 } from "../pathHooks";
 import {
   STEPS,
+  STEP_META,
+  allBandsNoteFor,
   assembleSteps,
   doneWhenForBand,
   parseTask,
@@ -41,19 +43,40 @@ import {
   taskTitleForBand,
   type ArtifactKey,
 } from "../path";
+import type { PathManifest } from "../parseCurriculum";
 
 const BRIEF_PATH = path.resolve(
   process.cwd(),
   "src/docs/first-profit-home-study-curriculum-brief.md",
 );
 
-/** The120's copy of the same brief, when that checkout exists on this machine. */
+/**
+ * The120's copy of the same brief, when that checkout exists on this machine.
+ * Overridable via THE120_BRIEF_PATH; otherwise guessed relative to the repo
+ * root (works on any machine that keeps the two repos as siblings).
+ */
 const SIBLING_BRIEF_PATH =
-  "C:\\Users\\pkupe\\aardvark\\120-The120\\artifacts\\First Profit\\first-profit-home-study-curriculum-brief.md";
+  process.env.THE120_BRIEF_PATH ??
+  path.resolve(
+    process.cwd(),
+    "..",
+    "120-The120",
+    "artifacts",
+    "First Profit",
+    "first-profit-home-study-curriculum-brief.md",
+  );
 
 const normalize = (text: string) => text.replace(/\r\n/g, "\n");
 const sha256 = (text: string) =>
   createHash("sha256").update(text, "utf8").digest("hex");
+
+/**
+ * The comparable content of a brief: leading HTML comments are repo-local
+ * plumbing (this repo's copy carries a "how to regenerate" header The120's
+ * copy does not), so they are stripped before the divergence comparison.
+ */
+const briefContent = (text: string) =>
+  normalize(text).replace(/^(\s*<!--[\s\S]*?-->\s*\n)+/, "");
 
 const briefSource = readFileSync(BRIEF_PATH, "utf8");
 const fresh = parseCurriculum(briefSource, PATH_MANIFEST.versionId);
@@ -69,23 +92,40 @@ describe("generated module tracks the brief (drift)", () => {
     expect(() => assertMatchesManifest(PATH_CONTENT)).not.toThrow();
   });
 
-  it("notes (warning only) when The120's brief copy diverges from ours", () => {
-    if (!existsSync(SIBLING_BRIEF_PATH)) return;
-    const ours = sha256(normalize(briefSource));
-    const theirs = sha256(normalize(readFileSync(SIBLING_BRIEF_PATH, "utf8")));
-    if (ours !== theirs) {
-      // Deliberately a warning, not a failure: this repo's brief is canonical
-      // for the SPA, but a meaning-changing divergence must be coordinated
-      // with The120's version-pinning policy. Surface it loudly in test output.
-      console.warn(
-        `[pathContent] WARNING: the curriculum brief differs between repos.\n` +
-          `  first-profit (canonical for the SPA): sha256 ${ours}\n` +
-          `  120-The120:                           sha256 ${theirs}\n` +
-          `  Coordinate the edit with The120's version pinning before shipping.`,
-      );
-    }
-    expect(true).toBe(true);
-  });
+  // Sibling-brief divergence is deliberately a SOFT check: this repo's brief
+  // is canonical for the SPA, but a meaning-changing divergence must be
+  // coordinated with The120's version-pinning policy. Divergence therefore
+  // surfaces as a SKIPPED, name-annotated test plus a console warning — never
+  // a tautological pass and never a hard failure. Hashes compare CONTENT after
+  // stripping leading HTML comments, so this repo's regeneration header does
+  // not count as divergence.
+  const siblingStatus = ((): "absent" | "in-sync" | "diverged" => {
+    if (!existsSync(SIBLING_BRIEF_PATH)) return "absent";
+    const ours = sha256(briefContent(briefSource));
+    const theirs = sha256(briefContent(readFileSync(SIBLING_BRIEF_PATH, "utf8")));
+    if (ours === theirs) return "in-sync";
+    console.warn(
+      `[pathContent] WARNING: the curriculum brief differs between repos.\n` +
+        `  first-profit (canonical for the SPA): sha256 ${ours}\n` +
+        `  120-The120 (${SIBLING_BRIEF_PATH}):   sha256 ${theirs}\n` +
+        `  (both hashes taken after stripping leading HTML comments)\n` +
+        `  Coordinate the edit with The120's version pinning before shipping.`,
+    );
+    return "diverged";
+  })();
+
+  const siblingIt = siblingStatus === "diverged" ? it.skip : it;
+  siblingIt(
+    `The120's brief copy matches ours (content after leading HTML comments)` +
+      (siblingStatus === "diverged"
+        ? " — (sibling brief DIVERGED, see warning above)"
+        : siblingStatus === "absent"
+          ? " — (sibling checkout absent on this machine)"
+          : ""),
+    () => {
+      expect(siblingStatus).not.toBe("diverged");
+    },
+  );
 });
 
 describe("content shape", () => {
@@ -269,5 +309,242 @@ describe("1.1/1.2 semantic parity (done-key stability)", () => {
       xp: 60,
     });
     expect(stepById("1.2")).toMatchObject({ room: "market", xp: 120 });
+  });
+});
+
+// ── Synthetic-brief parser guards (parse-or-throw, incl. band bullets) ────
+
+/** A minimal one-phase brief whose single task carries `taskContent` lines. */
+const syntheticBrief = (taskContent: string, extraTasks = "") =>
+  [
+    "# Phase 01 · SELL — *Sell it.*",
+    "",
+    "## Criterion 1.1 — Pass criterion one.",
+    "",
+    "**1.1.1 — Do the thing.** Body text.",
+    taskContent,
+    "*Done when:* it is done. **This completes the criterion.**",
+    extraTasks,
+    "",
+  ].join("\n");
+
+const SYNTHETIC_MANIFEST: PathManifest = {
+  versionId: "test",
+  phases: 1,
+  criteria: 1,
+  tasks: 1,
+  tasksPerPhase: [1],
+  tasksPerCriterion: { "1.1": 1 },
+};
+
+describe("parseCurriculum band bullets parse-or-throw (synthetic briefs)", () => {
+  it("accepts a plain-hyphen band label and normalises it to the canonical band", () => {
+    const parsed = parseCurriculum(
+      syntheticBrief("- **3-5:** Younger version."),
+      "test",
+    );
+    const task = parsed.phases[0].criteria[0].tasks[0];
+    expect(task.bandVariants.g3_5).toBe("Younger version.");
+    expect(task.bandVariants.g6_8).toBeUndefined();
+  });
+
+  it("accepts an indented band bullet (leading whitespace tolerated)", () => {
+    const parsed = parseCurriculum(
+      syntheticBrief("  - **9–12:** Older version."),
+      "test",
+    );
+    expect(parsed.phases[0].criteria[0].tasks[0].bandVariants.g9_12).toBe(
+      "Older version.",
+    );
+    // And it must NOT leak into the body as continuation prose.
+    expect(parsed.phases[0].criteria[0].tasks[0].body).toBe("Body text.");
+  });
+
+  it("accepts hyphen labels in combined ranges", () => {
+    const parsed = parseCurriculum(
+      syntheticBrief("- **6-8/9-12:** Shared older version."),
+      "test",
+    );
+    const task = parsed.phases[0].criteria[0].tasks[0];
+    expect(task.bandVariants.g6_8).toBe("Shared older version.");
+    expect(task.bandVariants.g9_12).toBe("Shared older version.");
+  });
+
+  it("THROWS on a near-miss band bullet instead of silently dropping it", () => {
+    expect(() =>
+      parseCurriculum(syntheticBrief("- **Grades 3to5:** Mangled label."), "test"),
+    ).toThrow(/Task 1\.1\.1: unrecognised band bullet "- \*\*Grades 3to5:\*\*/);
+  });
+
+  it("THROWS on an unknown numeric band range", () => {
+    expect(() =>
+      parseCurriculum(syntheticBrief("- **3–7:** No such band."), "test"),
+    ).toThrow(/unrecognised band label/);
+  });
+
+  it("ignores leading HTML comments (the brief's regeneration header)", () => {
+    const commented = `<!--\n  Edit me, then regenerate.\n-->\n${syntheticBrief("- **3–5:** Younger version.")}`;
+    const plain = parseCurriculum(
+      syntheticBrief("- **3–5:** Younger version."),
+      "test",
+    );
+    expect(parseCurriculum(commented, "test")).toEqual(plain);
+  });
+});
+
+describe("parseCurriculum defensive branches (synthetic malformed input)", () => {
+  it("throws on an out-of-sequence criterion", () => {
+    const source = syntheticBrief("").replace("## Criterion 1.1", "## Criterion 1.2");
+    expect(() => parseCurriculum(source, "test")).toThrow(
+      /Criterion out of sequence: expected 1\.1, got 1\.2/,
+    );
+  });
+
+  it("throws on a task outside any criterion", () => {
+    const source = [
+      "# Phase 01 · SELL — *Sell it.*",
+      "",
+      "**1.1.1 — Do the thing.** Body text.",
+      "*Done when:* it is done.",
+    ].join("\n");
+    expect(() => parseCurriculum(source, "test")).toThrow(
+      /Task 1\.1\.1 appears outside any criterion/,
+    );
+  });
+
+  it("throws on a zero-task criterion", () => {
+    const source = [
+      "# Phase 01 · SELL — *Sell it.*",
+      "",
+      "## Criterion 1.1 — Empty.",
+      "",
+      "## Criterion 1.2 — Also empty.",
+    ].join("\n");
+    expect(() => parseCurriculum(source, "test")).toThrow(
+      /Criterion 1\.1 parsed with zero tasks/,
+    );
+  });
+
+  it("assertMatchesManifest rejects two criterion closers", () => {
+    const source = syntheticBrief(
+      "",
+      [
+        "",
+        "**1.1.2 — Do it again.** More body.",
+        "*Done when:* done again. **This completes the criterion.**",
+      ].join("\n"),
+    );
+    const parsed = parseCurriculum(source, "test");
+    expect(() =>
+      assertMatchesManifest(parsed, {
+        ...SYNTHETIC_MANIFEST,
+        tasks: 2,
+        tasksPerPhase: [2],
+        tasksPerCriterion: { "1.1": 2 },
+      }),
+    ).toThrow(/has 2 tasks marked\s+completesCriterion/);
+  });
+
+  it("assertMatchesManifest rejects residual ** in a Done-when line", () => {
+    const source = syntheticBrief("").replace(
+      "*Done when:* it is done. **This completes the criterion.**",
+      "*Done when:* it is **really** done. **This completes the criterion.**",
+    );
+    const parsed = parseCurriculum(source, "test");
+    expect(() => assertMatchesManifest(parsed, SYNTHETIC_MANIFEST)).toThrow(
+      /still contains markdown\s+bold markers/,
+    );
+  });
+
+  it("assertMatchesManifest rejects an em dash in a task title", () => {
+    const source = syntheticBrief("").replace(
+      "**1.1.1 — Do the thing.**",
+      "**1.1.1 — Do — the thing.**",
+    );
+    const parsed = parseCurriculum(source, "test");
+    expect(() => assertMatchesManifest(parsed, SYNTHETIC_MANIFEST)).toThrow(
+      /title contains an em dash/,
+    );
+  });
+
+  it("assertMatchesManifest rejects a per-criterion count mismatch (the id-shift class)", () => {
+    // A task "moved" between same-phase criteria keeps every phase total
+    // intact; only the per-criterion map catches it.
+    const parsed = parseCurriculum(syntheticBrief(""), "test");
+    expect(() =>
+      assertMatchesManifest(parsed, {
+        ...SYNTHETIC_MANIFEST,
+        tasksPerCriterion: { "1.1": 2 },
+      }),
+    ).toThrow(/criterion 1\.1 carries 1 tasks, manifest\s+expects 2/);
+    expect(() =>
+      assertMatchesManifest(parsed, {
+        ...SYNTHETIC_MANIFEST,
+        tasksPerCriterion: {},
+      }),
+    ).toThrow(/criterion 1\.1 is not in the manifest's tasksPerCriterion map/);
+  });
+});
+
+describe("manifest per-criterion counts (real brief)", () => {
+  it("PATH_MANIFEST.tasksPerCriterion matches the generated content exactly", () => {
+    const actual = Object.fromEntries(
+      PATH_CONTENT.phases.flatMap((p) =>
+        p.criteria.map((c) => [c.id, c.tasks.length]),
+      ),
+    );
+    expect(actual).toEqual(PATH_MANIFEST.tasksPerCriterion);
+    expect(Object.keys(PATH_MANIFEST.tasksPerCriterion)).toHaveLength(25);
+  });
+});
+
+describe("task ids satisfy The120's acceptor contract", () => {
+  it("every generated task id is dotted-numeric and ≤16 chars", () => {
+    // The120's fp_task_feedback table CHECK-constrains task_id to the
+    // producer's id shape; this pin keeps first-profit (the producer) inside
+    // that acceptor contract so a generated id can never be rejected there.
+    const ids = PATH_CONTENT.phases.flatMap((p) =>
+      p.criteria.flatMap((c) => c.tasks.map((t) => t.id)),
+    );
+    expect(ids).toHaveLength(125);
+    for (const id of ids) {
+      expect(id).toMatch(/^[0-9]+(\.[0-9]+){2}$/);
+      expect(id.length).toBeLessThanOrEqual(16);
+    }
+  });
+});
+
+describe("STEP_META chrome coverage", () => {
+  const hooks = {
+    artifacts: ARTIFACT_HOOKS,
+    saleAutoCompleteTaskId: SALE_AUTO_COMPLETE_TASK_ID,
+    fields: FIELD_HOOKS,
+  };
+
+  it("an extra STEP_META entry (unknown criterion) fails the assembly", () => {
+    expect(() =>
+      assembleSteps(PATH_CONTENT, hooks, { ...STEP_META, "9.9": STEP_META["1.1"] }),
+    ).toThrow(/STEP_META has chrome for unknown criterion "9\.9"/);
+  });
+
+  it("a missing STEP_META entry fails the assembly", () => {
+    const { "3.3": _dropped, ...withoutOne } = STEP_META;
+    expect(() => assembleSteps(PATH_CONTENT, hooks, withoutOne)).toThrow(
+      /STEP_META is missing chrome for criterion "3\.3"/,
+    );
+  });
+});
+
+describe("band accessors", () => {
+  it("allBandsNoteFor returns the note on its happy path", () => {
+    expect(allBandsNoteFor("1.2.5")).toContain("as written");
+  });
+
+  it("every band accessor returns undefined for a bogus task id", () => {
+    expect(taskById("0.0.0")).toBeUndefined();
+    expect(taskTitleForBand("0.0.0", "g3_5")).toBeUndefined();
+    expect(taskBodyForBand("0.0.0", "g6_8")).toBeUndefined();
+    expect(doneWhenForBand("0.0.0", "g9_12")).toBeUndefined();
+    expect(allBandsNoteFor("0.0.0")).toBeUndefined();
   });
 });

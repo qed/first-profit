@@ -1,3 +1,10 @@
+<!--
+  This brief is the SOURCE OF TRUTH for the app's path content.
+  Edit this file, then run `npm run build:path-content` and commit the
+  regenerated src/data/pathContent.generated.ts (the `npm run build` preflight
+  fails on drift). Copy tweaks keep task ids; meaning changes need a remap
+  entry — see docs/plans/2026-08-03-001-feat-full-path-cohort-readiness-plan.md.
+-->
 ---
 date: 2026-07-21
 topic: first-profit-home-study-curriculum-brief

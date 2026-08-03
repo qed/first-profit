@@ -16,7 +16,7 @@
  */
 import { PATH_CONTENT } from "./pathContent.generated";
 import type { Band, ContentPhase, PathContent, UnitTask } from "./parseCurriculum";
-import { resolveVariant } from "./parseCurriculum";
+import { assertMatchesManifest, resolveVariant } from "./parseCurriculum";
 import {
   ARTIFACT_HOOKS,
   FIELD_HOOKS,
@@ -117,7 +117,7 @@ PHASES.find((p) => p.id === id) as Phase;
 // here. Keyed by criterion id; the assembly asserts this table covers exactly
 // the criteria the generated content carries.
 
-interface StepMeta {
+export interface StepMeta {
   room: RoomId;
   title: string;
   brief: string;
@@ -126,7 +126,7 @@ interface StepMeta {
   xp: number;
 }
 
-const STEP_META: Record<string, StepMeta> = {
+export const STEP_META: Record<string, StepMeta> = {
   // ── PHASE 01 · SELL ─────────────────────────────────────────────
   '1.1': {
     room: 'idea',
@@ -491,6 +491,12 @@ export function assembleSteps(
     };
   });
 }
+
+// Belt-and-braces: the generated module is validated against the manifest at
+// import time, so a corrupted or hand-edited pathContent.generated.ts fails
+// the dev server and the app the moment it loads — not when a child reaches
+// the affected screen. (The build preflight runs the same check pre-deploy.)
+assertMatchesManifest(PATH_CONTENT);
 
 export const STEPS: Step[] = assembleSteps(PATH_CONTENT, {
   artifacts: ARTIFACT_HOOKS,

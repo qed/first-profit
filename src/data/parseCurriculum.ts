@@ -88,13 +88,36 @@ export type PathContent = {
  * NOTE: tasks per criterion is VARIABLE (2.3 has six, 3.4 has four) — never
  * assume five.
  */
-export const PATH_MANIFEST = {
+export interface PathManifest {
+  versionId: string;
+  phases: number;
+  criteria: number;
+  tasks: number;
+  tasksPerPhase: readonly number[];
+  /**
+   * Task count per criterion id. Phase-level totals alone cannot catch a task
+   * MOVED between two criteria of the same phase (every other count still adds
+   * up, and ids re-sequence cleanly) — this map is what kills that silent
+   * id-shift class.
+   */
+  tasksPerCriterion: Readonly<Record<string, number>>;
+}
+
+export const PATH_MANIFEST: PathManifest = {
   versionId: "2026-27",
   phases: 5,
   criteria: 25,
   tasks: 125,
   // Not uniform: Build carries an extra task, Validate one fewer.
-  tasksPerPhase: [25, 26, 24, 25, 25] as readonly number[],
+  tasksPerPhase: [25, 26, 24, 25, 25],
+  // Variable by design: 2.3 has six, 3.4 has four, the rest five.
+  tasksPerCriterion: {
+    "1.1": 5, "1.2": 5, "1.3": 5, "1.4": 5, "1.5": 5,
+    "2.1": 5, "2.2": 5, "2.3": 6, "2.4": 5, "2.5": 5,
+    "3.1": 5, "3.2": 5, "3.3": 5, "3.4": 4, "3.5": 5,
+    "4.1": 5, "4.2": 5, "4.3": 5, "4.4": 5, "4.5": 5,
+    "5.1": 5, "5.2": 5, "5.3": 5, "5.4": 5, "5.5": 5,
+  },
 } as const;
 
 /* ── line shapes ───────────────────────────────────────────────────────────
@@ -110,8 +133,10 @@ const DONE_WHEN_RE = /^\*Done when:\*\s*(.+?)\s*$/;
 /**
  * A band bullet. Captures the range label so combined forms survive:
  *   `- **3–5:** …`  `- **6–8/9–12:** …`  `- **3–5/6–8:** …`
+ * The label charset accepts a plain hyphen alongside the en dash ("3-5" and
+ * "3–5" both parse); `bandsForLabel` normalises to the canonical en-dash band.
  */
-const BAND_RE = /^- \*\*([0-9–/]+):\*\*\s*(.+?)\s*$/;
+const BAND_RE = /^- \*\*([0-9–/-]+):\*\*\s*(.+?)\s*$/;
 
 /** `- All bands: …` — guidance for every band, kept as a note. */
 const ALL_BANDS_RE = /^- All bands:\s*(.+?)\s*$/i;
@@ -141,10 +166,11 @@ const PHASE_KEYS: readonly PhaseKey[] = [
   "SCALE",
 ];
 
-/** Maps a bullet's range label ("6–8/9–12") to the bands it applies to. */
+/** Maps a bullet's range label ("6–8/9–12") to the bands it applies to.
+ *  A plain hyphen ("3-5") is normalised to the canonical en-dash form first. */
 function bandsForLabel(label: string, taskId: string): Band[] {
   return label.split("/").map((part) => {
-    const band = BAND_LABELS[part.trim()];
+    const band = BAND_LABELS[part.trim().replace(/-/g, "–")];
     if (!band) {
       throw new Error(
         `Task ${taskId}: unrecognised band label "${part}" in "${label}". ` +
@@ -306,7 +332,12 @@ export function parseCurriculum(source: string, versionId: string): PathContent 
 
     if (!draft) continue;
 
-    const doneMatch = DONE_WHEN_RE.exec(line);
+    // Task-content lines tolerate leading whitespace: an indented list bullet
+    // is still a bullet. (Without this, an indented band line would fall into
+    // the continuation-prose branch and silently corrupt the task body.)
+    const content = line.trimStart();
+
+    const doneMatch = DONE_WHEN_RE.exec(content);
     if (doneMatch) {
       const text = doneMatch[1];
       draft.completesCriterion = COMPLETES_RE.test(text);
@@ -314,13 +345,13 @@ export function parseCurriculum(source: string, versionId: string): PathContent 
       continue;
     }
 
-    const allBandsMatch = ALL_BANDS_RE.exec(line);
+    const allBandsMatch = ALL_BANDS_RE.exec(content);
     if (allBandsMatch) {
       draft.allBandsNote = allBandsMatch[1].trim();
       continue;
     }
 
-    const bandMatch = BAND_RE.exec(line);
+    const bandMatch = BAND_RE.exec(content);
     if (bandMatch) {
       const [, label, text] = bandMatch;
       const value = text.trim();
@@ -335,9 +366,23 @@ export function parseCurriculum(source: string, versionId: string): PathContent 
       continue;
     }
 
+    // NEAR-MISS detector: a bolded bullet under a task that matched none of
+    // the band/all-bands shapes is a malformed band bullet, not prose. The
+    // module's throws-not-skips promise applies to band bullets too — dropping
+    // the line here would silently show a child the base text where their
+    // band's instruction belongs.
+    if (content.startsWith("- **")) {
+      throw new Error(
+        `Task ${draft.id}: unrecognised band bullet "${content}". Band bullets ` +
+          `must read "- **3–5:** …", "- **6–8/9–12:** …" (en dash or hyphen in ` +
+          `the range), or "- All bands: …" — fix the brief; this parser throws ` +
+          `rather than silently dropping content.`,
+      );
+    }
+
     // Continuation prose for the current task, before its Done-when line.
-    if (line && !line.startsWith("-") && !draft.doneWhen) {
-      draft.bodyParts.push(line.trim());
+    if (content && !content.startsWith("-") && !draft.doneWhen) {
+      draft.bodyParts.push(content.trim());
     }
   }
 
@@ -360,7 +405,7 @@ export function parseCurriculum(source: string, versionId: string): PathContent 
  */
 export function assertMatchesManifest(
   content: PathContent,
-  manifest: typeof PATH_MANIFEST = PATH_MANIFEST,
+  manifest: PathManifest = PATH_MANIFEST,
 ): void {
   const where = `path content ${content.versionId}`;
 
@@ -397,6 +442,29 @@ export function assertMatchesManifest(
         `manifest's ${expected.join("/")}. A total-only check would have passed ` +
         `this — tasks per criterion is variable (2.3 has six, 3.4 has four).`,
     );
+  }
+
+  // Per-criterion counts. Phase totals cannot see a task moved BETWEEN two
+  // criteria of the same phase (ids re-sequence, every other count adds up) —
+  // this is the check that catches that silent id shift.
+  const perCriterion = new Map(criteria.map((c) => [c.id, c.tasks.length]));
+  const expectedPerCriterion = manifest.tasksPerCriterion;
+  for (const [id, count] of Object.entries(expectedPerCriterion)) {
+    const actual = perCriterion.get(id);
+    if (actual !== count) {
+      throw new Error(
+        `${where}: criterion ${id} carries ${actual ?? 0} tasks, manifest ` +
+          `expects ${count}. A task moved between criteria re-sequences ids ` +
+          `silently — check the brief before regenerating.`,
+      );
+    }
+  }
+  for (const id of perCriterion.keys()) {
+    if (!(id in expectedPerCriterion)) {
+      throw new Error(
+        `${where}: criterion ${id} is not in the manifest's tasksPerCriterion map.`,
+      );
+    }
   }
 
   /*
