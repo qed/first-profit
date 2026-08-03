@@ -57,9 +57,6 @@ export function Login() {
         <div className="rounded-3xl border border-[hsl(40_14%_89%)] bg-white p-6 shadow-card sm:p-8">
           <p className="font-mono text-[11px] uppercase tracking-[0.28em] text-sell">First Profit</p>
           <h1 className="mt-2 font-display text-3xl font-black leading-tight">Welcome back, founder.</h1>
-          <p className="mt-2 text-sm leading-relaxed text-ink/60">
-            Log in with the username and password your grown-up set up for you.
-          </p>
 
           <form onSubmit={onSubmit} className="mt-6 space-y-4" noValidate>
             <div>
