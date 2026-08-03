@@ -17,6 +17,7 @@
  */
 import { useCallback, useEffect, useState } from "react";
 import { GameProvider, isLoggedInStage, useGame } from "./state/GameContext";
+import { GlobalNav } from "./components/GlobalNav";
 import { Login } from "./screens/Login";
 import { Landing } from "./screens/Landing";
 import { Onboarding } from "./screens/Onboarding";
@@ -144,26 +145,37 @@ function StageRouter() {
   // A verify-return link overrides normal routing while logged out (the token
   // flow is a signup stage, out of isLoggedInStage). Once the child is logged in
   // (path a), the lingering token is ignored and the game renders normally.
-  if (verifyToken && !isLoggedInStage(stage)) {
-    return renderSignup(verifyToken);
-  }
+  const content = (() => {
+    if (verifyToken && !isLoggedInStage(stage)) {
+      return renderSignup(verifyToken);
+    }
+    switch (stage) {
+      case "boot":
+        return <Boot />;
+      case "landing":
+        return <Landing />;
+      case "login":
+        return <Login />;
+      case "signup":
+        return renderSignup();
+      case "onboard":
+        return <Onboarding />;
+      case "app":
+        return <Factory />;
+      default:
+        return <Boot />;
+    }
+  })();
 
-  switch (stage) {
-    case "boot":
-      return <Boot />;
-    case "landing":
-      return <Landing />;
-    case "login":
-      return <Login />;
-    case "signup":
-      return renderSignup();
-    case "onboard":
-      return <Onboarding />;
-    case "app":
-      return <Factory />;
-    default:
-      return <Boot />;
-  }
+  // The global nav mounts ABOVE the stage render (never remounts across stage
+  // swaps); only the boot spinner stays chrome-free. Spec:
+  // docs/superpowers/specs/2026-08-02-global-nav-design.md
+  return (
+    <>
+      {stage !== "boot" ? <GlobalNav /> : null}
+      {content}
+    </>
+  );
 }
 
 export function App() {

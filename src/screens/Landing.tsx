@@ -26,30 +26,6 @@
 import { useGame } from "../state/GameContext";
 import { isSignupEnabled } from "../config";
 
-/** Logo mark: five ascending steps, one per phase color (adapted from
- * assets/logo-mark.svg). Inline so it inherits `height` from the className. */
-function LogoMark({ className }: { className?: string }) {
-  return (
-    <svg
-      viewBox="0 -6 300 276"
-      className={className}
-      role="img"
-      aria-label="First Profit logo mark, five ascending steps, one per phase"
-    >
-      <path d="M18 260 L58 260 L58 196 L18 210 Z" fill="hsl(14 78% 54%)" />
-      <path d="M18 210 L58 196 L44 184 L4 198 Z" fill="hsl(14 80% 67%)" />
-      <path d="M74 260 L114 260 L114 148 L74 162 Z" fill="hsl(217 74% 56%)" />
-      <path d="M74 162 L114 148 L100 136 L60 150 Z" fill="hsl(217 78% 69%)" />
-      <path d="M130 260 L170 260 L170 100 L130 114 Z" fill="hsl(265 52% 58%)" />
-      <path d="M130 114 L170 100 L156 88 L116 102 Z" fill="hsl(265 56% 70%)" />
-      <path d="M186 260 L226 260 L226 52 L186 66 Z" fill="hsl(150 52% 42%)" />
-      <path d="M186 66 L226 52 L212 40 L172 54 Z" fill="hsl(150 45% 56%)" />
-      <path d="M242 260 L282 260 L282 10 L242 24 Z" fill="hsl(41 88% 52%)" />
-      <path d="M242 24 L282 10 L268 -2 L228 12 Z" fill="hsl(45 92% 65%)" />
-    </svg>
-  );
-}
-
 const PHASES = [
   { index: 1, name: "Sell", promise: "Learn to confidently sell anything.", color: "hsl(14 78% 54%)" },
   { index: 2, name: "Build", promise: "Ship a real thing people can buy.", color: "hsl(217 74% 56%)" },
@@ -196,22 +172,8 @@ export function Landing({ signupEnabled = isSignupEnabled() }: { signupEnabled?:
 
   return (
     <main className="min-h-screen w-full overflow-x-hidden bg-[hsl(40_30%_99%)] text-ink">
-      {/* Nav */}
-      <nav className="mx-auto flex max-w-[1120px] items-center justify-between px-5 py-5 sm:px-8">
-        <div className="flex items-center gap-2.5">
-          <LogoMark className="h-7 w-auto" />
-          <span className="text-[15px] font-extrabold tracking-[0.02em]">FIRST PROFIT</span>
-        </div>
-        <div className="flex items-center gap-3 sm:gap-5">
-          <button
-            type="button"
-            onClick={onStartBuilding}
-            className="inline-flex min-h-[44px] items-center rounded-lg bg-ink px-[18px] text-sm font-medium text-white transition-colors hover:bg-[hsl(30_12%_22%)]"
-          >
-            Start Building
-          </button>
-        </div>
-      </nav>
+      {/* Nav is global now (GlobalNav in App.tsx); Start Building lives in the
+          hero and the bottom CTA band. */}
 
       {/* Hero */}
       <header className="mx-auto grid max-w-[1120px] grid-cols-1 items-center gap-14 px-5 pb-16 pt-12 sm:px-8 lg:grid-cols-[1.1fr_0.9fr] lg:gap-14 lg:pb-[72px] lg:pt-16">

@@ -1,7 +1,8 @@
 /**
  * Factory-floor HUD (handoff §H): parchment rounded bar with logo + wordmark, a
  * Sell phase chip (n/5 criteria), right-side Sales / Profit stats, the founder
- * chip, a small save-status indicator (from useGame().syncStatus), and Log out.
+ * chip, and a small save-status indicator (from useGame().syncStatus). Log out
+ * moved to the persistent GlobalNav (spec 2026-08-02-global-nav-design.md).
  *
  * Per the handoff HUD spec: NO XP, NO website link.
  * Dollars are whole-dollar (cents / 100, floored) mono numerals.
@@ -45,7 +46,7 @@ function SaveIndicator({ status }: { status: SyncStatus }) {
 }
 
 export function Hud() {
-  const { profile, activeIdea, isCriterionDone, grossSalesSumCents, salesSumCents, syncStatus, logout } = useGame();
+  const { profile, activeIdea, isCriterionDone, grossSalesSumCents, salesSumCents, syncStatus } = useGame();
   const phaseDone = PLAYABLE_STEPS.filter((id) => isCriterionDone(activeIdea, id)).length;
   const founder = profile.firstName || profile.handle || "Founder";
 
@@ -80,16 +81,7 @@ export function Hud() {
         <span className="inline-block max-w-[4.5rem] truncate rounded-full bg-[hsl(14_78%_54%/0.12)] px-3 py-1.5 font-mono text-[10.5px] font-semibold uppercase tracking-[0.06em] text-[hsl(14_78%_44%)] sm:max-w-[12rem]">
           {founder}
         </span>
-        <div className="flex flex-col items-end gap-1">
-          <button
-            type="button"
-            onClick={() => void logout()}
-            className="inline-flex min-h-[44px] items-center rounded-full border-2 border-[hsl(25_34%_20%/0.15)] px-4 font-mono text-[11px] uppercase tracking-[0.06em] text-ink hover:border-[hsl(25_34%_20%/0.4)]"
-          >
-            Log out
-          </button>
-          <SaveIndicator status={syncStatus} />
-        </div>
+        <SaveIndicator status={syncStatus} />
       </div>
     </header>
   );
