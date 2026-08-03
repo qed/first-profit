@@ -55,7 +55,7 @@ import * as GameContext from "../../state/GameContext";
 import { StepRunner } from "../StepRunner";
 import { Celebration } from "../Celebration";
 import { taskIdFor } from "../StuckBox";
-import { phaseById } from "../../data/path";
+import { phaseById, STEPS } from "../../data/path";
 
 const Ctx = (GameContext as unknown as { __ctx: React.Context<unknown> }).__ctx;
 
@@ -243,9 +243,13 @@ describe("StepRunner", () => {
     expect(header.style.background).toBe(cssBackground(build.wash));
     const label = screen.getByText(/Phase 2 · Build · Criterion 1 of 5/) as HTMLElement;
     expect(label.style.color).toBe(cssColor(build.text));
-    // The primary CTA takes the Build accent (non-sell phases only).
+    // The primary CTA takes the Build ctaFill (non-sell phases only) — the
+    // WCAG-safe deepened fill, never the raw accent (unit review FIX 4).
     const cta = screen.getByText("✓ I did it") as HTMLElement;
-    expect(cta.style.background).toBe(cssBackground(build.accent));
+    expect(cta.style.background).toBe(cssBackground(build.ctaFill));
+    const shadowProbe = document.createElement("div");
+    shadowProbe.style.boxShadow = `0 5px 0 ${build.ctaShadow}`;
+    expect(cta.style.boxShadow).toBe(shadowProbe.style.boxShadow);
   });
 
   it("keeps the SELL runner exactly as before Unit 8 (verified-green CTA, sell wash)", () => {
@@ -299,11 +303,26 @@ describe("Celebration after 1.2", () => {
 });
 
 describe("Celebration across phase boundaries (Unit 8)", () => {
+  /** Legacy-key done map covering every task of the given criteria (the
+   *  engine's isTaskDone falls back to the legacy map for phases 1-3). */
+  function doneFor(...stepIds: string[]): Record<string, boolean> {
+    const done: Record<string, boolean> = {};
+    for (const stepId of stepIds) {
+      const step = STEPS.find((s) => s.id === stepId)!;
+      for (let i = 0; i < step.tasks.length; i++) done[taskKey(stepId, i)] = true;
+    }
+    return done;
+  }
+
+  /** Celebrating `celebrate` with all criteria up TO AND INCLUDING it done —
+   *  honest progress, matching what the reducer produces in real play (the
+   *  FIX 3 gating hides the next-room block for dishonest synthetic states). */
   function seedCelebrating(celebrate: string): GameState {
+    const upTo = STEPS.slice(0, STEPS.findIndex((s) => s.id === celebrate) + 1).map((s) => s.id);
     return {
       ...initialState(),
       stage: "app",
-      ideas: [{ fields: {}, done: {} }],
+      ideas: [{ fields: {}, done: doneFor(...upTo) }],
       activeIdea: 0,
       celebrate,
     };
@@ -334,7 +353,7 @@ describe("Celebration across phase boundaries (Unit 8)", () => {
 
   it("at 3.5 WITH an active business it names 4.1 · The Checkout Booth", () => {
     const seed = seedCelebrating("3.5");
-    seed.ideas = [{ id: "idea-a", fields: {}, done: {} }];
+    seed.ideas = [{ ...seed.ideas[0], id: "idea-a" }];
     seed.businesses = [{ id: "biz-1", ideaId: "idea-a", archived: false }];
     render(<Harness seed={seed} />);
     expect(screen.queryByText(/Promote it to open/)).toBeNull();

@@ -61,6 +61,17 @@ export interface Phase {
   faded: string;
   /** 9%-alpha accent for header/chip background washes. */
   wash: string;
+  /**
+   * WCAG-safe CTA fill (unit review FIX 4): a solid the phase's primary action
+   * button can paint UNDER WHITE TEXT at >= 4.5:1 contrast. The raw `accent`
+   * values fail that bar for several phases (scale's amber is 1.97:1), so each
+   * phase carries a deepened fill chosen by computed relative-luminance ratio;
+   * a test (src/data/__tests__/phaseContrast.test.ts) recomputes every ratio
+   * and fails the suite if a future tweak drops one below 4.5.
+   */
+  ctaFill: string;
+  /** The pressed/3D shadow under a ctaFill button (fill deepened further). */
+  ctaShadow: string;
 }
 
 export interface Step {
@@ -102,7 +113,9 @@ export const PHASES: Phase[] = [
   accent: 'hsl(14 78% 54%)',
   text: 'hsl(14 78% 44%)',
   faded: 'hsl(14 78% 54% / .3)',
-  wash: 'hsl(14 78% 54% / .09)'
+  wash: 'hsl(14 78% 54% / .09)',
+  ctaFill: 'hsl(14 78% 44%)',
+  ctaShadow: 'hsl(14 78% 30%)'
 },
 {
   id: 'build',
@@ -114,7 +127,9 @@ export const PHASES: Phase[] = [
   accent: 'hsl(217 74% 56%)',
   text: 'hsl(217 74% 46%)',
   faded: 'hsl(217 74% 56% / .3)',
-  wash: 'hsl(217 74% 56% / .09)'
+  wash: 'hsl(217 74% 56% / .09)',
+  ctaFill: 'hsl(217 74% 44%)',
+  ctaShadow: 'hsl(217 74% 30%)'
 },
 {
   id: 'validate',
@@ -126,7 +141,9 @@ export const PHASES: Phase[] = [
   accent: 'hsl(265 52% 58%)',
   text: 'hsl(265 52% 48%)',
   faded: 'hsl(265 52% 58% / .3)',
-  wash: 'hsl(265 52% 58% / .09)'
+  wash: 'hsl(265 52% 58% / .09)',
+  ctaFill: 'hsl(265 52% 58%)',
+  ctaShadow: 'hsl(265 52% 44%)'
 },
 {
   id: 'grow',
@@ -138,7 +155,9 @@ export const PHASES: Phase[] = [
   accent: 'hsl(150 52% 42%)',
   text: 'hsl(150 52% 34%)',
   faded: 'hsl(150 52% 42% / .3)',
-  wash: 'hsl(150 52% 42% / .09)'
+  wash: 'hsl(150 52% 42% / .09)',
+  ctaFill: 'hsl(150 52% 32%)',
+  ctaShadow: 'hsl(150 52% 18%)'
 },
 {
   id: 'scale',
@@ -150,7 +169,9 @@ export const PHASES: Phase[] = [
   accent: 'hsl(41 88% 52%)',
   text: 'hsl(41 88% 38%)',
   faded: 'hsl(41 88% 52% / .3)',
-  wash: 'hsl(41 88% 52% / .09)'
+  wash: 'hsl(41 88% 52% / .09)',
+  ctaFill: 'hsl(41 88% 32%)',
+  ctaShadow: 'hsl(41 88% 18%)'
 }];
 
 

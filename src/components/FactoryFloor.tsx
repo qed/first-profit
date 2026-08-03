@@ -45,10 +45,15 @@ export interface FloorProps {
    * desktop/mobile variant swapping at the lg breakpoint. */
   onWalk: (intent: WalkIntent) => void;
   floorView: FloorView;
-  /** Immediate (no-walk) return to the phases view; a parent-level setter. */
+  /** Immediate (no-walk) return to the phases view; a parent-level setter
+   *  (which ALSO cancels any in-flight walk — unit review FIX 1b). */
   onBack: () => void;
   /** Open the idea-switcher dialog (state lives in Factory, above the mount). */
   onOpenSwitcher: () => void;
+  /** True while ANY overlay is open (Factory's lifted anyOverlayOpen, unit
+   *  review FIX 5): the floors hide their floating chip on it. The container
+   *  is also `inert` then, so nothing here can catch focus. */
+  overlayOpen?: boolean;
 }
 
 function useIsDesktop() {
@@ -68,12 +73,15 @@ export function FactoryFloor(props: FloorProps) {
 
 const HINT = "Click the floor to walk · click a room to enter it";
 
-function DesktopFloor({ walkTo, onArrived, onWalk, floorView, onBack, onOpenSwitcher }: FloorProps) {
+function DesktopFloor({ walkTo, onArrived, onWalk, floorView, onBack, onOpenSwitcher, overlayOpen }: FloorProps) {
   const { profile } = useGame();
   const [pos, setPos] = useState({ x: 50, y: 94 });
   const timer = useRef<number | null>(null);
 
   // Drive the walk from the parent's intent (survives the breakpoint swap).
+  // walkTo → null is CANCELLATION (unit review FIX 1b): the dep change makes
+  // the cleanup below clear the pending arrival timer, so the intent never
+  // fires; the early return then arms nothing new.
   useEffect(() => {
     if (!walkTo) return;
     // Cosmetic: glide toward the middle of the floor, then fire the intent.
@@ -105,9 +113,9 @@ function DesktopFloor({ walkTo, onArrived, onWalk, floorView, onBack, onOpenSwit
           onFloorClick (cosmetic avatar walk); card buttons handle their own tap. */}
       <div className="absolute inset-0 overflow-y-auto p-7 pb-14">
         {floorView === "phases" ? (
-          <PhasesFloor onWalk={onWalk} onOpenSwitcher={onOpenSwitcher} />
+          <PhasesFloor onWalk={onWalk} onOpenSwitcher={onOpenSwitcher} overlayOpen={overlayOpen} />
         ) : (
-          <CriterionFloor phase={floorView} onWalk={onWalk} onBack={onBack} onOpenSwitcher={onOpenSwitcher} />
+          <CriterionFloor phase={floorView} onWalk={onWalk} onBack={onBack} onOpenSwitcher={onOpenSwitcher} overlayOpen={overlayOpen} />
         )}
       </div>
 

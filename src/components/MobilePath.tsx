@@ -15,12 +15,14 @@ import { PhasesFloor } from "./PhasesFloor";
 import { CriterionFloor } from "./CriterionFloor";
 import type { FloorProps } from "./FactoryFloor";
 
-export function MobilePath({ walkTo, onArrived, onWalk, floorView, onBack, onOpenSwitcher }: FloorProps) {
+export function MobilePath({ walkTo, onArrived, onWalk, floorView, onBack, onOpenSwitcher, overlayOpen }: FloorProps) {
   const { profile } = useGame();
   const timer = useRef<number | null>(null);
 
   // Resume/complete any in-flight walk from the parent's intent. On this variant
   // the avatar is a fixed top sprite (cosmetic); the durable part is the intent.
+  // walkTo → null is CANCELLATION (unit review FIX 1b): the dep change makes
+  // the cleanup below clear the pending arrival timer before the early return.
   useEffect(() => {
     if (!walkTo) return;
     if (timer.current) window.clearTimeout(timer.current);
@@ -40,9 +42,9 @@ export function MobilePath({ walkTo, onArrived, onWalk, floorView, onBack, onOpe
           (repo convention from CLAUDE.md — preserve this padding). */}
       <div className="px-4 pb-80 pt-2">
         {floorView === "phases" ? (
-          <PhasesFloor onWalk={onWalk} onOpenSwitcher={onOpenSwitcher} />
+          <PhasesFloor onWalk={onWalk} onOpenSwitcher={onOpenSwitcher} overlayOpen={overlayOpen} />
         ) : (
-          <CriterionFloor phase={floorView} onWalk={onWalk} onBack={onBack} onOpenSwitcher={onOpenSwitcher} />
+          <CriterionFloor phase={floorView} onWalk={onWalk} onBack={onBack} onOpenSwitcher={onOpenSwitcher} overlayOpen={overlayOpen} />
         )}
       </div>
     </div>

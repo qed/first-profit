@@ -18,6 +18,8 @@ import {
   nextUpFor as nextUpForFn,
   isPhaseComplete as isPhaseCompleteFn,
   activeBusiness as activeBusinessFn,
+  grossSalesSumCents as grossSalesSumCentsFn,
+  salesSumCents as salesSumCentsFn,
   type Action,
   type GameState,
 } from "../state/gameCore";
@@ -102,6 +104,17 @@ export function FloorHarness({ seed, Ctx, children, onAction, promoteIdea }: Har
     isStepUnlocked: (i: number, s: string) => isStepUnlockedFn(state, i, s),
     ideasEligibleFor: (s: string) => ideasEligibleForFn(state, s),
     nextUpFor: (i: number) => nextUpForFn(state, i),
+    // Extras the full-screen surfaces (Hud, screens/Factory) consume; harmless
+    // for the floor components that ignore them.
+    grossSalesSumCents: () => grossSalesSumCentsFn(state),
+    salesSumCents: () => salesSumCentsFn(state),
+    syncStatus: "idle" as const,
+    grade: state.profile.grade,
+    band: "g6_8" as const,
+    gradeAskDone: true,
+    skipGradeAsk: () => {},
+    submitGradeAnswer: async () => ({ ok: true }),
+    submitFeedback: async () => "sent" as const,
   };
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }

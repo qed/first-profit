@@ -22,7 +22,7 @@
  */
 import { useEffect, useRef, useState } from "react";
 import { useGame } from "../state/GameContext";
-import { activeBusinessExists, isPhaseComplete } from "../state/gameCore";
+import { activeBusiness, activeBusinessExists, isPhaseComplete } from "../state/gameCore";
 import { phaseById } from "../data/path";
 import { ideaSummaryName } from "../state/floorSelectors";
 import { useFocusTrap } from "../lib/useFocusTrap";
@@ -31,11 +31,17 @@ export function PromoteBusiness({ open, onClose }: { open: boolean; onClose: () 
   const game = useGame();
   const { ideas, promoteIdea, dispatch } = game;
   const panelRef = useRef<HTMLDivElement>(null);
-  // The idea index just promoted (celebrate-lite state), or null while listing.
-  const [promoted, setPromoted] = useState<number | null>(null);
-  // Bumped after a refused promoteIdea so the list re-derives from live state
-  // (the refused row disappears; nothing errors at the kid).
-  const [, setRefresh] = useState(0);
+  // What the one allowed confirm of this open session did: "promoted" shows
+  // the celebrate-lite confirmation; "refused" re-renders the list from live
+  // state (nothing errors at the kid). The promoted idea's NAME is derived at
+  // render time from the POST-dispatch truth (activeBusiness), never from an
+  // optimistic index (unit review FIX 6).
+  const [fired, setFired] = useState<"idle" | "promoted" | "refused">("idle");
+  // Synchronous double-confirm guard (unit review FIX 6): flips BEFORE
+  // promoteIdea runs, so a rapid double-tap (same row or cross-row) in one
+  // event-loop burst can dispatch at most ONE promotion. Re-armed only on the
+  // open transition — once fired, every confirm stays dead for this session.
+  const confirmingRef = useRef(false);
 
   // Reset + focus ONLY on the open transition. Deliberately keyed on `open`
   // alone: the parent recreates `onClose` every render, and depending on it
@@ -43,7 +49,8 @@ export function PromoteBusiness({ open, onClose }: { open: boolean; onClose: () 
   // Factory, wiping the celebrate-lite state back to the list.
   useEffect(() => {
     if (!open) return;
-    setPromoted(null);
+    confirmingRef.current = false;
+    setFired("idle");
     panelRef.current?.focus();
   }, [open]);
 
@@ -67,15 +74,31 @@ export function PromoteBusiness({ open, onClose }: { open: boolean; onClose: () 
         .map((_, i) => i)
         .filter((i) => Boolean(ideas[i].id) && isPhaseComplete(game, i, "validate"));
 
+  // The RETURNED truth (unit review FIX 6): the celebrate-lite heading names
+  // the idea the ACTIVE business was actually promoted from — read from live
+  // post-dispatch state, so a raced/refused second confirm can never put the
+  // wrong idea's name on the confirmation.
+  const promotedBusiness = fired === "promoted" ? activeBusiness(game) : null;
+  const promotedIdeaIndex = promotedBusiness
+    ? ideas.findIndex((i) => i.id === promotedBusiness.ideaId)
+    : -1;
+
   const confirm = (ideaIndex: number) => {
+    // Synchronous guard BEFORE the dispatch: a second tap in the same burst
+    // (React state hasn't re-rendered the disabled buttons yet) no-ops here.
+    if (confirmingRef.current) return;
+    confirmingRef.current = true;
     if (promoteIdea(ideaIndex)) {
-      setPromoted(ideaIndex);
+      setFired("promoted");
       // Make the new business the working context so the floor, coach, and
       // runner all point at 4.1 for it the moment this screen closes.
       dispatch({ type: "SET_ACTIVE_IDEA", ideaIndex });
     } else {
-      // Refused (e.g. another tab promoted first): refresh from live state.
-      setRefresh((r) => r + 1);
+      // Refused (e.g. another tab promoted first): re-render from live state
+      // (the eligible list re-derives; nothing errors at the kid). The guard
+      // stays down — refusals are state-deterministic, not transient, and the
+      // list below now reflects why.
+      setFired("refused");
     }
   };
 
@@ -90,7 +113,7 @@ export function PromoteBusiness({ open, onClose }: { open: boolean; onClose: () 
         className="fp-rise flex h-full w-full flex-col overflow-y-auto bg-[hsl(40_55%_97%)] outline-none sm:h-auto sm:max-h-[calc(100dvh-2rem)] sm:w-full sm:max-w-[560px] sm:rounded-3xl sm:border-2 sm:border-[hsl(25_34%_20%/0.15)] sm:shadow-[0_8px_0_rgba(120,80,40,.1)]"
         style={{ animation: "fp-rise .3s cubic-bezier(.22,1,.36,1) both" }}
       >
-        {promoted !== null ? (
+        {promotedBusiness && promotedIdeaIndex >= 0 ? (
           // ── Celebrate-lite confirmation ─────────────────────────────────
           <div className="flex flex-1 flex-col justify-center px-6 py-9 text-center sm:flex-none">
             <span
@@ -108,7 +131,7 @@ export function PromoteBusiness({ open, onClose }: { open: boolean; onClose: () 
               It is official
             </p>
             <h2 className="mt-2 font-display text-[26px] font-black leading-[1.15] text-[hsl(25_34%_20%)]">
-              {ideaSummaryName(game, promoted)} is now your business
+              {ideaSummaryName(game, promotedIdeaIndex)} is now your business
             </h2>
             <p className="mt-2 text-[14px] leading-[1.6] text-[hsl(25_20%_38%)]">
               Phase 4 · Grow is open. First stop: your first $1,000 in sales.
@@ -170,8 +193,12 @@ export function PromoteBusiness({ open, onClose }: { open: boolean; onClose: () 
                       <button
                         type="button"
                         onClick={() => confirm(n)}
-                        className="inline-flex min-h-[48px] items-center justify-center rounded-xl px-4 font-display text-[15px] font-bold text-white transition hover:-translate-y-0.5 active:translate-y-0"
-                        style={{ background: grow.accent, boxShadow: "0 4px 0 hsl(150 52% 26%)" }}
+                        // Dead after the one allowed confirm of this open
+                        // session (unit review FIX 6) — the sync guard above
+                        // covers the same-burst race this render lags behind.
+                        disabled={fired !== "idle"}
+                        className="inline-flex min-h-[48px] items-center justify-center rounded-xl px-4 font-display text-[15px] font-bold text-white transition hover:-translate-y-0.5 active:translate-y-0 disabled:opacity-50"
+                        style={{ background: grow.ctaFill, boxShadow: `0 4px 0 ${grow.ctaShadow}` }}
                       >
                         Make this my business
                       </button>

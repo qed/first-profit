@@ -17,6 +17,7 @@ vi.mock("../../state/GameContext", async () => {
 import * as GameContext from "../../state/GameContext";
 import { CriterionFloor } from "../CriterionFloor";
 import { phaseById } from "../../data/path";
+import { roomEntryFor } from "../../state/floorSelectors";
 import { FloorHarness, completePhase, completeStep, validatedIdea, withIdeas, apply } from "../../testSupport/floorHarness";
 import type { WalkIntent } from "../FactoryFloor";
 
@@ -150,5 +151,52 @@ describe("CriterionFloor — Grow/Scale business context (Tier C2)", () => {
   it("uses no em dashes anywhere on the floor", () => {
     mount(promotedSeed(), "grow");
     expect(document.body.textContent).not.toMatch(/—/);
+  });
+});
+
+describe("CriterionFloor — honest cards for the ACTIVE idea (unit review FIX 2)", () => {
+  /** Idea #1 finished 1.1 (eligible for 1.2); idea #2 is ACTIVE and fresh. */
+  function twoIdeaSeed() {
+    return completeStep(withIdeas(2), 0, "1.1");
+  }
+
+  it("a card the ACTIVE idea cannot play renders LOCKED even when another idea could", () => {
+    mount(twoIdeaSeed(), "sell");
+    const card = screen.getByText("The Sales Room").closest("button, div") as HTMLElement;
+    // Dashed locked treatment, not the unlocked card chrome.
+    expect(card.className).toContain("border-dashed");
+    // Pips/meta on the unlocked cards stay the ACTIVE idea's (locked cards
+    // render the hint instead of a meta line).
+    expect(screen.getAllByText(/unit tasks · Idea #2/).length).toBeGreaterThan(0);
+    expect(screen.queryByText(/unit tasks · Idea #1/)).toBeNull();
+  });
+
+  it("active-locked/other-eligible: honest cross-idea hint, and the tap routes to the eligible idea's entry", () => {
+    const seed = twoIdeaSeed();
+    const { walks } = mount(seed, "sell");
+    expect(screen.getByText("Idea #1 can play this")).toBeTruthy();
+    const button = screen.getByText("The Sales Room").closest("button") as HTMLButtonElement;
+    expect(button).toBeTruthy(); // locked-but-TAPPABLE (the explicit redirect)
+    fireEvent.click(button);
+    expect(walks).toEqual([{ kind: "enterCriterion", stepId: "1.2" }]);
+    // The intent resolves through roomEntryFor exactly as Factory will run it:
+    // ONE eligible idea → enter for idea #1 (index 0), never a silent no-op.
+    expect(roomEntryFor(seed, "1.2")).toEqual({ action: "enter", ideaIndex: 0, index: 0 });
+  });
+
+  it("a card locked for EVERY idea keeps the plain locked hint and stays inert", () => {
+    mount(twoIdeaSeed(), "sell");
+    // 1.3 is locked for both ideas (neither finished 1.2).
+    const card = screen.getByText("The Learning Room").closest("div") as HTMLElement;
+    expect(card.querySelector("button")).toBeNull();
+    expect(screen.getByText("Complete 1.2 first")).toBeTruthy();
+  });
+
+  it("the active idea's own unlocked frontier still renders unlocked ('You are here')", () => {
+    mount(twoIdeaSeed(), "sell");
+    // 1.1 is the ACTIVE idea #2's frontier: unlocked + marked.
+    expect(screen.getByText("You are here")).toBeTruthy();
+    const idea1Card = screen.getByText("The Idea Room").closest("button") as HTMLElement;
+    expect(idea1Card.className).not.toContain("border-dashed");
   });
 });

@@ -160,13 +160,13 @@ export function StepRunner() {
   const close = () => dispatch({ type: "CLOSE_RUNNER" });
 
   // Primary CTA per phase (PHASES data): Sell keeps the pre-Unit-8 verified
-  // green EXACTLY (the classes below); the other phases take their accent with
-  // a darkened press shadow, so the runner's action reads in phase color.
-  const darkenL = (hsl: string, by: number) =>
-    hsl.replace(/ (\d+(?:\.\d+)?)%\)$/, (_m, l) => ` ${Math.max(0, Number(l) - by)}%)`);
+  // green EXACTLY (the classes below); the other phases take the phase's
+  // ctaFill/ctaShadow tokens (unit review FIX 4) — the WCAG-safe deepened
+  // fills, NOT the raw accent (scale's amber accent is 1.97:1 under white
+  // text; every ctaFill is computed-verified >= 4.5:1 by phaseContrast.test).
   const ctaStyle =
-    phaseId && phaseId !== "sell"
-      ? { background: accent, boxShadow: `0 5px 0 ${darkenL(accent, 20)}` }
+    phase && phaseId !== "sell"
+      ? { background: phase.ctaFill, boxShadow: `0 5px 0 ${phase.ctaShadow}` }
       : undefined;
 
   return (

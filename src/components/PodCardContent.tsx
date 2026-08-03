@@ -252,6 +252,7 @@ export function CriterionRoomCard({
   hint,
   accent,
   text,
+  lockedTappable,
   onClick,
 }: {
   sign: string;
@@ -268,11 +269,19 @@ export function CriterionRoomCard({
   accent: string;
   /** The phase's darker text color (PHASES data) — the criterion id label. */
   text: string;
+  /**
+   * Locked-but-tappable (unit review FIX 2, the PhaseCard `promotable`
+   * pattern): the ACTIVE idea is locked out but ANOTHER idea can play this
+   * criterion — the card keeps the dashed locked treatment with an honest
+   * hint, and the tap routes through the normal room-entry channel (which
+   * enters/picks for the eligible idea — an EXPLICIT redirect).
+   */
+  lockedTappable?: boolean;
   onClick?: () => void;
 }) {
   if (!unlocked) {
-    return (
-      <div className="flex flex-col gap-2.5 rounded-[14px] border-2 border-dashed border-[hsl(25_34%_20%/0.15)] bg-[hsl(25_34%_20%/0.02)] p-3.5">
+    const lockedBody = (
+      <>
         <span className="text-lg opacity-35" aria-hidden>
           {sign}
         </span>
@@ -286,12 +295,31 @@ export function CriterionRoomCard({
         </span>
         <span className="flex items-center gap-1.5">
           <span aria-hidden className="text-[10px] opacity-45">
-            🔒
+            {lockedTappable ? "💡" : "🔒"}
           </span>
-          <span className="font-mono text-[9px] uppercase tracking-[0.06em]" style={{ color: "hsl(25 20% 38% / .75)" }}>
+          <span
+            className="text-left font-mono text-[9px] uppercase tracking-[0.06em]"
+            style={{ color: lockedTappable ? text : "hsl(25 20% 38% / .75)" }}
+          >
             {hint}
           </span>
         </span>
+      </>
+    );
+    if (lockedTappable && onClick) {
+      return (
+        <button
+          type="button"
+          onClick={onClick}
+          className="flex min-h-[44px] flex-col gap-2.5 rounded-[14px] border-2 border-dashed border-[hsl(25_34%_20%/0.15)] bg-[hsl(25_34%_20%/0.02)] p-3.5 text-left transition-transform hover:-translate-y-[3px] active:translate-y-0"
+        >
+          {lockedBody}
+        </button>
+      );
+    }
+    return (
+      <div className="flex flex-col gap-2.5 rounded-[14px] border-2 border-dashed border-[hsl(25_34%_20%/0.15)] bg-[hsl(25_34%_20%/0.02)] p-3.5">
+        {lockedBody}
       </div>
     );
   }

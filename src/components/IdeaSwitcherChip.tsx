@@ -9,10 +9,18 @@
 import { useGame } from "../state/GameContext";
 import { ideaSummaryName } from "../state/floorSelectors";
 
-export function IdeaSwitcherChip({ onOpen }: { onOpen: () => void }) {
+export function IdeaSwitcherChip({
+  onOpen,
+  hidden,
+}: {
+  onOpen: () => void;
+  /** True while any overlay is open (unit review FIX 5): the chip hides so a
+   *  floating dialog from sm up can never race a second overlay open. */
+  hidden?: boolean;
+}) {
   const game = useGame();
   const { ideas, activeIdea } = game;
-  if (ideas.length === 0) return null;
+  if (hidden || ideas.length === 0) return null;
   return (
     <button
       type="button"

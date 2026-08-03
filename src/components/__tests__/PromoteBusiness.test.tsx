@@ -6,7 +6,7 @@
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
 import React from "react";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 
 vi.mock("../../state/GameContext", async () => {
   const R = await import("react");
@@ -17,7 +17,7 @@ vi.mock("../../state/GameContext", async () => {
 import * as GameContext from "../../state/GameContext";
 import { PromoteBusiness } from "../PromoteBusiness";
 import { FloorHarness, apply, validatedIdea, withIdeas } from "../../testSupport/floorHarness";
-import type { GameState } from "../../state/gameCore";
+import type { Action, GameState } from "../../state/gameCore";
 
 const Ctx = (GameContext as unknown as { __ctx: React.Context<unknown> }).__ctx;
 
@@ -120,5 +120,83 @@ describe("PromoteBusiness", () => {
     const dialog = screen.getByRole("dialog");
     expect(document.activeElement).toBe(dialog);
     expect(document.body.textContent).not.toMatch(/—/);
+  });
+});
+
+describe("PromoteBusiness — double-confirm guard + returned truth (unit review FIX 6)", () => {
+  /** TWO Validate-complete, named ideas (both rows offer a confirm). */
+  function twoEligibleSeed(): GameState {
+    let s = withIdeas(2);
+    s = validatedIdea(s, 0);
+    s = validatedIdea(s, 1);
+    s = apply(s, { type: "SET_FIELD", ideaIndex: 0, key: "oneLiner", value: "Slime kits" });
+    s = apply(s, { type: "SET_FIELD", ideaIndex: 1, key: "oneLiner", value: "Dog walking" });
+    return s;
+  }
+
+  function mountWithActions(seed: GameState) {
+    const actions: Action[] = [];
+    const utils = render(
+      <FloorHarness seed={seed} Ctx={Ctx} onAction={(a) => actions.push(a)}>
+        <PromoteBusiness open onClose={() => {}} />
+      </FloorHarness>,
+    );
+    return { actions, ...utils };
+  }
+
+  it("rapid double-confirm on the SAME row promotes exactly once", () => {
+    const { actions } = mountWithActions(twoEligibleSeed());
+    const [first] = screen.getAllByText("Make this my business") as HTMLButtonElement[];
+    const button = first.closest("button") as HTMLButtonElement;
+    // Same event-loop burst: the synchronous confirmingRef guard is the only
+    // thing standing between these two clicks (state has not re-rendered yet).
+    act(() => {
+      button.click();
+      button.click();
+    });
+    expect(actions.filter((a) => a.type === "PROMOTE_IDEA").length).toBe(1);
+    expect(screen.getByText("Slime kits is now your business")).toBeTruthy();
+  });
+
+  it("rapid CROSS-ROW double-confirm: the second is refused and the confirmation names the FIRST (post-dispatch truth)", () => {
+    const { actions } = mountWithActions(twoEligibleSeed());
+    const buttons = (screen.getAllByText("Make this my business") as HTMLElement[]).map(
+      (el) => el.closest("button") as HTMLButtonElement,
+    );
+    expect(buttons.length).toBe(2);
+    act(() => {
+      buttons[0].click();
+      buttons[1].click(); // dead: sync guard fires before any dispatch
+    });
+    const promotes = actions.filter((a) => a.type === "PROMOTE_IDEA");
+    expect(promotes.length).toBe(1);
+    expect((promotes[0] as { ideaId: string }).ideaId).toBe("idea-0");
+    // The celebrate-lite heading is derived from the ACTIVE business in live
+    // state (the returned truth), so it names idea #1 — never the raced row.
+    expect(screen.getByText("Slime kits is now your business")).toBeTruthy();
+    expect(screen.queryByText("Dog walking is now your business")).toBeNull();
+  });
+
+  it("after one confirm fires, every confirm button is disabled for the session", () => {
+    // A FORCED refusal keeps the list view up so the buttons stay visible.
+    const refused = vi.fn().mockReturnValue(false);
+    mount(twoEligibleSeed(), { promoteIdea: refused });
+    const button = screen.getAllByText("Make this my business")[0].closest("button") as HTMLButtonElement;
+    fireEvent.click(button);
+    expect(refused).toHaveBeenCalledTimes(1);
+    for (const el of screen.getAllByText("Make this my business")) {
+      expect((el.closest("button") as HTMLButtonElement).disabled).toBe(true);
+    }
+    // A further click dispatches nothing more.
+    fireEvent.click(button);
+    expect(refused).toHaveBeenCalledTimes(1);
+  });
+
+  it("a refusal never shows the celebrate-lite confirmation (refusal boolean honored)", () => {
+    const refused = vi.fn().mockReturnValue(false);
+    mount(twoEligibleSeed(), { promoteIdea: refused });
+    fireEvent.click(screen.getAllByText("Make this my business")[0]);
+    expect(screen.queryByText(/is now your business/)).toBeNull();
+    expect(screen.getByText("Make it your business")).toBeTruthy();
   });
 });

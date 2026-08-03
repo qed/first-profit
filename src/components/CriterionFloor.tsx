@@ -35,11 +35,14 @@ export function CriterionFloor({
   onWalk,
   onBack,
   onOpenSwitcher,
+  overlayOpen,
 }: {
   phase: PhaseId;
   onWalk: (intent: WalkIntent) => void;
   onBack: () => void;
   onOpenSwitcher: () => void;
+  /** Factory's lifted anyOverlayOpen (unit review FIX 5) — hides the chip. */
+  overlayOpen?: boolean;
 }) {
   const game = useGame();
   const { ideas, activeIdea, isCriterionDone, isStepUnlocked, nextUpFor, isTaskDone } = game;
@@ -77,7 +80,7 @@ export function CriterionFloor({
             <span aria-hidden>🏢</span> Your business · {businessName}
           </p>
         ) : (
-          <IdeaSwitcherChip onOpen={onOpenSwitcher} />
+          <IdeaSwitcherChip onOpen={onOpenSwitcher} hidden={overlayOpen} />
         )}
       </div>
 
@@ -85,22 +88,38 @@ export function CriterionFloor({
         {criteria.map((step, pos) => {
           const built = BUILT_CRITERIA.has(step.id);
           const total = step.tasks.length;
-          const unlocked = built && ideas.some((_, i) => isStepUnlocked(i, step.id));
+          // HONEST CARDS (unit review FIX 2): a card's unlocked visual state
+          // reflects the ACTIVE idea — the one whose pips/meta it shows —
+          // never "some idea somewhere". When the active idea is locked out
+          // but ANOTHER idea could play the criterion, the card keeps the
+          // dashed locked look with an honest cross-idea hint and stays
+          // tappable (the tap routes through roomEntryFor, which enters/picks
+          // for the eligible idea — an EXPLICIT redirect, never a silent one).
+          const unlocked = built && isStepUnlocked(activeIdea, step.id);
+          const otherEligible = built && !unlocked
+            ? ideas.findIndex(
+                (_, i) =>
+                  i !== activeIdea && isStepUnlocked(i, step.id) && !isCriterionDone(i, step.id),
+              )
+            : -1;
           const pips = step.tasks.map((_, i) => isTaskDone(activeIdea, step.id, i));
           const doneTasks = pips.filter(Boolean).length;
           const complete = built && isCriterionDone(activeIdea, step.id);
           // "You are here" stops at the built frontier, exactly like the coach.
           const isNext = built && nextStep === step.id;
-          // Locked hints extend the EXISTING dashed treatment: within the phase
-          // it is the previous criterion; the phase's first card names the
+          // Locked hints extend the EXISTING dashed treatment: the cross-idea
+          // hint names the idea that can play; otherwise within the phase it
+          // is the previous criterion, and the phase's first card names the
           // phase gate (the business gate for Grow/Scale reads "promote").
           const hint = !built
             ? "Coming in the next build"
-            : pos > 0
-              ? `Complete ${criteria[pos - 1].id} first`
-              : phase === "grow" && !business
-                ? "Promote an idea first"
-                : `Complete ${phaseById(PHASE_BEFORE[phase] ?? "sell").name} first`;
+            : otherEligible >= 0
+              ? `Idea #${otherEligible + 1} can play this`
+              : pos > 0
+                ? `Complete ${criteria[pos - 1].id} first`
+                : phase === "grow" && !business
+                  ? "Promote an idea first"
+                  : `Complete ${phaseById(PHASE_BEFORE[phase] ?? "sell").name} first`;
           const meta = isBusinessPhase
             ? `${doneTasks}/${total} unit tasks · ${businessName}`
             : `${doneTasks}/${total} unit tasks · Idea #${activeIdea + 1}`;
@@ -119,6 +138,7 @@ export function CriterionFloor({
               hint={hint}
               accent={ph.accent}
               text={ph.text}
+              lockedTappable={otherEligible >= 0}
               onClick={() => onWalk({ kind: "enterCriterion", stepId: step.id })}
             />
           );

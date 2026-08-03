@@ -1,22 +1,35 @@
 /**
- * The top-level `app` surface (handoff §H). This screen OWNS the two pieces of
- * in-flight intent that must outlive the desktop/mobile variant swap at lg:
+ * The top-level `app` surface (handoff §H). This screen OWNS the pieces of
+ * UI intent that must outlive the desktop/mobile variant swap at lg:
  *
  *   - `walkTo`  : the WalkIntent a card tap wants to run once the avatar arrives.
- *   - `floorView`: phases | sell (which sub-floor is showing).
+ *   - `floorView`: phases | a phase id (which sub-floor is showing).
+ *   - `promoteOpen` / `switcherOpen`: the TWO Factory-owned overlays — the
+ *     PromoteBusiness screen and the idea SwitcherDialog. Their open-state is
+ *     pure UI intent no reducer action ever needs to drive, so it lives in
+ *     useState HERE rather than gameCore. That placement is swap-safe because
+ *     Factory itself NEVER unmounts across the lg breakpoint — only
+ *     FactoryFloor's two variants below it swap — so this state (like walkTo)
+ *     survives a mid-interaction viewport crossing.
  *
- * Both live HERE, above <FactoryFloor/>'s matchMedia conditional mount, per
+ * All of it lives above <FactoryFloor/>'s matchMedia conditional mount, per
  * docs/solutions/ui-bugs/breakpoint-crossing-drops-navigation (BINDING). Card
  * taps flow: card → onWalk(intent) → setWalkTo → the mounted variant animates and
  * calls onArrived(intent) → we run the action and clear walkTo (at-least-once).
  * Crossing lg mid-walk cancels the old variant's timer but not the intent, so the
- * new variant's effect resumes it.
+ * new variant's effect resumes it. Arrival is RACE-PROOF (unit review FIX 1):
+ * the variants call arrival through a ref-backed stable wrapper, so the action
+ * always computes against LIVE state (never the closure captured when the walk
+ * started), onBack and an idea switch both CANCEL an in-flight walk
+ * (walkTo → null; the variants' effect cleanup clears their timer), and the
+ * kid's explicit switch always wins over a pending arrival.
  *
  * Dialog / runner / picker / celebration open-state lives in the gameCore reducer
  * (in the provider, above everything), so those already survive the swap; we just
- * render them here. The mock Stripe checkout overlay was retired in Payment Phase
- * 2 Unit 4; the Checkout Booth now teaches the provider-choice lesson inline in
- * the room dialog body.
+ * render them here. While ANY overlay is open (reducer overlays + the two
+ * Factory-owned ones) the floor container is `inert` and the floating helpers
+ * (coach, switcher chip, GradeAsk) hide, so nothing behind a modal scrim can
+ * catch taps or tab focus.
  */
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useGame } from "../state/GameContext";
@@ -181,9 +194,17 @@ function PickerDialog() {
  *
  * Exported for the component test suite; only Factory mounts it.
  */
-export function NextStepCoach({ onWalk }: { onWalk: (intent: WalkIntent) => void }) {
+export function NextStepCoach({
+  onWalk,
+  overlayOpen,
+}: {
+  onWalk: (intent: WalkIntent) => void;
+  /** Factory's lifted anyOverlayOpen (unit review FIX 5): includes the two
+   *  Factory-owned overlays (promote/switcher) the reducer knows nothing of. */
+  overlayOpen?: boolean;
+}) {
   const game = useGame();
-  if (game.runnerOpen || game.room || game.celebrate || game.pickFor) return null;
+  if (overlayOpen || game.runnerOpen || game.room || game.celebrate || game.pickFor) return null;
   const target = nextCoachTarget(game);
   if (!target) return null;
 
@@ -231,11 +252,22 @@ export function NextStepCoach({ onWalk }: { onWalk: (intent: WalkIntent) => void
  * floor cards/coach, which now target any built phase for the newly active
  * idea. Exported for the component test suite; only Factory mounts it.
  */
-export function SwitcherDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
+export function SwitcherDialog({
+  open,
+  onClose,
+  onSwitched,
+}: {
+  open: boolean;
+  onClose: () => void;
+  /** Fired on an explicit idea choice (unit review FIX 1c): Factory cancels
+   *  any in-flight walk here — the kid's switch wins over a pending arrival. */
+  onSwitched?: () => void;
+}) {
   const game = useGame();
   const { ideas, activeIdea, dispatch } = game;
   if (!open) return null;
   const choose = (ideaIndex: number) => {
+    onSwitched?.();
     dispatch({ type: "SET_ACTIVE_IDEA", ideaIndex });
     onClose();
   };
@@ -284,9 +316,14 @@ export function Factory() {
   const [promoteOpen, setPromoteOpen] = useState(false);
   const [switcherOpen, setSwitcherOpen] = useState(false);
 
-  const onArrived = useCallback(
-    (intent: WalkIntent) => {
-      switch (intent.kind) {
+  // Race-proof arrival (unit review FIX 1a): the floor variants fire their
+  // arrival timer ~550ms after the tap, during which the game state may have
+  // moved (a switch, a remote union, a completed task). The variants therefore
+  // call a STABLE wrapper that reads the CURRENT implementation from a ref
+  // refreshed every render, so arrival always computes against live state —
+  // never the closure captured when the walk started.
+  const onArrivedImpl = (intent: WalkIntent) => {
+    switch (intent.kind) {
         case "openPhaseFloor":
           setFloorView(intent.phase);
           break;
@@ -324,27 +361,52 @@ export function Factory() {
           dispatch({ type: "CREATE_IDEA", ideaId: crypto.randomUUID() });
           break;
       }
-      setWalkTo(null);
-    },
-    [game, dispatch],
-  );
+    setWalkTo(null);
+  };
+  const onArrivedRef = useRef(onArrivedImpl);
+  onArrivedRef.current = onArrivedImpl;
+  const onArrived = useCallback((intent: WalkIntent) => onArrivedRef.current(intent), []);
+
+  // Cancel any in-flight walk (FIX 1b/1c): clearing walkTo makes both floor
+  // variants' [walkTo] effect cleanup run, which clears their arrival timer —
+  // the intent never fires.
+  const cancelWalk = useCallback(() => setWalkTo(null), []);
+
+  // One lifted overlay truth (unit review FIX 5): the reducer-owned overlays
+  // (runner / room / celebration / picker) plus the two Factory-owned ones.
+  // Every overlay here is a modal takeover (full-screen below sm, floating
+  // aria-modal dialog from sm up), so while ANY is open the floor container
+  // goes `inert` and the floating helpers hide.
+  const anyOverlayOpen =
+    Boolean(game.runnerOpen || game.room || game.celebrate || game.pickFor) ||
+    promoteOpen ||
+    switcherOpen;
+  // React 18's types don't know the `inert` attribute yet; apply it through a
+  // spread so the DOM gets the real attribute without a ts-expect-error.
+  const inertProps = (anyOverlayOpen ? { inert: "" } : {}) as React.HTMLAttributes<HTMLDivElement>;
 
   return (
     <main className="flex h-[100dvh] w-full flex-col gap-3 overflow-hidden bg-[hsl(38_46%_95%)] p-3 text-ink sm:gap-4 sm:p-5">
       <Hud />
-      <div className="relative min-h-0 flex-1">
+      <div className="relative min-h-0 flex-1" {...inertProps}>
         <FactoryFloor
           walkTo={walkTo}
           onArrived={onArrived}
           onWalk={setWalkTo}
           floorView={floorView}
-          onBack={() => setFloorView("phases")}
+          onBack={() => {
+            // Back cancels any in-flight walk (FIX 1b): a walk started from
+            // this floor must not arrive onto the floor we just left.
+            cancelWalk();
+            setFloorView("phases");
+          }}
           onOpenSwitcher={() => setSwitcherOpen(true)}
+          overlayOpen={anyOverlayOpen}
         />
-        <NextStepCoach onWalk={setWalkTo} />
+        <NextStepCoach onWalk={setWalkTo} overlayOpen={anyOverlayOpen} />
         {/* Ask-once birth-year card (Unit 3): non-modal, above the breakpoint
             conditional like the coach, so it survives the lg variant swap. */}
-        <GradeAsk />
+        <GradeAsk overlayOpen={anyOverlayOpen} />
       </div>
 
       <StepRunner />
@@ -352,7 +414,11 @@ export function Factory() {
       <RoomDialog />
       <PickerDialog />
       <PromoteBusiness open={promoteOpen} onClose={() => setPromoteOpen(false)} />
-      <SwitcherDialog open={switcherOpen} onClose={() => setSwitcherOpen(false)} />
+      <SwitcherDialog
+        open={switcherOpen}
+        onClose={() => setSwitcherOpen(false)}
+        onSwitched={cancelWalk}
+      />
     </main>
   );
 }

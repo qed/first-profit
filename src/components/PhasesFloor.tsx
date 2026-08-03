@@ -37,9 +37,12 @@ const GRID = "mt-3 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5";
 export function PhasesFloor({
   onWalk,
   onOpenSwitcher,
+  overlayOpen,
 }: {
   onWalk: (intent: WalkIntent) => void;
   onOpenSwitcher: () => void;
+  /** Factory's lifted anyOverlayOpen (unit review FIX 5) — hides the chip. */
+  overlayOpen?: boolean;
 }) {
   const game = useGame();
   const { profile, ideas, activeIdea, isCriterionDone } = game;
@@ -56,7 +59,7 @@ export function PhasesFloor({
       <section>
         <div className="flex flex-wrap items-center justify-between gap-2">
           <SectionTitle>The Path</SectionTitle>
-          <IdeaSwitcherChip onOpen={onOpenSwitcher} />
+          <IdeaSwitcherChip onOpen={onOpenSwitcher} hidden={overlayOpen} />
         </div>
         <div className={GRID}>
           {PHASE_ORDER.map((phaseId: PhaseId) => {

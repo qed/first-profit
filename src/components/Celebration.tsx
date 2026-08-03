@@ -15,7 +15,7 @@
  */
 import { useEffect, useRef } from "react";
 import { useGame } from "../state/GameContext";
-import { CRITERION_SEQUENCE, activeBusinessExists, phaseOfCriterion } from "../state/gameCore";
+import { CRITERION_SEQUENCE, activeBusinessExists, isStepUnlocked, phaseOfCriterion } from "../state/gameCore";
 import { phaseById, stepById } from "../data/path";
 import { useFocusTrap } from "../lib/useFocusTrap";
 
@@ -59,7 +59,21 @@ export function Celebration() {
     nextStep !== undefined &&
     phaseOfCriterion(nextStep.id) === "grow" &&
     !activeBusinessExists(game);
-  const showNextRoom = !terminal && !promoteNext && nextStep !== undefined;
+  // HONEST NEXT-STEP (unit review FIX 3): only promise the next room when the
+  // CELEBRATED idea (the active one — the runner plays the active idea) can
+  // actually proceed into it, business gate included. A second idea that
+  // finishes 3.5 while ANOTHER idea owns the business must not be promised
+  // 4.1 — it gets the honest "waits here" copy below instead.
+  const nextUnlocked =
+    nextStep !== undefined && isStepUnlocked(game, game.activeIdea, nextStep.id);
+  const showNextRoom = !terminal && !promoteNext && nextStep !== undefined && nextUnlocked;
+  const blockedByOtherBusiness =
+    !terminal &&
+    !promoteNext &&
+    nextStep !== undefined &&
+    !nextUnlocked &&
+    phaseOfCriterion(nextStep.id) === "grow" &&
+    activeBusinessExists(game);
 
   const keepGoing = () => dispatch({ type: "DISMISS_CELEBRATION" });
 
@@ -124,6 +138,24 @@ export function Celebration() {
             </p>
             <p className="mt-1.5 font-display text-[17px] font-bold text-[hsl(25_34%_20%)]">
               {nextStep.id} · {nextStep.roomName}
+            </p>
+          </div>
+        ) : null}
+
+        {blockedByOtherBusiness ? (
+          <div
+            className="mt-[18px] rounded-2xl border-2 border-dashed p-3.5 text-left"
+            style={{ borderColor: "hsl(25 34% 20% / .2)", background: "hsl(25 34% 20% / .03)" }}
+          >
+            <p className="font-mono text-[10px] uppercase tracking-[0.08em] text-[hsl(25_20%_38%)]">
+              All of Validate, done
+            </p>
+            <p className="mt-1.5 font-display text-[17px] font-bold text-[hsl(25_34%_20%)]">
+              Your business is a different idea
+            </p>
+            <p className="mt-1 text-[12.5px] leading-[1.5] text-[hsl(25_20%_38%)]">
+              This one waits here. Archive your business first if you want to grow this idea
+              instead.
             </p>
           </div>
         ) : null}
