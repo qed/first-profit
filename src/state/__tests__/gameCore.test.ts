@@ -1,26 +1,33 @@
 import { describe, expect, it } from "vitest";
 import { STEPS, parseTask, stepById } from "../../data/path";
 import {
+  CRITERION_SEQUENCE,
   DOC_VERSION,
   MAX_IDEAS,
-  PLAYABLE_STEPS,
   type Action,
   type GameState,
+  activeBusinessExists,
+  criterionIdsForPhase,
   fromSaveDoc,
   grossSalesSumCents,
   ideasEligibleFor,
   initialState,
   isCriterionDone,
   isIdeaEligibleFor,
+  isPhaseComplete,
+  isPhaseUnlocked,
   isStepUnlocked,
   isTaskDone,
   nextUpFor,
+  phaseProgress,
   reducer,
   salesSumCents,
   sellProgress,
   stepPips,
   taskKey,
   toSaveDoc,
+  totalXp,
+  xpFor,
 } from "../gameCore";
 
 /** Apply a sequence of actions to a starting state. */
@@ -46,6 +53,18 @@ function completeCriterion(state: GameState, ideaIndex: number, stepId: string):
   if (!step) throw new Error(`no step ${stepId}`);
   return step.tasks.reduce(
     (acc, _task, index) => reducer(acc, { type: "COMPLETE_TASK", ideaIndex, stepId, index }),
+    state,
+  );
+}
+
+/** Complete every criterion of a phase, in order, for an idea. */
+function completePhase(
+  state: GameState,
+  ideaIndex: number,
+  phase: Parameters<typeof criterionIdsForPhase>[0],
+): GameState {
+  return criterionIdsForPhase(phase).reduce(
+    (acc, stepId) => completeCriterion(acc, ideaIndex, stepId),
     state,
   );
 }
@@ -150,12 +169,28 @@ describe("celebration takes over from the runner (no dual modal / terminal trap)
     expect(s.runnerIndex).toBe(0);
   });
 
-  it("DISMISS_CELEBRATION on the FINAL criterion leaves the runner closed (back to floor)", () => {
+  it("DISMISS_CELEBRATION after 1.2 rolls onto 1.3 (the sequence continues past the old playable pair)", () => {
     let s = completeCriterion(withOneIdea(), 0, "1.1");
     s = reducer(s, { type: "DISMISS_CELEBRATION" }); // now on 1.2
-    s = completeCriterion(s, 0, "1.2"); // finish the last playable criterion
+    s = completeCriterion(s, 0, "1.2");
     expect(s.celebrate).toBe("1.2");
     expect(s.runnerOpen).toBe(false);
+    // Unit 6: 1.3 is next-up now — the path no longer dead-ends at 1.2.
+    expect(nextUpFor(s, 0)).toBe("1.3");
+    s = reducer(s, { type: "DISMISS_CELEBRATION" });
+    expect(s.celebrate).toBeNull();
+    expect(s.runnerOpen).toBe(true);
+    expect(s.runnerStep).toBe("1.3");
+  });
+
+  it("DISMISS_CELEBRATION at the GATED frontier (3.5 done, no business) leaves the runner closed", () => {
+    let s = withOneIdea();
+    s = completePhase(s, 0, "sell");
+    s = completePhase(s, 0, "build");
+    s = completePhase(s, 0, "validate");
+    expect(s.celebrate).toBe("3.5");
+    expect(s.runnerOpen).toBe(false);
+    // Phase 4 waits on the business seam → no workable next step.
     expect(nextUpFor(s, 0)).toBeNull();
     s = reducer(s, { type: "DISMISS_CELEBRATION" });
     expect(s.celebrate).toBeNull();
@@ -620,9 +655,11 @@ describe("idea eligibility (room click)", () => {
     let s = withOneIdea();
     s = completeCriterion(s, 0, "1.1");
     s = completeCriterion(s, 0, "1.2");
-    // Both playable criteria done -> eligible for neither.
+    // Both criteria done for the only idea -> eligible for neither (the
+    // sequence continues: 1.3 is now the eligible one instead).
     expect(ideasEligibleFor(s, "1.1")).toEqual([]);
     expect(ideasEligibleFor(s, "1.2")).toEqual([]);
+    expect(ideasEligibleFor(s, "1.3")).toEqual([0]);
   });
 
   it("1.2 is only eligible once 1.1 is complete for that idea", () => {
@@ -635,7 +672,7 @@ describe("idea eligibility (room click)", () => {
 
 describe("@artifact auto-complete convention", () => {
   it("no 1.1/1.2 task is @artifact-prefixed, so plain done drives completion", () => {
-    for (const stepId of PLAYABLE_STEPS) {
+    for (const stepId of ["1.1", "1.2"]) {
       const step = getStep(stepId);
       for (const raw of step.tasks) {
         expect(parseTask(raw).auto).toBeUndefined();
@@ -704,13 +741,23 @@ describe("OPEN_RUNNER", () => {
     expect(s.runnerIndex).toBe(0);
   });
 
-  it("falls back to the first playable criterion when all criteria are done", () => {
+  it("keeps walking the sequence: after 1.1 + 1.2 the fallback is 1.3, not the old dead end", () => {
     let s = withOneIdea();
     s = completeCriterion(s, 0, "1.1");
     s = completeCriterion(s, 0, "1.2");
+    expect(nextUpFor(s, 0)).toBe("1.3");
+    s = reducer(s, { type: "OPEN_RUNNER" });
+    expect(s.runnerStep).toBe("1.3");
+  });
+
+  it("falls back to the sequence's FIRST criterion when nothing is workable (gated at the business seam)", () => {
+    let s = withOneIdea();
+    s = completePhase(s, 0, "sell");
+    s = completePhase(s, 0, "build");
+    s = completePhase(s, 0, "validate");
     expect(nextUpFor(s, 0)).toBeNull();
     s = reducer(s, { type: "OPEN_RUNNER" });
-    expect(s.runnerStep).toBe(PLAYABLE_STEPS[0]);
+    expect(s.runnerStep).toBe(CRITERION_SEQUENCE[0]);
   });
 });
 
@@ -820,12 +867,17 @@ describe("selectors: pips and progress", () => {
     expect(pips[1]).toBe(false);
   });
 
-  it("sellProgress counts across 1.1 + 1.2 using real path.ts task counts", () => {
-    const total = getStep("1.1").tasks.length + getStep("1.2").tasks.length;
+  it("sellProgress counts across the WHOLE Sell phase using real content task counts", () => {
+    const total = criterionIdsForPhase("sell").reduce(
+      (sum, id) => sum + getStep(id).tasks.length,
+      0,
+    );
     let s = withOneIdea();
     expect(sellProgress(s, 0)).toEqual({ done: 0, total });
     s = completeCriterion(s, 0, "1.1");
     expect(sellProgress(s, 0)).toEqual({ done: getStep("1.1").tasks.length, total });
+    // The alias and the generic selector agree.
+    expect(phaseProgress(s, 0, "sell")).toEqual(sellProgress(s, 0));
   });
 });
 
@@ -1284,7 +1336,7 @@ describe("path.ts sanity (handoff copy rules)", () => {
   });
 
   it("1.1/1.2 copy carries no em dashes", () => {
-    for (const stepId of PLAYABLE_STEPS) {
+    for (const stepId of ["1.1", "1.2"]) {
       const step = getStep(stepId);
       const copy = [step.title, step.brief, step.doneWhen, step.coach, ...step.tasks].join(" ");
       expect(copy).not.toContain("—");
@@ -1429,5 +1481,182 @@ describe("doneAt completion timestamps (additive-optional, NO DOC_VERSION bump)"
     });
     const reset = reducer(s, { type: "RESET_SESSION" });
     expect(reset.ideas).toEqual([]);
+  });
+});
+
+describe("generic phase engine (Unit 6): full 25-criterion sequence", () => {
+  it("exposes the full ordered sequence from the generated content", () => {
+    expect(CRITERION_SEQUENCE).toHaveLength(25);
+    expect(CRITERION_SEQUENCE[0]).toBe("1.1");
+    expect(CRITERION_SEQUENCE[24]).toBe("5.5");
+    expect(criterionIdsForPhase("sell")).toEqual(["1.1", "1.2", "1.3", "1.4", "1.5"]);
+    expect(criterionIdsForPhase("scale")).toEqual(["5.1", "5.2", "5.3", "5.4", "5.5"]);
+  });
+
+  it("honors VARIABLE task counts from the content (2.3 has six tasks, 3.4 has four)", () => {
+    expect(getStep("2.3").tasks).toHaveLength(6);
+    expect(getStep("3.4").tasks).toHaveLength(4);
+    // stepPips follows the content's count, never a x5 assumption.
+    const s = withOneIdea();
+    expect(stepPips(s, 0, "2.3")).toHaveLength(6);
+    expect(stepPips(s, 0, "3.4")).toHaveLength(4);
+  });
+
+  it("2.3 only completes on its SIXTH task (five done is not enough)", () => {
+    let s = withOneIdea();
+    for (let i = 0; i < 5; i++) {
+      s = reducer(s, { type: "COMPLETE_TASK", ideaIndex: 0, stepId: "2.3", index: i });
+    }
+    expect(isCriterionDone(s, 0, "2.3")).toBe(false);
+    s = reducer(s, { type: "COMPLETE_TASK", ideaIndex: 0, stepId: "2.3", index: 5 });
+    expect(isCriterionDone(s, 0, "2.3")).toBe(true);
+  });
+
+  it("completing 1.5 (finishing phase 1) for idea A unlocks 2.1 for A ONLY", () => {
+    let s = apply(
+      initialState(),
+      { type: "CREATE_IDEA" },
+      { type: "CLOSE_RUNNER" },
+      { type: "CREATE_IDEA" },
+      { type: "CLOSE_RUNNER" },
+    );
+    s = completePhase(s, 0, "sell");
+    expect(isPhaseComplete(s, 0, "sell")).toBe(true);
+    expect(isPhaseUnlocked(s, 0, "build")).toBe(true);
+    expect(isStepUnlocked(s, 0, "2.1")).toBe(true);
+    expect(nextUpFor(s, 0)).toBe("2.1");
+    // Idea B is still at its own frontier: 2.1 locked, next-up 1.1.
+    expect(isPhaseUnlocked(s, 1, "build")).toBe(false);
+    expect(isStepUnlocked(s, 1, "2.1")).toBe(false);
+    expect(nextUpFor(s, 1)).toBe("1.1");
+  });
+
+  it("nextUpFor walks the sequence 1.1 -> 3.5 in order per idea with no dead end", () => {
+    let s = withOneIdea();
+    const playable = CRITERION_SEQUENCE.slice(0, 15); // phases 1-3
+    for (const stepId of playable) {
+      expect(nextUpFor(s, 0)).toBe(stepId);
+      expect(isStepUnlocked(s, 0, stepId)).toBe(true);
+      s = completeCriterion(s, 0, stepId);
+    }
+    // 3.5 done: phase 4 waits on the business seam, so next-up is null.
+    expect(nextUpFor(s, 0)).toBeNull();
+  });
+
+  it("phase 4 stays LOCKED without the business seam even with 3.5 complete", () => {
+    let s = withOneIdea();
+    s = completePhase(s, 0, "sell");
+    s = completePhase(s, 0, "build");
+    s = completePhase(s, 0, "validate");
+    expect(isPhaseComplete(s, 0, "validate")).toBe(true);
+    // Nothing can set the seam yet (Unit 7 adds the business model).
+    expect(activeBusinessExists(s)).toBe(false);
+    expect(isPhaseUnlocked(s, 0, "grow")).toBe(false);
+    expect(isPhaseUnlocked(s, 0, "scale")).toBe(false);
+    expect(isStepUnlocked(s, 0, "4.1")).toBe(false);
+    expect(isIdeaEligibleFor(s, 0, "4.1")).toBe(false);
+    expect(ideasEligibleFor(s, "4.1")).toEqual([]);
+  });
+
+  it("a criterion deeper in a LOCKED phase is also locked (5.3, 4.2)", () => {
+    let s = withOneIdea();
+    s = completePhase(s, 0, "sell");
+    s = completePhase(s, 0, "build");
+    s = completePhase(s, 0, "validate");
+    expect(isStepUnlocked(s, 0, "4.2")).toBe(false);
+    expect(isStepUnlocked(s, 0, "5.3")).toBe(false);
+  });
+
+  it("criteria unlock linearly WITHIN phase 2: 2.2 needs 2.1 done, not just the phase", () => {
+    let s = withOneIdea();
+    s = completePhase(s, 0, "sell");
+    expect(isStepUnlocked(s, 0, "2.1")).toBe(true);
+    expect(isStepUnlocked(s, 0, "2.2")).toBe(false);
+    s = completeCriterion(s, 0, "2.1");
+    expect(isStepUnlocked(s, 0, "2.2")).toBe(true);
+    expect(nextUpFor(s, 0)).toBe("2.2");
+  });
+
+  it("the real-sale auto-complete still targets 1.2's LAST task via the hooks id (dual-write intact)", () => {
+    let s = withOneIdea();
+    s = completeCriterion(s, 0, "1.1");
+    s = reducer(s, { type: "DISMISS_CELEBRATION" });
+    for (let i = 0; i < LAST_1_2_INDEX; i++) {
+      s = reducer(s, { type: "COMPLETE_TASK", ideaIndex: 0, stepId: "1.2", index: i });
+    }
+    s = reducer(s, {
+      type: "ADD_LEDGER",
+      id: "sale-hooked",
+      kind: "sale",
+      payer: "Nadia",
+      amountCents: 1000,
+      createdAt: "2026-08-03T00:00:00.000Z",
+    });
+    // Positional (legacy) AND stable-id (Unit 5 dual-write) shapes both land.
+    expect(isTaskDone(s, 0, "1.2", LAST_1_2_INDEX)).toBe(true);
+    expect(s.ideas[0].done[taskKey("1.2", LAST_1_2_INDEX)]).toBe(true);
+    expect(s.ideas[0].doneByTask?.["1.2.5"]).toBe(true);
+    expect(isCriterionDone(s, 0, "1.2")).toBe(true);
+    expect(s.celebrate).toBe("1.2");
+  });
+
+  it("XP derives from completed criteria across the sequence (STEP_META values)", () => {
+    let s = withOneIdea();
+    expect(xpFor(s, 0)).toBe(0);
+    s = completeCriterion(s, 0, "1.1");
+    expect(xpFor(s, 0)).toBe(60);
+    s = completePhase(s, 0, "sell");
+    // Phase 1 total: 60 + 120 + 70 + 80 + 100.
+    expect(xpFor(s, 0)).toBe(430);
+    s = completeCriterion(s, 0, "2.1");
+    expect(xpFor(s, 0)).toBe(430 + 140);
+  });
+
+  it("totalXp sums across ideas", () => {
+    let s = apply(
+      initialState(),
+      { type: "CREATE_IDEA" },
+      { type: "CLOSE_RUNNER" },
+      { type: "CREATE_IDEA" },
+      { type: "CLOSE_RUNNER" },
+    );
+    s = completeCriterion(s, 0, "1.1");
+    s = completeCriterion(s, 1, "1.1");
+    s = completeCriterion(s, 1, "1.2");
+    expect(xpFor(s, 0)).toBe(60);
+    expect(xpFor(s, 1)).toBe(180);
+    expect(totalXp(s)).toBe(240);
+  });
+
+  it("phaseProgress is scoped to one phase with content-driven totals", () => {
+    let s = withOneIdea();
+    expect(phaseProgress(s, 0, "sell").total).toBe(25);
+    expect(phaseProgress(s, 0, "build").total).toBe(26);
+    expect(phaseProgress(s, 0, "validate").total).toBe(24);
+    s = completeCriterion(s, 0, "1.1");
+    expect(phaseProgress(s, 0, "sell")).toEqual({ done: 5, total: 25 });
+    expect(phaseProgress(s, 0, "build")).toEqual({ done: 0, total: 26 });
+  });
+
+  it("a SCRIPTED fresh save can be driven 1.1 -> 3.5 with no dead end (verification gate)", () => {
+    // Drive the reducer exactly as the UI would: open the runner via next-up,
+    // complete every task, dismiss every celebration, repeat to 3.5.
+    let s = withOneIdea();
+    let guard = 0;
+    for (;;) {
+      const stepId = nextUpFor(s, 0);
+      if (!stepId) break;
+      if (++guard > 25) throw new Error("engine loop did not terminate");
+      s = reducer(s, { type: "OPEN_RUNNER" });
+      expect(s.runnerStep).toBe(stepId);
+      s = completeCriterion(s, 0, stepId);
+      expect(s.celebrate).toBe(stepId);
+      s = reducer(s, { type: "DISMISS_CELEBRATION" });
+    }
+    // The walk ends exactly at the business gate with phases 1-3 complete.
+    expect(isPhaseComplete(s, 0, "sell")).toBe(true);
+    expect(isPhaseComplete(s, 0, "build")).toBe(true);
+    expect(isPhaseComplete(s, 0, "validate")).toBe(true);
+    expect(guard).toBe(15);
   });
 });

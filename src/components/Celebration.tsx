@@ -15,6 +15,7 @@
  */
 import { useEffect, useRef } from "react";
 import { useGame } from "../state/GameContext";
+import { CRITERION_SEQUENCE } from "../state/gameCore";
 import { stepById } from "../data/path";
 import { useFocusTrap } from "../lib/useFocusTrap";
 
@@ -47,9 +48,12 @@ export function Celebration() {
   if (!celebrate) return null;
 
   const step = stepById(celebrate);
-  const critNum = Number(celebrate.split(".")[1]) || 0;
-  const nextId = `1.${critNum + 1}`;
-  const nextRoom = SELL_ROOMS[nextId];
+  // Sequence-driven next criterion (Unit 6): safe across phase boundaries —
+  // at 1.5 the next id is "2.1", which has no SELL_ROOMS entry, so the "New on
+  // The Path" block simply hides (Unit 8 generalizes it per phase).
+  const seqPos = CRITERION_SEQUENCE.indexOf(celebrate);
+  const nextId = seqPos >= 0 ? CRITERION_SEQUENCE[seqPos + 1] : undefined;
+  const nextRoom = nextId ? SELL_ROOMS[nextId] : undefined;
 
   const keepGoing = () => dispatch({ type: "DISMISS_CELEBRATION" });
 

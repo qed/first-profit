@@ -8,7 +8,7 @@
  * Dollars are whole-dollar (cents / 100, floored) mono numerals.
  */
 import { useGame } from "../state/GameContext";
-import { PLAYABLE_STEPS } from "../state/gameCore";
+import { criterionIdsForPhase } from "../state/gameCore";
 import type { SyncStatus } from "../lib/sync";
 
 function LogoMark() {
@@ -47,7 +47,9 @@ function SaveIndicator({ status }: { status: SyncStatus }) {
 
 export function Hud() {
   const { profile, activeIdea, isCriterionDone, grossSalesSumCents, salesSumCents, syncStatus } = useGame();
-  const phaseDone = PLAYABLE_STEPS.filter((id) => isCriterionDone(activeIdea, id)).length;
+  // All five Sell criteria count now (Unit 6 engine); the chip stays Sell-scoped
+  // until Unit 8 makes the HUD phase-aware.
+  const phaseDone = criterionIdsForPhase("sell").filter((id) => isCriterionDone(activeIdea, id)).length;
   const founder = profile.firstName || profile.handle || "Founder";
 
   return (

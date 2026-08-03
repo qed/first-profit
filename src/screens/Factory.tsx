@@ -181,6 +181,10 @@ function NextStepCoach({ onWalk }: { onWalk: (intent: WalkIntent) => void }) {
   if (game.runnerOpen || game.room || game.celebrate || game.pickFor) return null;
   const target = nextCoachTarget(game);
   if (!target) return null;
+  // The promotion seam (Unit 6): an idea validated through phase 3 with no
+  // business promoted yet. Unit 8 renders the promotion CTA; until then the
+  // coach hides rather than pointing at the locked Grow phase.
+  if (target.kind === "promote") return null;
 
   const name =
     target.kind === "create"

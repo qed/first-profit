@@ -11,7 +11,7 @@
  * breakpoint (docs/solutions/ui-bugs/breakpoint-crossing-drops-navigation).
  */
 import { useGame } from "../state/GameContext";
-import { MAX_IDEAS, PLAYABLE_STEPS } from "../state/gameCore";
+import { MAX_IDEAS, criterionIdsForPhase } from "../state/gameCore";
 import { ideaProgressLabel, ideaSummaryName } from "../state/floorSelectors";
 import { CompanyCard, DashedSlot, PhaseCard, ProductCard, ProductEmpty, SectionTitle } from "./PodCardContent";
 import type { WalkIntent } from "./FactoryFloor";
@@ -23,8 +23,11 @@ export function PhasesFloor({ onWalk }: { onWalk: (intent: WalkIntent) => void }
   const { profile, ideas, activeIdea, isCriterionDone } = game;
   const handle = profile.handle || "you";
 
-  const phaseDone = PLAYABLE_STEPS.filter((id) => isCriterionDone(activeIdea, id)).length;
-  const phasePips = [0, 1, 2, 3, 4].map((k) => k < phaseDone);
+  // Phase-1 progress over the full five Sell criteria (Unit 6 engine). The
+  // phase 2-5 cards stay visually locked until Unit 8 generalizes this floor.
+  const sellIds = criterionIdsForPhase("sell");
+  const phaseDone = sellIds.filter((id) => isCriterionDone(activeIdea, id)).length;
+  const phasePips = sellIds.map((_, k) => k < phaseDone);
 
   return (
     <div className="flex flex-col gap-5">

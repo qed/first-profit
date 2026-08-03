@@ -9,7 +9,8 @@
  * rewiring is Unit 5's job. The existing app keeps compiling; this module only
  * adds new code.
  */
-import { stepById, type RoomId } from "../data/path";
+import { STEPS, stepById, type PhaseId, type RoomId } from "../data/path";
+import { SALE_AUTO_COMPLETE_TASK_ID } from "../data/pathHooks";
 import { PROVIDER_IDS, computeFee, providerById, type ProviderId } from "../data/providers";
 import {
   LEGACY_KEY_REMAP,
@@ -22,14 +23,49 @@ import {
 /** Schema version stored inside every serialized save doc. Bump on shape change. */
 export const DOC_VERSION = 1;
 
-/** The criteria that are actually playable in Slice A. */
-export const PLAYABLE_STEPS = ["1.1", "1.2"] as const;
+/**
+ * The full ordered criterion sequence (25 ids, "1.1".."5.5"), derived from the
+ * generated content via path.ts's assembly (Unit 6). This RETIRES the old
+ * PLAYABLE_STEPS constant: unlock/progress/next-up logic now walks this
+ * sequence, phase-aware, per idea. Task counts per criterion are VARIABLE
+ * (2.3 has six, 3.4 has four) — always read `step.tasks.length`, never ×5.
+ */
+export const CRITERION_SEQUENCE: readonly string[] = STEPS.map((s) => s.id);
+
+/** Phases in play order (indices match PHASES' 1-based `index` - 1). */
+export const PHASE_ORDER: readonly PhaseId[] = ["sell", "build", "validate", "grow", "scale"];
+
+const CRITERIA_BY_PHASE: ReadonlyMap<PhaseId, readonly string[]> = new Map(
+  PHASE_ORDER.map((phase) => [phase, STEPS.filter((s) => s.phase === phase).map((s) => s.id)]),
+);
+
+const PHASE_BY_CRITERION: ReadonlyMap<string, PhaseId> = new Map(
+  STEPS.map((s) => [s.id, s.phase]),
+);
+
+/** The ordered criterion ids of one phase (e.g. 'sell' → ["1.1".."1.5"]). */
+export function criterionIdsForPhase(phase: PhaseId): readonly string[] {
+  return CRITERIA_BY_PHASE.get(phase) ?? [];
+}
+
+/** The phase a criterion belongs to, or undefined for an unknown id. */
+export function phaseOfCriterion(stepId: string): PhaseId | undefined {
+  return PHASE_BY_CRITERION.get(stepId);
+}
 
 /** Maximum parallel product ideas per the handoff multi-idea model. */
 export const MAX_IDEAS = 5;
 
 /** taskKey shape mirrors the existing GameContext convention: `${stepId}#${index}`. */
 export const taskKey = (stepId: string, index: number): string => `${stepId}#${index}`;
+
+/**
+ * The criterion the real-sale auto-complete lives in, derived from the hooks
+ * registry's stable task id ("1.2.5" → "1.2"). path.ts's assembly asserts the
+ * target id exists AND is the last task of this criterion, so ADD_LEDGER can
+ * keep addressing it positionally as `tasks.length - 1`.
+ */
+const SALE_STEP_ID = SALE_AUTO_COMPLETE_TASK_ID.split(".").slice(0, 2).join(".");
 
 /**
  * Top-level stage machine. `signup` is the parent-facing Start Building flow
@@ -439,20 +475,74 @@ export function stepPips(state: GameState, ideaIndex: number, stepId: string): b
   return step.tasks.map((_, i) => isTaskDone(state, ideaIndex, stepId, i));
 }
 
-/** The first incomplete playable criterion for an idea, or null if all done. */
-export function nextUpFor(state: GameState, ideaIndex: number): string | null {
-  if (!hasIdea(state, ideaIndex)) return null;
-  for (const stepId of PLAYABLE_STEPS) {
+/**
+ * The Grow/Scale business seam (Unit 7 wires the real check): phases 4-5
+ * belong to the promoted BUSINESS, not an idea, so they gate on an active
+ * business existing. NOTHING can make this true yet — the business model
+ * arrives in Unit 7 — so phases 4-5 stay locked in practice and the app is
+ * shippable after this unit alone. Unit 7 replaces the body with a read of
+ * the state's business list (single active, archivable).
+ */
+export function activeBusinessExists(_state: GameState): boolean {
+  return false;
+}
+
+/** Whether every criterion of a phase is complete for an idea. */
+export function isPhaseComplete(state: GameState, ideaIndex: number, phase: PhaseId): boolean {
+  const ids = criterionIdsForPhase(phase);
+  return ids.length > 0 && ids.every((id) => isCriterionDone(state, ideaIndex, id));
+}
+
+/**
+ * Phase unlock per idea (Unit 6 rules):
+ *  - phase 1 (sell) is open for any existing idea;
+ *  - phases 2 and 3 unlock for an idea when THAT idea completed every
+ *    criterion of the previous phase;
+ *  - phases 4-5 additionally gate on the active business (the Unit 7 seam
+ *    above), so they are locked for everyone until promotion exists.
+ */
+export function isPhaseUnlocked(state: GameState, ideaIndex: number, phase: PhaseId): boolean {
+  if (!hasIdea(state, ideaIndex)) return false;
+  const pos = PHASE_ORDER.indexOf(phase);
+  if (pos < 0) return false;
+  if ((phase === "grow" || phase === "scale") && !activeBusinessExists(state)) return false;
+  if (pos === 0) return true;
+  return isPhaseComplete(state, ideaIndex, PHASE_ORDER[pos - 1]);
+}
+
+/**
+ * The first incomplete criterion of the full sequence for an idea — the idea's
+ * frontier — or null when every criterion is done. Pure position, no locking.
+ */
+function frontierFor(state: GameState, ideaIndex: number): string | null {
+  for (const stepId of CRITERION_SEQUENCE) {
     if (!isCriterionDone(state, ideaIndex, stepId)) return stepId;
   }
   return null;
 }
 
-/** Per-idea Sell progress across the playable criteria (task counts from path.ts). */
-export function sellProgress(state: GameState, ideaIndex: number): { done: number; total: number } {
+/**
+ * The next criterion an idea can actually WORK: its frontier when that
+ * frontier's phase is unlocked, else null (the frontier sits behind the
+ * business gate — e.g. 4.1 after 3.5 with no business promoted yet, which is
+ * the promotion seam floorSelectors surfaces). Null also once all 25 are done.
+ */
+export function nextUpFor(state: GameState, ideaIndex: number): string | null {
+  if (!hasIdea(state, ideaIndex)) return null;
+  const frontier = frontierFor(state, ideaIndex);
+  if (!frontier) return null;
+  return isStepUnlocked(state, ideaIndex, frontier) ? frontier : null;
+}
+
+/** Per-idea task progress across ONE phase (task counts from the content). */
+export function phaseProgress(
+  state: GameState,
+  ideaIndex: number,
+  phase: PhaseId,
+): { done: number; total: number } {
   let done = 0;
   let total = 0;
-  for (const stepId of PLAYABLE_STEPS) {
+  for (const stepId of criterionIdsForPhase(phase)) {
     const step = stepById(stepId);
     if (!step) continue;
     total += step.tasks.length;
@@ -462,15 +552,46 @@ export function sellProgress(state: GameState, ideaIndex: number): { done: numbe
 }
 
 /**
- * Sequential room unlock: whether the criterion's room is reachable for an idea
- * (the previous criterion is complete). The first playable criterion is always
- * unlocked. Distinct from eligibility, which also requires this one NOT done.
+ * Sell-phase progress — kept as a thin phase-1 alias so existing consumers
+ * (GameContext's bound selector) keep their shape. New code should call
+ * phaseProgress directly.
+ */
+export function sellProgress(state: GameState, ideaIndex: number): { done: number; total: number } {
+  return phaseProgress(state, ideaIndex, "sell");
+}
+
+/**
+ * Total XP an idea has earned: the sum of `xp` (path.ts STEP_META) over every
+ * criterion the idea has completed across the full sequence.
+ */
+export function xpFor(state: GameState, ideaIndex: number): number {
+  if (!hasIdea(state, ideaIndex)) return 0;
+  return STEPS.reduce(
+    (sum, step) => (isCriterionDone(state, ideaIndex, step.id) ? sum + step.xp : sum),
+    0,
+  );
+}
+
+/** Total XP across every idea (the account's XP). */
+export function totalXp(state: GameState): number {
+  return state.ideas.reduce((sum, _idea, i) => sum + xpFor(state, i), 0);
+}
+
+/**
+ * Sequential criterion unlock, phase-aware (Unit 6): the criterion's PHASE must
+ * be unlocked for the idea (see isPhaseUnlocked — phases 4-5 gate on the
+ * business seam), and criteria unlock linearly WITHIN the phase (the previous
+ * criterion complete; the phase's first criterion rides the phase gate alone).
+ * Distinct from eligibility, which also requires this one NOT done.
  */
 export function isStepUnlocked(state: GameState, ideaIndex: number, stepId: string): boolean {
-  const pos = (PLAYABLE_STEPS as readonly string[]).indexOf(stepId);
-  if (pos < 0 || !hasIdea(state, ideaIndex)) return false;
-  if (pos === 0) return true;
-  return isCriterionDone(state, ideaIndex, PLAYABLE_STEPS[pos - 1]);
+  const phase = PHASE_BY_CRITERION.get(stepId);
+  if (!phase || !hasIdea(state, ideaIndex)) return false;
+  if (!isPhaseUnlocked(state, ideaIndex, phase)) return false;
+  const ids = criterionIdsForPhase(phase);
+  const pos = ids.indexOf(stepId);
+  if (pos <= 0) return pos === 0;
+  return isCriterionDone(state, ideaIndex, ids[pos - 1]);
 }
 
 /**
@@ -645,7 +766,7 @@ export function reducer(state: GameState, action: Action): GameState {
         ideas,
         activeIdea: ideas.length - 1,
         runnerOpen: true,
-        runnerStep: PLAYABLE_STEPS[0],
+        runnerStep: CRITERION_SEQUENCE[0],
         runnerIndex: 0,
         pickFor: null,
       };
@@ -670,7 +791,7 @@ export function reducer(state: GameState, action: Action): GameState {
       return markTaskDone(state, action.ideaIndex, action.stepId, action.index, action.at);
 
     case "OPEN_RUNNER": {
-      const stepId = action.stepId ?? nextUpFor(state, state.activeIdea) ?? PLAYABLE_STEPS[0];
+      const stepId = action.stepId ?? nextUpFor(state, state.activeIdea) ?? CRITERION_SEQUENCE[0];
       return {
         ...state,
         runnerOpen: true,
@@ -753,18 +874,23 @@ export function reducer(state: GameState, action: Action): GameState {
       };
       let next: GameState = { ...state, ledger: [...state.ledger, entry] };
       if (action.kind === "sale" && !action.mock) {
-        // A REAL logged sale auto-completes the LAST task of 1.2 for the active
-        // idea, but only when 1.2 is unlocked for it (1.1 complete). A stray sale
-        // event before then must not light 1.2's final pip while earlier pips are
-        // dark. The `mock` opt-out lets the cosmetic Checkout Booth overlay log a
-        // ledger/HUD row (preserving pre-Unit-3 behavior) WITHOUT completing the
-        // real first sale or firing the first-sale celebration; the real sale
-        // path (Unit 5 Sales Room / booth log-a-sale) omits `mock` and completes.
-        const saleStep = stepById("1.2");
+        // A REAL logged sale auto-completes the sale target task — addressed by
+        // STABLE ID through the hooks registry (SALE_AUTO_COMPLETE_TASK_ID,
+        // "1.2.5"; path.ts's assembly asserts it is the LAST task of its
+        // criterion, so `tasks.length - 1` below is that exact task and the
+        // dual-write lands both `1.2#4` and doneByTask["1.2.5"]) — for the
+        // active idea, but only when its criterion is unlocked for it (1.1
+        // complete). A stray sale event before then must not light the final
+        // pip while earlier pips are dark. The `mock` opt-out lets the cosmetic
+        // Checkout Booth overlay log a ledger/HUD row (preserving pre-Unit-3
+        // behavior) WITHOUT completing the real first sale or firing the
+        // first-sale celebration; the real sale path (Sales Room / booth
+        // log-a-sale) omits `mock` and completes.
+        const saleStep = stepById(SALE_STEP_ID);
         if (
           saleStep &&
           hasIdea(next, next.activeIdea) &&
-          isStepUnlocked(next, next.activeIdea, "1.2")
+          isStepUnlocked(next, next.activeIdea, SALE_STEP_ID)
         ) {
           // Stamp the auto-completion from the row's caller-stamped createdAt
           // (the module stays Date.now()-free); an unparseable timestamp just
@@ -773,7 +899,7 @@ export function reducer(state: GameState, action: Action): GameState {
           next = markTaskDone(
             next,
             next.activeIdea,
-            "1.2",
+            SALE_STEP_ID,
             saleStep.tasks.length - 1,
             Number.isFinite(at) && at >= 0 ? at : undefined,
           );
