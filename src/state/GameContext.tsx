@@ -55,7 +55,7 @@ import {
   type PublishSiteResult,
 } from "../lib/auth";
 import { bandForFeedback, displayBand, gradeFromBirthYear, type Band } from "../lib/band";
-import { wipeAllForUser, wipeAllFpKeys, getLastUserId, setLastUserId } from "../lib/draftCache";
+import { getDraft, setDraft, wipeAllForUser, wipeAllFpKeys, getLastUserId, setLastUserId } from "../lib/draftCache";
 import {
   resolveProfileId,
   resetProfileIdCache,
@@ -79,6 +79,11 @@ import {
 
 /** ~45 minutes of no interaction triggers an idle logout. */
 const IDLE_TIMEOUT_MS = 45 * 60 * 1000;
+
+/** Draft-cache name for the login roster patch (firstName/handle/grade), so a
+ *  restored session's hydrate can re-adopt it (login is otherwise its only
+ *  writer and the profile never rides the save doc). */
+const PROFILE_CACHE_DRAFT = "profileCache";
 
 /**
  * The honest fate of a "Stuck? Tell us" submission, for the StuckBox UI:
@@ -455,6 +460,23 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
       // as `unknown`), and the generation guard inside discards a response
       // that outlives this session.
       void refreshSiteStatus();
+      // Profile restore (the roster patch is otherwise login-only, so a page
+      // reload with a RESTORED session used to degrade the founder chip and
+      // avatar label to "Founder"): re-adopt the account-scoped cache written
+      // at login. fp:-prefixed, so a different child's login wipes it; a
+      // roster rename stays stale only until that child's next real login.
+      const cachedProfile = getDraft<{ firstName?: unknown; handle?: unknown; grade?: unknown }>(
+        userId,
+        PROFILE_CACHE_DRAFT,
+      );
+      if (cachedProfile && typeof cachedProfile === "object") {
+        const firstName = typeof cachedProfile.firstName === "string" ? cachedProfile.firstName : "";
+        const handle = typeof cachedProfile.handle === "string" ? cachedProfile.handle : "";
+        const grade = typeof cachedProfile.grade === "number" ? cachedProfile.grade : null;
+        if (firstName || handle) {
+          dispatch({ type: "SET_PROFILE", patch: { firstName, handle, grade } });
+        }
+      }
       try {
         const profileId = await resolveProfileId();
         if (!profileId) {
@@ -611,6 +633,16 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
           // card never shows; null arms the ask.
           patch: { firstName: profile.firstName, handle: profile.handle, grade: result.grade ?? null },
         });
+        // Cache the roster patch (account-scoped, fp:-prefixed) so a RESTORED
+        // session's hydrate can re-adopt it — without this, a page reload
+        // degrades the founder chip/avatar label to "Founder".
+        if (userId) {
+          setDraft(userId, PROFILE_CACHE_DRAFT, {
+            firstName: profile.firstName,
+            handle: profile.handle,
+            grade: result.grade ?? null,
+          });
+        }
 
         // Resolve the profile (RLS "own row"), load the save, HYDRATE or route to
         // onboard, and start the sync engine. Same-user re-login restores the

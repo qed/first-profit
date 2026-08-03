@@ -42,12 +42,17 @@ const draftMock = {
   wipeAllFpKeys: vi.fn(),
   getLastUserId: vi.fn(),
   setLastUserId: vi.fn(),
+  // Profile cache (login writes, restored-session hydrate reads) — inert here.
+  getDraft: vi.fn(() => undefined),
+  setDraft: vi.fn(() => true),
 };
 vi.mock("../../lib/draftCache", () => ({
   wipeAllForUser: (...a: unknown[]) => draftMock.wipeAllForUser(...a),
   wipeAllFpKeys: (...a: unknown[]) => draftMock.wipeAllFpKeys(...a),
   getLastUserId: (...a: unknown[]) => draftMock.getLastUserId(...a),
   setLastUserId: (...a: unknown[]) => draftMock.setLastUserId(...a),
+  getDraft: () => draftMock.getDraft(),
+  setDraft: () => draftMock.setDraft(),
 }));
 
 interface FakeEngine {
