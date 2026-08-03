@@ -20,13 +20,14 @@
  */
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useGame } from "../state/GameContext";
-import { firstIncompleteTaskIndex, ideaOneLiner, nextCoachTarget, roomEntryFor } from "../state/floorSelectors";
+import { firstIncompleteTaskIndex, ideaOneLiner, ideaProgressLabel, ideaSummaryName, nextCoachTarget, roomEntryFor } from "../state/floorSelectors";
 import { stepById, type RoomId } from "../data/path";
 import { FactoryFloor, type FloorView, type WalkIntent } from "../components/FactoryFloor";
 import { Hud } from "../components/Hud";
 import { StepRunner } from "../components/StepRunner";
 import { Celebration } from "../components/Celebration";
 import { GradeAsk } from "../components/GradeAsk";
+import { PromoteBusiness } from "../components/PromoteBusiness";
 import { useFocusTrap } from "../lib/useFocusTrap";
 import { YourSite } from "../components/rooms/YourSite";
 import { CheckoutBooth } from "../components/rooms/CheckoutBooth";
@@ -170,28 +171,36 @@ function PickerDialog() {
 
 /**
  * The bottom-docked Next Step coach: one green button that walks the founder to
- * whatever comes next (first idea → the Idea Room; otherwise the room of the next
- * incomplete criterion). Routes through onWalk so the walk animation and the
- * breakpoint-swap survival contract apply exactly as for a card tap. Hidden while
- * any overlay is open (it would sit behind the scrim but still catch tab focus)
- * and once the playable criteria are all done.
+ * whatever comes next (first idea → the Idea Room; the room of the next
+ * incomplete criterion — any phase, for the active idea or the promoted
+ * business; or the promotion screen when an idea finished Validate and no
+ * business exists). Routes through onWalk so the walk animation and the
+ * breakpoint-swap survival contract apply exactly as for a card tap. Hidden
+ * while any overlay is open (it would sit behind the scrim but still catch tab
+ * focus) and once the whole path is done.
+ *
+ * Exported for the component test suite; only Factory mounts it.
  */
-function NextStepCoach({ onWalk }: { onWalk: (intent: WalkIntent) => void }) {
+export function NextStepCoach({ onWalk }: { onWalk: (intent: WalkIntent) => void }) {
   const game = useGame();
   if (game.runnerOpen || game.room || game.celebrate || game.pickFor) return null;
   const target = nextCoachTarget(game);
   if (!target) return null;
-  // The promotion seam (Unit 6): an idea validated through phase 3 with no
-  // business promoted yet. Unit 8 renders the promotion CTA; until then the
-  // coach hides rather than pointing at the locked Grow phase.
-  if (target.kind === "promote") return null;
 
-  const name =
-    target.kind === "create"
-      ? ROOM_META.idea?.name ?? "The Idea Room"
-      : ROOM_META[target.room]?.name ?? stepById(target.stepId)?.title ?? "your next room";
+  // The promotion seam (Unit 8 Tier C2): the CTA opens the PromoteBusiness
+  // screen via the same walk/intent channel as every other coach action.
+  const label =
+    target.kind === "promote"
+      ? "Make it your business!"
+      : target.kind === "create"
+        ? `Take me to ${ROOM_META.idea?.name ?? "The Idea Room"}`
+        : `Take me to ${stepById(target.stepId)?.roomName ?? "your next room"}`;
   const intent: WalkIntent =
-    target.kind === "create" ? { kind: "createIdea" } : { kind: "enterCriterion", stepId: target.stepId };
+    target.kind === "promote"
+      ? { kind: "openPromote" }
+      : target.kind === "create"
+        ? { kind: "createIdea" }
+        : { kind: "enterCriterion", stepId: target.stepId };
 
   return (
     <div className="pointer-events-none absolute inset-x-0 bottom-7 z-40 flex justify-center px-4 lg:bottom-11">
@@ -203,7 +212,7 @@ function NextStepCoach({ onWalk }: { onWalk: (intent: WalkIntent) => void }) {
         <span>
           <span className="block font-display text-lg font-black leading-none">Next Step</span>
           <span className="mt-1 block font-mono text-[10px] uppercase tracking-wider text-white/85">
-            Take me to {name}
+            {label}
           </span>
         </span>
         <span aria-hidden className="text-xl">
@@ -214,17 +223,75 @@ function NextStepCoach({ onWalk }: { onWalk: (intent: WalkIntent) => void }) {
   );
 }
 
+/**
+ * The idea-switcher dialog (Unit 8; origin IA decision): the Path shows the
+ * ACTIVE idea, and this dialog is the one-tap route to any other. It reuses
+ * the existing picker pattern (Modal + idea rows) but lists EVERY idea — a
+ * switch is SET_ACTIVE_IDEA only; entry into a criterion stays with the
+ * floor cards/coach, which now target any built phase for the newly active
+ * idea. Exported for the component test suite; only Factory mounts it.
+ */
+export function SwitcherDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
+  const game = useGame();
+  const { ideas, activeIdea, dispatch } = game;
+  if (!open) return null;
+  const choose = (ideaIndex: number) => {
+    dispatch({ type: "SET_ACTIVE_IDEA", ideaIndex });
+    onClose();
+  };
+  return (
+    <Modal label="Switch idea" onClose={onClose}>
+      <div className="px-6 py-7">
+        <h2 className="font-display text-xl font-black text-[hsl(25_34%_20%)]">Switch idea</h2>
+        <p className="mt-1 text-[13px] text-[hsl(25_20%_38%)]">
+          The Path shows one idea at a time. Which one are you working on?
+        </p>
+        <div className="mt-4 flex flex-col gap-2">
+          {ideas.map((_, n) => (
+            <button
+              key={n}
+              type="button"
+              onClick={() => choose(n)}
+              className="flex min-h-[48px] flex-col rounded-2xl border-2 bg-white px-4 py-3 text-left hover:border-sell"
+              style={{ borderColor: n === activeIdea ? "hsl(14 78% 54%)" : "hsl(25 34% 20% / .15)" }}
+            >
+              <span className="flex items-center gap-2">
+                <span className="font-mono text-[11px] font-bold text-[hsl(14_78%_44%)]">Idea #{n + 1}</span>
+                {n === activeIdea ? (
+                  <span className="rounded-full bg-[hsl(14_78%_54%/0.12)] px-2 py-0.5 font-mono text-[8.5px] font-bold uppercase tracking-[0.06em] text-[hsl(14_78%_44%)]">
+                    current
+                  </span>
+                ) : null}
+              </span>
+              <span className="text-[13px] text-[hsl(25_34%_20%)]">{ideaSummaryName(game, n)}</span>
+              <span className="font-mono text-[9px] text-[hsl(25_20%_38%)]">{ideaProgressLabel(game, n)}</span>
+            </button>
+          ))}
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
 export function Factory() {
   const game = useGame();
   const { dispatch } = game;
   const [walkTo, setWalkTo] = useState<WalkIntent | null>(null);
   const [floorView, setFloorView] = useState<FloorView>("phases");
+  // Overlay intents owned HERE (not the reducer): pure UI open-state that no
+  // reducer action ever needs to drive, held above the breakpoint conditional
+  // mount so both survive the lg swap (see PromoteBusiness's doc comment).
+  const [promoteOpen, setPromoteOpen] = useState(false);
+  const [switcherOpen, setSwitcherOpen] = useState(false);
 
   const onArrived = useCallback(
     (intent: WalkIntent) => {
       switch (intent.kind) {
-        case "openSellFloor":
-          setFloorView("sell");
+        case "openPhaseFloor":
+          setFloorView(intent.phase);
+          break;
+        case "openPromote":
+          setPromoteOpen(true);
           break;
         case "openRoom":
           dispatch({ type: "OPEN_ROOM", room: intent.room });
@@ -272,6 +339,7 @@ export function Factory() {
           onWalk={setWalkTo}
           floorView={floorView}
           onBack={() => setFloorView("phases")}
+          onOpenSwitcher={() => setSwitcherOpen(true)}
         />
         <NextStepCoach onWalk={setWalkTo} />
         {/* Ask-once birth-year card (Unit 3): non-modal, above the breakpoint
@@ -283,6 +351,8 @@ export function Factory() {
       <Celebration />
       <RoomDialog />
       <PickerDialog />
+      <PromoteBusiness open={promoteOpen} onClose={() => setPromoteOpen(false)} />
+      <SwitcherDialog open={switcherOpen} onClose={() => setSwitcherOpen(false)} />
     </main>
   );
 }

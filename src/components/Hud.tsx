@@ -9,6 +9,8 @@
  */
 import { useGame } from "../state/GameContext";
 import { criterionIdsForPhase } from "../state/gameCore";
+import { currentPhaseFor } from "../state/floorSelectors";
+import { phaseById } from "../data/path";
 import type { SyncStatus } from "../lib/sync";
 
 function LogoMark() {
@@ -46,10 +48,13 @@ function SaveIndicator({ status }: { status: SyncStatus }) {
 }
 
 export function Hud() {
-  const { profile, activeIdea, isCriterionDone, grossSalesSumCents, salesSumCents, syncStatus } = useGame();
-  // All five Sell criteria count now (Unit 6 engine); the chip stays Sell-scoped
-  // until Unit 8 makes the HUD phase-aware.
-  const phaseDone = criterionIdsForPhase("sell").filter((id) => isCriterionDone(activeIdea, id)).length;
+  const game = useGame();
+  const { profile, activeIdea, isCriterionDone, grossSalesSumCents, salesSumCents, syncStatus } = game;
+  // Phase-aware chip (Unit 8): the ACTIVE idea's current phase, colored from
+  // the PHASES data (sell renders exactly as before the generalization).
+  const phase = phaseById(currentPhaseFor(game, activeIdea));
+  const phaseIds = criterionIdsForPhase(phase.id);
+  const phaseDone = phaseIds.filter((id) => isCriterionDone(activeIdea, id)).length;
   const founder = profile.firstName || profile.handle || "Founder";
 
   return (
@@ -59,12 +64,22 @@ export function Hud() {
         <p className="font-display text-[13px] font-extrabold leading-none tracking-[0.02em]">FIRST PROFIT</p>
       </div>
 
-      <div className="flex items-center gap-2 rounded-[10px] border-2 border-sell bg-[hsl(14_78%_54%/0.09)] px-3 py-1.5">
-        <span className="flex h-5 w-5 items-center justify-center rounded-md bg-sell font-mono text-[10px] font-bold text-white">
-          1
+      <div
+        className="flex items-center gap-2 rounded-[10px] border-2 px-3 py-1.5"
+        style={{ borderColor: phase.accent, background: phase.wash }}
+      >
+        <span
+          className="flex h-5 w-5 items-center justify-center rounded-md font-mono text-[10px] font-bold text-white"
+          style={{ background: phase.accent }}
+        >
+          {phase.index}
         </span>
-        <span className="text-[12.5px] font-semibold text-[hsl(14_78%_44%)]">Sell</span>
-        <span className="font-mono text-[10.5px] text-[hsl(25_20%_38%)]">{phaseDone}/5 criteria</span>
+        <span className="text-[12.5px] font-semibold" style={{ color: phase.text }}>
+          {phase.name}
+        </span>
+        <span className="font-mono text-[10.5px] text-[hsl(25_20%_38%)]">
+          {phaseDone}/{phaseIds.length} criteria
+        </span>
       </div>
 
       <div className="ml-auto flex items-center gap-3 sm:gap-4">

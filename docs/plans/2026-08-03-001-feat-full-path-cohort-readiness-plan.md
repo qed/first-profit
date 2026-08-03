@@ -203,6 +203,12 @@ consent policy, not in this repo's code.
   density.
 - Exact XP/celebration behavior at phase boundaries (Celebration currently
   computes `1.{n+1}`) — generalized in Unit 8 with the phase engine.
+- Archive/unarchive UI (Unit 8 note): DELIBERATELY DEFERRED. The reducer fully
+  supports `ARCHIVE_BUSINESS`/`UNARCHIVE_BUSINESS` (with confirm-worthy
+  semantics, timestamps, and the cross-tab union), but no floor affordance
+  ships yet — the cohort has one business per family and no observed need to
+  swap it; the UI lands when a real need appears rather than as speculative
+  chrome.
 
 ## High-Level Technical Design
 

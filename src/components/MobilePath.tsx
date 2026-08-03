@@ -12,10 +12,10 @@ import { useEffect, useRef } from "react";
 import { useGame } from "../state/GameContext";
 import { AvatarSprite } from "./Avatar";
 import { PhasesFloor } from "./PhasesFloor";
-import { SellFloor } from "./SellFloor";
+import { CriterionFloor } from "./CriterionFloor";
 import type { FloorProps } from "./FactoryFloor";
 
-export function MobilePath({ walkTo, onArrived, onWalk, floorView, onBack }: FloorProps) {
+export function MobilePath({ walkTo, onArrived, onWalk, floorView, onBack, onOpenSwitcher }: FloorProps) {
   const { profile } = useGame();
   const timer = useRef<number | null>(null);
 
@@ -36,9 +36,14 @@ export function MobilePath({ walkTo, onArrived, onWalk, floorView, onBack }: Flo
       <div className="flex justify-center pt-4">
         <AvatarSprite name={profile.firstName || profile.handle || "Founder"} />
       </div>
-      {/* pb-80 reserves space for the future bottom-docked coach / HUD. */}
+      {/* pb-80 keeps the bottom-docked Next Step coach clear of the last card
+          (repo convention from CLAUDE.md — preserve this padding). */}
       <div className="px-4 pb-80 pt-2">
-        {floorView === "phases" ? <PhasesFloor onWalk={onWalk} /> : <SellFloor onWalk={onWalk} onBack={onBack} />}
+        {floorView === "phases" ? (
+          <PhasesFloor onWalk={onWalk} onOpenSwitcher={onOpenSwitcher} />
+        ) : (
+          <CriterionFloor phase={floorView} onWalk={onWalk} onBack={onBack} onOpenSwitcher={onOpenSwitcher} />
+        )}
       </div>
     </div>
   );

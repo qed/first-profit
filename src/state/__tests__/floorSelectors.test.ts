@@ -27,9 +27,19 @@ function apply(state: GameState, ...actions: Action[]): GameState {
 /**
  * An OPEN content-readiness allowlist (every criterion "built"), injected into
  * nextCoachTarget/roomEntryFor where a test exercises the ENGINE's full-sequence
- * behavior rather than today's shipped UI. This is the Unit 8 testing seam.
+ * behavior rather than today's shipped UI. Since Unit 8 shipped all 25 surfaces
+ * this equals the default; kept so the engine tests stay independent of the
+ * shipped list.
  */
 const ALL_BUILT: ReadonlySet<string> = new Set(CRITERION_SEQUENCE);
+
+/**
+ * A RESTRICTED allowlist (the pre-Unit-8 shipped pair), injected where a test
+ * pins the readiness-GATE machinery itself: the gate must keep working so a
+ * future criterion whose content lands before its surface can be pulled back
+ * out of BUILT_CRITERIA.
+ */
+const ONLY_11_12: ReadonlySet<string> = new Set(["1.1", "1.2"]);
 
 /** Base state with N onboarding-seeded ideas (runner closed for clarity). */
 function withIdeas(n: number): GameState {
@@ -176,34 +186,39 @@ describe("floorSelectors — Next Step coach target", () => {
     expect(nextCoachTarget(s)).toEqual({ kind: "criterion", stepId: "1.1", room: "idea" });
   });
 
-  it("STOPS at the built frontier past 1.2 while the ENGINE keeps walking (readiness allowlist)", () => {
+  it("STOPS at an unbuilt frontier under a RESTRICTED allowlist (gate machinery pinned)", () => {
     let s = withIdeas(2);
     s = completeStep(completeStep(s, 1, "1.1"), 1, "1.2"); // active idea 1 through 1.2
     // The ENGINE's frontier for the active idea is 1.3 (the curriculum walks on)...
     expect(nextUpFor(s, 1)).toBe("1.3");
-    // ...but 1.3 is not in BUILT_CRITERIA, so the coach does NOT point there: it
-    // falls back to the other idea's BUILT work (pre-Unit-6 behavior restored).
-    expect(nextCoachTarget(s)).toEqual({ kind: "criterion", stepId: "1.1", room: "idea" });
-    // The full-sequence behavior stays testable via the injectable allowlist (Unit 8).
-    expect(nextCoachTarget(s, ALL_BUILT)).toEqual({ kind: "criterion", stepId: "1.3", room: "market" });
+    // ...and under the pre-Unit-8 restricted list the coach does NOT point
+    // there: it falls back to the other idea's BUILT work. The gate must keep
+    // working so a criterion can be pulled back out of BUILT_CRITERIA.
+    expect(nextCoachTarget(s, ONLY_11_12)).toEqual({ kind: "criterion", stepId: "1.1", room: "idea" });
+    // The shipped default (all 25 built since Unit 8) walks straight on.
+    expect(nextCoachTarget(s)).toEqual({ kind: "criterion", stepId: "1.3", room: "market" });
   });
 
-  it("hides entirely at an unbuilt frontier with no other built work (single idea past 1.2)", () => {
+  it("hides entirely at an unbuilt frontier with no other built work (restricted allowlist)", () => {
     const s = completeStep(completeStep(withIdeas(1), 0, "1.1"), 0, "1.2");
     expect(nextUpFor(s, 0)).toBe("1.3"); // engine walks
-    expect(nextCoachTarget(s)).toBeNull(); // coach stops at the built frontier
+    expect(nextCoachTarget(s, ONLY_11_12)).toBeNull(); // coach stops at the built frontier
+    expect(nextCoachTarget(s)).toEqual({ kind: "criterion", stepId: "1.3", room: "market" });
   });
 
-  it("crosses the phase boundary UNDER AN OPEN ALLOWLIST: Sell complete -> 2.1 in the Build Room", () => {
+  it("crosses the phase boundary UNDER THE DEFAULT ALLOWLIST: Sell complete -> 2.1 in the Build Room", () => {
     const s = completePhase(withIdeas(1), 0, "sell");
-    // Engine: 2.1 is next. Coach: hidden by default (2.1 unbuilt), targets it when open.
     expect(nextUpFor(s, 0)).toBe("2.1");
-    expect(nextCoachTarget(s)).toBeNull();
+    // Unit 8: 2.1 is a shipped surface, so the DEFAULT coach targets it; the
+    // restricted list still hides it (gate proof).
+    expect(nextCoachTarget(s)).toEqual({ kind: "criterion", stepId: "2.1", room: "build" });
+    expect(nextCoachTarget(s, ONLY_11_12)).toBeNull();
     expect(nextCoachTarget(s, ALL_BUILT)).toEqual({ kind: "criterion", stepId: "2.1", room: "build" });
   });
 
-  it("the default allowlist is BUILT_CRITERIA (exactly 1.1 and 1.2 today)", () => {
-    expect([...BUILT_CRITERIA].sort()).toEqual(["1.1", "1.2"]);
+  it("the default allowlist is BUILT_CRITERIA (ALL 25 criteria since Unit 8)", () => {
+    expect([...BUILT_CRITERIA].sort()).toEqual([...CRITERION_SEQUENCE].sort());
+    expect(BUILT_CRITERIA.size).toBe(25);
   });
 
   it("targets the PROMOTION seam once the active idea completes phase 3 (business gate)", () => {
@@ -258,16 +273,17 @@ describe("floorSelectors — locked-phase entry is a no-op (Unit 6)", () => {
 });
 
 describe("floorSelectors — content-readiness gate on room entry (BUILT_CRITERIA)", () => {
-  it("an ELIGIBLE but unbuilt criterion no-ops under the default allowlist", () => {
+  it("an ELIGIBLE criterion no-ops under a RESTRICTED allowlist (gate machinery pinned)", () => {
     let s = withIdeas(1);
     s = completeStep(s, 0, "1.1");
     s = completeStep(s, 0, "1.2");
-    // The engine says 1.3 is workable; the shipped UI does not have it yet.
+    // The engine says 1.3 is workable; a restricted list still gates the entry
+    // (the gate must survive Unit 8 so a surface can be un-shipped again).
     expect(nextUpFor(s, 0)).toBe("1.3");
-    expect(roomEntryFor(s, "1.3")).toEqual({ action: "noop" });
-    // Same state, open allowlist: entry works — proof the gate (not the engine)
-    // produced the noop above.
-    expect(roomEntryFor(s, "1.3", ALL_BUILT)).toEqual({ action: "enter", ideaIndex: 0, index: 0 });
+    expect(roomEntryFor(s, "1.3", ONLY_11_12)).toEqual({ action: "noop" });
+    // The shipped default (all 25 built) enters — proof the gate (not the
+    // engine) produced the noop above.
+    expect(roomEntryFor(s, "1.3")).toEqual({ action: "enter", ideaIndex: 0, index: 0 });
   });
 
   it("a SCRIPTED walk drives every room entry 1.1 -> 3.5 through roomEntryFor under an open allowlist", () => {

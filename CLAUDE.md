@@ -28,9 +28,12 @@ Every UI change MUST look good and work well on mobile before it is considered d
   all mounted at `src/screens/Factory.tsx` above the floor) are full-screen takeovers on
   mobile and floating dialogs from `sm` up. Their open-state lives in the `gameCore`
   reducer, which is above the breakpoint mount, so they survive the swap too.
-- The fpv2 floor uses click-to-walk plus a bottom hint pill and the HUD for guidance; there
-  is no separate "Next Step coach" component (a v1 concept the fpv2 design superseded).
-  `MobilePath` still reserves bottom padding (`pb-80`) so a bottom-docked HUD/overlay never
+- The fpv2 floor uses click-to-walk plus a bottom hint pill and the HUD for guidance, and a
+  `NextStepCoach` component (added 2026-08-03, defined in `src/screens/Factory.tsx`): one
+  green button docked at the bottom of the floor (absolute, bottom-7 / lg:bottom-11) that
+  targets whatever comes next via `nextCoachTarget` — create-idea, the next criterion's
+  room, or the promotion screen — routing through the same `onWalk` intent channel as card
+  taps. `MobilePath` reserves bottom padding (`pb-80`) so the bottom-docked coach never
   covers the last card. Preserve that padding if you change either component.
 - Styling is Tailwind mobile-first: base classes are the mobile styles; desktop is layered
   on with `sm:`/`lg:` variants. When fixing mobile, don't silently change desktop —

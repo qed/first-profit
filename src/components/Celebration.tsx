@@ -15,20 +15,13 @@
  */
 import { useEffect, useRef } from "react";
 import { useGame } from "../state/GameContext";
-import { CRITERION_SEQUENCE } from "../state/gameCore";
-import { stepById } from "../data/path";
+import { CRITERION_SEQUENCE, activeBusinessExists, phaseOfCriterion } from "../state/gameCore";
+import { phaseById, stepById } from "../data/path";
 import { useFocusTrap } from "../lib/useFocusTrap";
 
-/** Sell-criterion id → room name, for the "New on The Path" unlock line. */
-const SELL_ROOMS: Record<string, string> = {
-  "1.2": "The Sales Room",
-  "1.3": "The Learning Room",
-  "1.4": "The Pricing Room",
-  "1.5": "The Outreach Room",
-};
-
 export function Celebration() {
-  const { celebrate, dispatch } = useGame();
+  const game = useGame();
+  const { celebrate, dispatch } = game;
   const panelRef = useRef<HTMLDivElement>(null);
 
   const open = Boolean(celebrate);
@@ -48,12 +41,25 @@ export function Celebration() {
   if (!celebrate) return null;
 
   const step = stepById(celebrate);
-  // Sequence-driven next criterion (Unit 6): safe across phase boundaries —
-  // at 1.5 the next id is "2.1", which has no SELL_ROOMS entry, so the "New on
-  // The Path" block simply hides (Unit 8 generalizes it per phase).
+  const phase = step ? phaseById(step.phase) : undefined;
+  // Sequence-driven next criterion (Unit 6/8): the next-step block names the
+  // next criterion + its room ACROSS phase boundaries (every criterion carries
+  // a roomName; rooms without dialogs are named, inert cards on the floor).
   const seqPos = CRITERION_SEQUENCE.indexOf(celebrate);
   const nextId = seqPos >= 0 ? CRITERION_SEQUENCE[seqPos + 1] : undefined;
-  const nextRoom = nextId ? SELL_ROOMS[nextId] : undefined;
+  const nextStep = nextId ? stepById(nextId) : undefined;
+  // Terminal 5.5 (Unit 8 Tier C2): the last criterion of the whole sequence —
+  // the same Celebration chrome with distinct terminal copy and NO next-step.
+  const terminal = seqPos >= 0 && seqPos === CRITERION_SEQUENCE.length - 1;
+  // The promotion seam: the next criterion is Grow's first and no business
+  // exists yet — the next step is PROMOTION, not a room (the coach and the
+  // Grow card carry the actual CTA once this dismisses).
+  const promoteNext =
+    !terminal &&
+    nextStep !== undefined &&
+    phaseOfCriterion(nextStep.id) === "grow" &&
+    !activeBusinessExists(game);
+  const showNextRoom = !terminal && !promoteNext && nextStep !== undefined;
 
   const keepGoing = () => dispatch({ type: "DISMISS_CELEBRATION" });
 
@@ -65,8 +71,12 @@ export function Celebration() {
         aria-modal="true"
         aria-labelledby="fp-celebrate-title"
         tabIndex={-1}
-        className="fp-rise flex h-full w-full flex-col justify-center overflow-y-auto border-t-4 border-sell bg-[hsl(40_55%_97%)] px-6 py-9 text-center outline-none sm:h-auto sm:max-h-[calc(100dvh-2rem)] sm:w-full sm:max-w-[480px] sm:justify-start sm:rounded-3xl sm:p-9 sm:shadow-[0_12px_32px_rgba(30,24,16,.2)]"
-        style={{ animation: "fp-rise .35s cubic-bezier(.22,1,.36,1) both" }}
+        className="fp-rise flex h-full w-full flex-col justify-center overflow-y-auto border-t-4 bg-[hsl(40_55%_97%)] px-6 py-9 text-center outline-none sm:h-auto sm:max-h-[calc(100dvh-2rem)] sm:w-full sm:max-w-[480px] sm:justify-start sm:rounded-3xl sm:p-9 sm:shadow-[0_12px_32px_rgba(30,24,16,.2)]"
+        style={{
+          animation: "fp-rise .35s cubic-bezier(.22,1,.36,1) both",
+          // Top border in the passed criterion's phase accent (sell unchanged).
+          borderTopColor: phase?.accent ?? "hsl(14 78% 54%)",
+        }}
       >
         <span
           className="fp-stamp mx-auto flex h-16 w-16 items-center justify-center rounded-full text-3xl text-white"
@@ -77,28 +87,63 @@ export function Celebration() {
           }}
           aria-hidden
         >
-          ✓
+          {terminal ? "★" : "✓"}
         </span>
         <p className="mt-4 font-mono text-[11px] uppercase tracking-[0.25em] text-[hsl(4_62%_46%)]">
-          Criterion passed
+          {terminal ? "Path complete" : "Criterion passed"}
         </p>
         <h2
           id="fp-celebrate-title"
           className="mt-2 font-display text-[28px] font-black leading-[1.15] text-[hsl(25_34%_20%)]"
         >
-          {step?.title}
+          {terminal ? "You built the whole path" : step?.title}
         </h2>
+        {terminal && step ? (
+          <p className="mt-2 text-[14px] leading-[1.6] text-[hsl(25_20%_38%)]">
+            {step.title}. All 25 criteria, Sell to Scale. You did not just play a founder. You
+            are one.
+          </p>
+        ) : null}
         {step ? (
           <p className="mt-1.5 font-mono text-sm text-[hsl(25_20%_38%)]">+{step.xp} XP</p>
         ) : null}
 
-        {nextRoom ? (
-          <div className="mt-[18px] rounded-2xl border-2 border-dashed border-[hsl(14_78%_54%/0.4)] bg-[hsl(14_78%_54%/0.05)] p-3.5 text-left">
-            <p className="font-mono text-[10px] uppercase tracking-[0.08em] text-[hsl(14_78%_44%)]">
+        {showNextRoom && nextStep ? (
+          <div
+            className="mt-[18px] rounded-2xl border-2 border-dashed p-3.5 text-left"
+            style={{
+              borderColor: phaseById(nextStep.phase).faded,
+              background: phaseById(nextStep.phase).wash,
+            }}
+          >
+            <p
+              className="font-mono text-[10px] uppercase tracking-[0.08em]"
+              style={{ color: phaseById(nextStep.phase).text }}
+            >
               New on The Path
             </p>
             <p className="mt-1.5 font-display text-[17px] font-bold text-[hsl(25_34%_20%)]">
-              {nextId} · {nextRoom}
+              {nextStep.id} · {nextStep.roomName}
+            </p>
+          </div>
+        ) : null}
+
+        {promoteNext ? (
+          <div
+            className="mt-[18px] rounded-2xl border-2 border-dashed p-3.5 text-left"
+            style={{ borderColor: phaseById("grow").faded, background: phaseById("grow").wash }}
+          >
+            <p
+              className="font-mono text-[10px] uppercase tracking-[0.08em]"
+              style={{ color: phaseById("grow").text }}
+            >
+              Next up
+            </p>
+            <p className="mt-1.5 font-display text-[17px] font-bold text-[hsl(25_34%_20%)]">
+              🏢 Make it your business
+            </p>
+            <p className="mt-1 text-[12.5px] leading-[1.5] text-[hsl(25_20%_38%)]">
+              This idea passed Validate. Promote it to open Phase 4 · Grow.
             </p>
           </div>
         ) : null}
@@ -108,7 +153,7 @@ export function Celebration() {
           onClick={keepGoing}
           className="mt-[22px] inline-flex min-h-[52px] w-full items-center justify-center rounded-2xl bg-verified px-5 font-display text-base font-bold text-white shadow-[0_5px_0_hsl(150_52%_26%)]"
         >
-          Keep going →
+          {terminal ? "Back to the floor" : "Keep going →"}
         </button>
       </div>
     </div>

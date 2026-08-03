@@ -27,7 +27,8 @@
 import { useEffect, useRef } from "react";
 import { useGame } from "../state/GameContext";
 import { parseTask, phaseById, stepById } from "../data/path";
-import { criterionIdsForPhase, phaseOfCriterion } from "../state/gameCore";
+import { activeBusiness, criterionIdsForPhase, phaseOfCriterion } from "../state/gameCore";
+import { ideaOneLiner, ideaSummaryName } from "../state/floorSelectors";
 import { getDraft, setDraft, getLastUserId } from "../lib/draftCache";
 import { useFocusTrap } from "../lib/useFocusTrap";
 import { StuckBox, taskIdFor } from "./StuckBox";
@@ -38,8 +39,9 @@ function fieldDraftName(ideaIndex: number, key: string): string {
 }
 
 export function StepRunner() {
+  const game = useGame();
   const { runnerOpen, runnerStep, runnerIndex, activeIdea, ideas, isTaskDone, celebrate, dispatch } =
-    useGame();
+    game;
 
   const panelRef = useRef<HTMLDivElement>(null);
 
@@ -98,16 +100,37 @@ export function StepRunner() {
     dispatch({ type: "OPEN_ROOM", room: step.room });
   };
 
-  // Phase-aware header chrome: phase name/number from the phase engine + PHASES
-  // data, "Criterion N of M" from the criterion's position within ITS phase (M
-  // varies only if the content does — never assume 5). Colors/tints below stay
-  // the Sell palette for every phase until Unit 8 themes the runner per phase.
+  // Phase-aware header chrome (Unit 8): phase name/number AND colors/tints from
+  // the phase engine + PHASES data (path.ts, single source), "Criterion N of M"
+  // from the criterion's position within ITS phase (M varies only if the
+  // content does — never assume 5). Sell resolves to the exact values the
+  // runner always used, so phase 1 renders unchanged.
   const phaseId = phaseOfCriterion(runnerStep);
   const phase = phaseId ? phaseById(phaseId) : undefined;
+  const accent = phase?.accent ?? "hsl(14 78% 54%)";
+  const accentText = phase?.text ?? "hsl(14 78% 44%)";
+  const accentWash = phase?.wash ?? "hsl(14 78% 54% / .09)";
   const phaseCriteria = phaseId ? criterionIdsForPhase(phaseId) : [];
   const critNum = phaseCriteria.indexOf(runnerStep) + 1 || 1;
   const critTotal = phaseCriteria.length || 1;
   const taskLabel = parseTask(step.tasks[idx]).label;
+
+  // Idea/business context for the header (Unit 8; origin IA decision): phases
+  // 1-3 name the idea being worked (one-liner when authored); phases 4-5 name
+  // THE BUSINESS — the promoted idea's one-liner (a business IS a promoted
+  // idea, never a separate name).
+  const isBusinessPhase = phaseId === "grow" || phaseId === "scale";
+  let ideaContext: string;
+  if (isBusinessPhase) {
+    const business = activeBusiness(game);
+    const bizIndex = business ? ideas.findIndex((i) => i.id === business.ideaId) : -1;
+    ideaContext = `Your business · ${bizIndex >= 0 ? ideaSummaryName(game, bizIndex) : `Idea #${activeIdea + 1}`}`;
+  } else {
+    const liner = ideaOneLiner(game, activeIdea);
+    ideaContext = liner
+      ? `Idea #${activeIdea + 1} · ${ideaSummaryName(game, activeIdea)}`
+      : `Idea #${activeIdea + 1}`;
+  }
   const alreadyDone = isTaskDone(activeIdea, runnerStep, idx);
   const isLast = idx + 1 >= total;
 
@@ -136,6 +159,16 @@ export function StepRunner() {
 
   const close = () => dispatch({ type: "CLOSE_RUNNER" });
 
+  // Primary CTA per phase (PHASES data): Sell keeps the pre-Unit-8 verified
+  // green EXACTLY (the classes below); the other phases take their accent with
+  // a darkened press shadow, so the runner's action reads in phase color.
+  const darkenL = (hsl: string, by: number) =>
+    hsl.replace(/ (\d+(?:\.\d+)?)%\)$/, (_m, l) => ` ${Math.max(0, Number(l) - by)}%)`);
+  const ctaStyle =
+    phaseId && phaseId !== "sell"
+      ? { background: accent, boxShadow: `0 5px 0 ${darkenL(accent, 20)}` }
+      : undefined;
+
   return (
     <div className="fixed inset-0 z-[55] flex bg-[hsl(25_34%_20%/0.55)] sm:items-center sm:justify-center sm:p-4">
       <div
@@ -147,11 +180,16 @@ export function StepRunner() {
         className="fp-rise flex h-full w-full flex-col overflow-y-auto bg-[hsl(40_55%_97%)] outline-none sm:h-auto sm:max-h-[calc(100dvh-2rem)] sm:w-full sm:max-w-[640px] sm:rounded-3xl sm:border-2 sm:border-[hsl(25_34%_20%/0.15)] sm:shadow-[0_8px_0_rgba(120,80,40,.1)]"
         style={{ animation: "fp-rise .3s cubic-bezier(.22,1,.36,1) both" }}
       >
-        {/* Header — Sell tint for ALL phases until Unit 8 themes per phase */}
-        <header className="flex items-start justify-between gap-4 border-b-2 border-[hsl(25_34%_20%/0.1)] bg-[hsl(14_78%_54%/0.09)] px-5 py-4 sm:px-6">
+        {/* Header — phase tint/text from PHASES (sell values match pre-Unit-8) */}
+        <header
+          className="flex items-start justify-between gap-4 border-b-2 border-[hsl(25_34%_20%/0.1)] px-5 py-4 sm:px-6"
+          style={{ background: accentWash }}
+        >
           <div className="min-w-0">
-            <p className="font-mono text-[10px] uppercase tracking-[0.2em] text-[hsl(14_78%_44%)]">
-              Phase {phase?.index ?? 1} · {phase?.name ?? "Sell"} · Criterion {critNum} of {critTotal} · Idea #{activeIdea + 1}
+            {/* Wraps (never truncates) so the idea/business context stays
+                visible at 390px. */}
+            <p className="font-mono text-[10px] uppercase tracking-[0.2em]" style={{ color: accentText }}>
+              Phase {phase?.index ?? 1} · {phase?.name ?? "Sell"} · Criterion {critNum} of {critTotal} · {ideaContext}
             </p>
             <h2
               id="fp-runner-title"
@@ -175,10 +213,12 @@ export function StepRunner() {
         <div className="flex gap-1.5 border-b-2 border-[hsl(25_34%_20%/0.1)] px-5 py-3 sm:px-6">
           {step.tasks.map((raw, i) => {
             const done = isTaskDone(activeIdea, runnerStep, i);
+            // Rail: done stays the app-wide verified green; the CURRENT segment
+            // takes the phase accent (sell = the exact pre-Unit-8 value).
             const color = done
               ? "hsl(150 52% 40%)"
               : i === idx
-                ? "hsl(14 78% 54%)"
+                ? accent
                 : "hsl(25 34% 20% / .12)";
             return (
               <div key={i} className="min-w-0 flex-1">
@@ -197,7 +237,10 @@ export function StepRunner() {
         {/* Body */}
         <div className="px-5 pb-7 pt-5 sm:px-6">
           <div className="flex items-center gap-2">
-            <span className="flex h-[26px] w-[26px] items-center justify-center rounded-lg bg-sell font-mono text-xs font-bold text-white">
+            <span
+              className="flex h-[26px] w-[26px] items-center justify-center rounded-lg font-mono text-xs font-bold text-white"
+              style={{ background: accent }}
+            >
               {idx + 1}
             </span>
             <span className="font-mono text-[10.5px] uppercase tracking-[0.08em] text-[hsl(25_20%_38%)]">
@@ -249,8 +292,11 @@ export function StepRunner() {
             );
           })}
 
-          {/* Done-when callout — terracotta left border */}
-          <div className="mt-[18px] rounded-r-[10px] border-l-2 border-sell bg-[hsl(40_30%_99%)] px-3.5 py-2.5">
+          {/* Done-when callout — phase-accent left border */}
+          <div
+            className="mt-[18px] rounded-r-[10px] border-l-2 bg-[hsl(40_30%_99%)] px-3.5 py-2.5"
+            style={{ borderLeftColor: accent }}
+          >
             <p className="font-mono text-[9.5px] font-semibold uppercase tracking-[0.06em] text-[hsl(25_20%_38%)]">
               Done when
             </p>
@@ -264,6 +310,7 @@ export function StepRunner() {
                 type="button"
                 disabled
                 className="inline-flex min-h-[52px] flex-1 items-center justify-center gap-2 rounded-2xl bg-verified px-5 font-display text-base font-bold text-white opacity-60 shadow-[0_5px_0_hsl(150_52%_26%)]"
+                style={ctaStyle}
               >
                 ✓ Done
               </button>
@@ -272,6 +319,7 @@ export function StepRunner() {
                 type="button"
                 onClick={advance}
                 className="inline-flex min-h-[52px] flex-1 items-center justify-center gap-2 rounded-2xl bg-verified px-5 font-display text-base font-bold text-white shadow-[0_5px_0_hsl(150_52%_26%)]"
+                style={ctaStyle}
               >
                 Next task →
               </button>
@@ -280,6 +328,7 @@ export function StepRunner() {
                 type="button"
                 onClick={doIt}
                 className="inline-flex min-h-[52px] flex-1 items-center justify-center gap-2 rounded-2xl bg-verified px-5 font-display text-base font-bold text-white shadow-[0_5px_0_hsl(150_52%_26%)]"
+                style={ctaStyle}
               >
                 ✓ I did it
               </button>

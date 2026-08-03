@@ -42,14 +42,40 @@ export interface Phase {
   index: number;
   name: string;
   promise: string;
+  /** Brand hex (onboarding/marketing surfaces). */
   color: string;
+  /** Brand hex wash (onboarding/marketing surfaces). */
   tint: string;
+  /**
+   * In-app UI chrome (Unit 8) — the SINGLE source for phase-colored floors,
+   * runner chrome, HUD chip, and celebration accents. These are the fpv2
+   * design-token hsl values (tailwind.config's sell/build/validate/grow/scale),
+   * which the shipped Sell UI already used, so Sell renders EXACTLY as before
+   * the generalization. The old duplicated PHASE_UI map in PodCardContent is
+   * retired in favor of these fields.
+   */
+  accent: string;
+  /** Darker accent for text/labels on light backgrounds. */
+  text: string;
+  /** 30%-alpha accent for locked/dashed treatments. */
+  faded: string;
+  /** 9%-alpha accent for header/chip background washes. */
+  wash: string;
 }
 
 export interface Step {
   id: string;
   phase: PhaseId;
   room: RoomId;
+  /** Floor-card emoji sign for this criterion's room (STEP_META chrome). */
+  sign: string;
+  /**
+   * The display name of the room this criterion is played in ("The Sales
+   * Room"). Every criterion has one (Unit 8): rooms without a built dialog are
+   * still NAMED cards on the floor and in the celebration's next-step block —
+   * they are simply inert (the Step Runner is the playing surface).
+   */
+  roomName: string;
   title: string;
   brief: string;
   doneWhen: string;
@@ -72,7 +98,11 @@ export const PHASES: Phase[] = [
   name: 'Sell',
   promise: 'Learn to confidently sell anything.',
   color: '#E0562A',
-  tint: '#FBEAE1'
+  tint: '#FBEAE1',
+  accent: 'hsl(14 78% 54%)',
+  text: 'hsl(14 78% 44%)',
+  faded: 'hsl(14 78% 54% / .3)',
+  wash: 'hsl(14 78% 54% / .09)'
 },
 {
   id: 'build',
@@ -80,7 +110,11 @@ export const PHASES: Phase[] = [
   name: 'Build',
   promise: 'Ship a real thing people can buy.',
   color: '#2F5D8C',
-  tint: '#E3EBF3'
+  tint: '#E3EBF3',
+  accent: 'hsl(217 74% 56%)',
+  text: 'hsl(217 74% 46%)',
+  faded: 'hsl(217 74% 56% / .3)',
+  wash: 'hsl(217 74% 56% / .09)'
 },
 {
   id: 'validate',
@@ -88,7 +122,11 @@ export const PHASES: Phase[] = [
   name: 'Validate',
   promise: 'Prove it works before you scale it.',
   color: '#6B4E8C',
-  tint: '#EBE5F2'
+  tint: '#EBE5F2',
+  accent: 'hsl(265 52% 58%)',
+  text: 'hsl(265 52% 48%)',
+  faded: 'hsl(265 52% 58% / .3)',
+  wash: 'hsl(265 52% 58% / .09)'
 },
 {
   id: 'grow',
@@ -96,7 +134,11 @@ export const PHASES: Phase[] = [
   name: 'Grow',
   promise: 'Get to your first $1,000 in sales.',
   color: '#2E7D53',
-  tint: '#E2F0E8'
+  tint: '#E2F0E8',
+  accent: 'hsl(150 52% 42%)',
+  text: 'hsl(150 52% 34%)',
+  faded: 'hsl(150 52% 42% / .3)',
+  wash: 'hsl(150 52% 42% / .09)'
 },
 {
   id: 'scale',
@@ -104,7 +146,11 @@ export const PHASES: Phase[] = [
   name: 'Scale',
   promise: 'Build the plan to $10,000 in profit.',
   color: '#C98A16',
-  tint: '#F7EDD8'
+  tint: '#F7EDD8',
+  accent: 'hsl(41 88% 52%)',
+  text: 'hsl(41 88% 38%)',
+  faded: 'hsl(41 88% 52% / .3)',
+  wash: 'hsl(41 88% 52% / .09)'
 }];
 
 
@@ -119,6 +165,8 @@ PHASES.find((p) => p.id === id) as Phase;
 
 export interface StepMeta {
   room: RoomId;
+  sign: string;
+  roomName: string;
   title: string;
   brief: string;
   doneWhen: string;
@@ -130,6 +178,8 @@ export const STEP_META: Record<string, StepMeta> = {
   // ── PHASE 01 · SELL ─────────────────────────────────────────────
   '1.1': {
     room: 'idea',
+    sign: '💡',
+    roomName: 'The Idea Room',
     title: 'Pitch a product in 60 seconds, no notes',
     brief:
     'Pick the thing you want to sell and get a 60-second pitch out of your mouth in front of an adult who is not family.',
@@ -141,6 +191,8 @@ export const STEP_META: Record<string, StepMeta> = {
   },
   '1.2': {
     room: 'market',
+    sign: '🛒',
+    roomName: 'The Sales Room',
     title: 'Make a real sale',
     brief:
     'A real customer who is not family. Real money changing hands. This is the moment you become a founder.',
@@ -151,6 +203,8 @@ export const STEP_META: Record<string, StepMeta> = {
   },
   '1.3': {
     room: 'market',
+    sign: '🎓',
+    roomName: 'The Learning Room',
     title: 'Hear "no" three times',
     brief:
     'Collect three real nos and write down what each one taught you. Nos are data, not damage.',
@@ -161,19 +215,23 @@ export const STEP_META: Record<string, StepMeta> = {
   },
   '1.4': {
     room: 'product',
+    sign: '🏷️',
+    roomName: 'The Pricing Room',
     title: 'Explain cost, price and profit on one page',
     brief:
     'What one unit costs you to make, what you charge, and what is left over. In your own words, on one page.',
     doneWhen: 'The one-pager is in the Founder File and you can explain it out loud.',
     coach:
-    'Use the Unit Economics bench in the Product Room. Set your cost and your price — the machine shows you the profit per unit.',
+    'Use the Unit Economics bench in the Product Room. Set your cost and your price. The machine shows you the profit per unit.',
     xp: 80
   },
   '1.5': {
     room: 'market',
+    sign: '📣',
+    roomName: 'The Outreach Room',
     title: '25 supervised outreach attempts',
     brief:
-    'A booth, door to door, calls, messages — 25 real attempts with a parent present.',
+    'A booth, door to door, calls, messages: 25 real attempts with a parent present.',
     doneWhen: 'The outreach tally reads 25 with channel and outcome for each.',
     coach:
     'Grind the tally. Every knock counts whether they buy or not. Twenty-five is the credential.',
@@ -183,9 +241,11 @@ export const STEP_META: Record<string, StepMeta> = {
   // ── PHASE 02 · BUILD ────────────────────────────────────────────
   '2.1': {
     room: 'build',
+    sign: '🔧',
+    roomName: 'The Build Room',
     title: 'Ship the smallest thing that works',
     brief:
-    'A working product, site or offer built with AI tools — with a live URL, a price and instructions.',
+    'A working product, site or offer built with AI tools, with a live URL, a price and instructions.',
     doneWhen: 'A stranger could find it, understand it and buy it without you in the room.',
     coach:
     'In the Build Room, strip your idea down to the smallest version that still solves the problem. Ship that. Then publish it in the Website Studio.',
@@ -193,9 +253,11 @@ export const STEP_META: Record<string, StepMeta> = {
   },
   '2.2': {
     room: 'idea',
+    sign: '💡',
+    roomName: 'The Idea Room',
     title: 'Connect the product to a real gap',
     brief:
-    'A one-page brief on the gap you spotted in a world you actually know — your sport, your school, your street.',
+    'A one-page brief on the gap you spotted in a world you actually know: your sport, your school, your street.',
     doneWhen: 'The brief names the gap, who feels it, and how your product closes it.',
     coach:
     'Back to the Idea Room. Name the gap in a domain you know better than most adults do.',
@@ -203,6 +265,8 @@ export const STEP_META: Record<string, StepMeta> = {
   },
   '2.3': {
     room: 'market',
+    sign: '📣',
+    roomName: 'The Outreach Room',
     title: 'Contact 40 potential customers',
     brief:
     'Forty real contacts, plus one piece of marketing you launch and measure.',
@@ -213,6 +277,8 @@ export const STEP_META: Record<string, StepMeta> = {
   },
   '2.4': {
     room: 'build',
+    sign: '🔧',
+    roomName: 'The Build Room',
     title: 'Ship a v2 from real feedback',
     brief:
     'Three real users tell you what is wrong. You change it and ship again.',
@@ -223,9 +289,11 @@ export const STEP_META: Record<string, StepMeta> = {
   },
   '2.5': {
     room: 'workshop',
+    sign: '🎤',
+    roomName: 'The Demo Stage',
     title: 'Give a 3–5 minute live demo',
     brief:
-    'The build, the results, the lessons — live, to an audience with at least one non-family adult.',
+    'The build, the results, the lessons. Live, to an audience with at least one non-family adult.',
     doneWhen: 'The demo happened, was recorded, and the recording is in the Founder File.',
     coach:
     'Book the Demo Stage in the Workshop Room. Three minutes, three beats: what I built, what happened, what I learned.',
@@ -235,6 +303,8 @@ export const STEP_META: Record<string, StepMeta> = {
   // ── PHASE 03 · VALIDATE ─────────────────────────────────────────
   '3.1': {
     room: 'product',
+    sign: '🔁',
+    roomName: 'The Loop Bench',
     title: 'Run two validation loops',
     brief: 'Hypothesis, test, outcome. Twice. Write the outcome even when you were wrong.',
     doneWhen: 'Two complete loops are logged with an honest outcome on each.',
@@ -244,6 +314,8 @@ export const STEP_META: Record<string, StepMeta> = {
   },
   '3.2': {
     room: 'checkout',
+    sign: '💳',
+    roomName: 'The Checkout Booth',
     title: 'Run a pricing experiment',
     brief:
     'Two price points, the margin math for each, and feedback from two different groups.',
@@ -254,16 +326,20 @@ export const STEP_META: Record<string, StepMeta> = {
   },
   '3.3': {
     room: 'workshop',
+    sign: '🤖',
+    roomName: 'The AI Workshop',
     title: 'Audit your AI tools',
     brief:
     'Three tools you adopted since Day 1: why you picked them, what they produced, whether they stay.',
     doneWhen: 'Three tools are audited with a keep-or-cut decision on each.',
     coach:
-    'Sit the AI Audit workshop. Tools are staff — if one is not earning its keep, fire it.',
+    'Sit the AI Audit workshop. Tools are staff. If one is not earning its keep, fire it.',
     xp: 80
   },
   '3.4': {
     room: 'product',
+    sign: '📦',
+    roomName: 'The Product Room',
     title: 'Choose a validation path solo',
     brief:
     'No adult help. You pick the path, you run it, you present the reasoning and the outcome.',
@@ -274,6 +350,8 @@ export const STEP_META: Record<string, StepMeta> = {
   },
   '3.5': {
     room: 'website',
+    sign: '🌐',
+    roomName: 'The Website Studio',
     title: 'Publish two pieces of content',
     brief: 'Two posts, videos or pages that pull in engagement from outside your household.',
     doneWhen: 'Both are published and you can show real external engagement.',
@@ -285,6 +363,8 @@ export const STEP_META: Record<string, StepMeta> = {
   // ── PHASE 04 · GROW ─────────────────────────────────────────────
   '4.1': {
     room: 'checkout',
+    sign: '💳',
+    roomName: 'The Checkout Booth',
     title: '10 sales or 3 repeat customers',
     brief: 'Proof this is a business and not a one-off favour.',
     doneWhen: 'The sales ledger shows ten sales, or three customers who bought twice.',
@@ -299,15 +379,19 @@ export const STEP_META: Record<string, StepMeta> = {
   // "subscription so far" estimate today; the real accounting belongs in this task.
   '4.2': {
     room: 'command',
+    sign: '🧮',
+    roomName: 'The Command Deck',
     title: 'Track a P&L for four weeks',
     brief: 'Money in, money out, what is left. Four consecutive weeks of a live business.',
     doneWhen: 'Four weeks of numbers are in the ledger with a total on the bottom.',
     coach:
-    'The Command Deck keeps your P&L. Enter each week honestly — the ugly weeks teach the most.',
+    'The Command Deck keeps your P&L. Enter each week honestly. The ugly weeks teach the most.',
     xp: 130
   },
   '4.3': {
     room: 'command',
+    sign: '⚙️',
+    roomName: 'The Command Deck',
     title: 'Build one repeating AI process',
     brief: 'A daily or weekly job an AI tool does for the business, every time, without you rewriting it.',
     doneWhen: 'The process has run at least twice on schedule.',
@@ -317,6 +401,8 @@ export const STEP_META: Record<string, StepMeta> = {
   },
   '4.4': {
     room: 'market',
+    sign: '🤝',
+    roomName: 'The Market Stall',
     title: 'Close a real negotiation',
     brief: 'A real back-and-forth with documented terms both sides agreed to.',
     doneWhen: 'The agreed terms are written down and both sides have a copy.',
@@ -326,6 +412,8 @@ export const STEP_META: Record<string, StepMeta> = {
   },
   '4.5': {
     room: 'command',
+    sign: '📊',
+    roomName: 'The Command Deck',
     title: 'Present your financials to the board',
     brief:
     'Parents plus a non-family adult sit as your board. You present the numbers like a founder.',
@@ -338,8 +426,10 @@ export const STEP_META: Record<string, StepMeta> = {
   // ── PHASE 05 · SCALE ────────────────────────────────────────────
   '5.1': {
     room: 'command',
+    sign: '⚙️',
+    roomName: 'The Command Deck',
     title: 'Automate one real part of the business',
-    brief: 'An agent or automation doing a real job — and you can show it running.',
+    brief: 'An agent or automation doing a real job, and you can show it running.',
     doneWhen: 'The automation runs live in front of a witness.',
     coach:
     'Wire the automation into your Command Deck and let it work while you watch.',
@@ -347,6 +437,8 @@ export const STEP_META: Record<string, StepMeta> = {
   },
   '5.2': {
     room: 'product',
+    sign: '📦',
+    roomName: 'The Delivery Bay',
     title: 'Delegate a task with written instructions',
     brief: 'Someone else does a real job for your business using only what you wrote down.',
     doneWhen: 'The task got done correctly by someone else, from your instructions alone.',
@@ -356,7 +448,9 @@ export const STEP_META: Record<string, StepMeta> = {
   },
   '5.3': {
     room: 'product',
-    title: 'Take a week off — stay open',
+    sign: '🏝️',
+    roomName: 'The Delivery Bay',
+    title: 'Take a week off, stay open',
     brief: 'Customers still get served through a week you did not work.',
     doneWhen: 'A week passed with no founder hours and at least one customer served.',
     coach:
@@ -365,6 +459,8 @@ export const STEP_META: Record<string, StepMeta> = {
   },
   '5.4': {
     room: 'workshop',
+    sign: '📖',
+    roomName: 'The Workshop Room',
     title: 'Write the one-page playbook',
     brief: 'One page that lets someone else run your business.',
     doneWhen: 'A stranger could run a week of the business from the page alone.',
@@ -374,6 +470,8 @@ export const STEP_META: Record<string, StepMeta> = {
   },
   '5.5': {
     room: 'workshop',
+    sign: '🎤',
+    roomName: 'The Capstone Stage',
     title: 'Pitch next year, on stage',
     brief:
     'The Capstone Showcase: five people, two of them non-family adults, and a real stage moment.',
@@ -475,6 +573,8 @@ export function assembleSteps(
       id: criterion.id,
       phase: PHASE_ID_BY_KEY[phase.key],
       room: m.room,
+      sign: m.sign,
+      roomName: m.roomName,
       title: m.title,
       brief: m.brief,
       doneWhen: m.doneWhen,
@@ -511,9 +611,13 @@ STEPS.find((s) => s.id === id);
 
 /**
  * The content-readiness allowlist: the ONE source of truth for which criteria
- * have a SHIPPED UI surface today. Unit 8 Tier C1 expands this as each phase's
- * surface generalizes; the coach, room entry, and floor cards all consume THIS
- * list so no surface can outrun another.
+ * have a SHIPPED UI surface. Unit 8 shipped the generalized criterion floor,
+ * phase-aware runner chrome, the promotion screen, and the Grow/Scale surface
+ * in one pass, so ALL 25 criteria are built — phases 4-5 remain gated by the
+ * BUSINESS MODEL (gameCore's isPhaseUnlocked), not by this list. The coach,
+ * room entry, and floor cards all consume THIS list so no surface can outrun
+ * another; if a future criterion ships content before its surface, shrink the
+ * list again rather than gating in components.
  *
  * Deliberate split: the ENGINE (gameCore's isStepUnlocked / nextUpFor / the
  * unlock and progress machinery) is allowlist-FREE — it models the full
@@ -522,7 +626,7 @@ STEPS.find((s) => s.id === id);
  * does, so save data and progress semantics stay independent of what the UI
  * has built.
  */
-export const BUILT_CRITERIA: ReadonlySet<string> = new Set(["1.1", "1.2"]);
+export const BUILT_CRITERIA: ReadonlySet<string> = new Set(STEPS.map((s) => s.id));
 
 export const parseTask = (
 raw: string)

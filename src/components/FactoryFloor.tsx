@@ -17,23 +17,26 @@
  */
 import { useEffect, useRef, useState } from "react";
 import { useGame } from "../state/GameContext";
-import type { RoomId } from "../data/path";
+import type { PhaseId, RoomId } from "../data/path";
 import { AvatarSprite } from "./Avatar";
 import { MobilePath } from "./MobilePath";
 import { PhasesFloor } from "./PhasesFloor";
-import { SellFloor } from "./SellFloor";
+import { CriterionFloor } from "./CriterionFloor";
 
 const DESKTOP_QUERY = "(min-width: 1024px)";
 
 /** What a card tap wants to happen once the avatar has walked over. */
 export type WalkIntent =
-  | { kind: "openSellFloor" }
+  | { kind: "openPhaseFloor"; phase: PhaseId }
   | { kind: "openRoom"; room: RoomId }
   | { kind: "enterCriterion"; stepId: string }
   | { kind: "openIdea"; ideaIndex: number }
-  | { kind: "createIdea" };
+  | { kind: "createIdea" }
+  /** Open the PromoteBusiness screen (Unit 8 Tier C2) — coach CTA + Grow card. */
+  | { kind: "openPromote" };
 
-export type FloorView = "phases" | "sell";
+/** Which sub-floor is showing: the Path overview or one phase's criterion floor. */
+export type FloorView = "phases" | PhaseId;
 
 export interface FloorProps {
   walkTo: WalkIntent | null;
@@ -44,6 +47,8 @@ export interface FloorProps {
   floorView: FloorView;
   /** Immediate (no-walk) return to the phases view; a parent-level setter. */
   onBack: () => void;
+  /** Open the idea-switcher dialog (state lives in Factory, above the mount). */
+  onOpenSwitcher: () => void;
 }
 
 function useIsDesktop() {
@@ -63,7 +68,7 @@ export function FactoryFloor(props: FloorProps) {
 
 const HINT = "Click the floor to walk · click a room to enter it";
 
-function DesktopFloor({ walkTo, onArrived, onWalk, floorView, onBack }: FloorProps) {
+function DesktopFloor({ walkTo, onArrived, onWalk, floorView, onBack, onOpenSwitcher }: FloorProps) {
   const { profile } = useGame();
   const [pos, setPos] = useState({ x: 50, y: 94 });
   const timer = useRef<number | null>(null);
@@ -99,7 +104,11 @@ function DesktopFloor({ walkTo, onArrived, onWalk, floorView, onBack }: FloorPro
       {/* Content scrolls within the floor panel. Clicks on empty area bubble to
           onFloorClick (cosmetic avatar walk); card buttons handle their own tap. */}
       <div className="absolute inset-0 overflow-y-auto p-7 pb-14">
-        {floorView === "phases" ? <PhasesFloor onWalk={onWalk} /> : <SellFloor onWalk={onWalk} onBack={onBack} />}
+        {floorView === "phases" ? (
+          <PhasesFloor onWalk={onWalk} onOpenSwitcher={onOpenSwitcher} />
+        ) : (
+          <CriterionFloor phase={floorView} onWalk={onWalk} onBack={onBack} onOpenSwitcher={onOpenSwitcher} />
+        )}
       </div>
 
       <div

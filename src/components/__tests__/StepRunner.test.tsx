@@ -55,8 +55,21 @@ import * as GameContext from "../../state/GameContext";
 import { StepRunner } from "../StepRunner";
 import { Celebration } from "../Celebration";
 import { taskIdFor } from "../StuckBox";
+import { phaseById } from "../../data/path";
 
 const Ctx = (GameContext as unknown as { __ctx: React.Context<unknown> }).__ctx;
+
+/** jsdom normalizes inline hsl() to rgba(); compare through the same pipe. */
+function cssBackground(value: string): string {
+  const el = document.createElement("div");
+  el.style.background = value;
+  return el.style.background;
+}
+function cssColor(value: string): string {
+  const el = document.createElement("div");
+  el.style.color = value;
+  return el.style.color;
+}
 
 function Harness({ seed, onAction }: { seed: GameState; onAction?: (a: unknown) => void }) {
   const [state, rawDispatch] = React.useReducer(reducer, seed);
@@ -183,6 +196,70 @@ describe("StepRunner", () => {
     expect(container.querySelectorAll(".h-1\\.5").length).toBe(6);
   });
 
+  it("shows the idea one-liner in the header once authored (idea context, Unit 8)", () => {
+    const s = seedAtLastTaskOf11();
+    render(
+      <Harness
+        seed={{ ...s, ideas: [{ fields: { oneLiner: "Bracelets" }, done: s.ideas[0].done }] }}
+      />,
+    );
+    expect(screen.getByText("Phase 1 · Sell · Criterion 1 of 5 · Idea #1 · Bracelets")).toBeTruthy();
+  });
+
+  it("shows the BUSINESS name in the header on a Grow criterion (4.1)", () => {
+    const s = initialState();
+    const seed: GameState = {
+      ...s,
+      stage: "app",
+      ideas: [{ id: "idea-a", fields: { oneLiner: "Slime kits" }, done: {} }],
+      activeIdea: 0,
+      businesses: [{ id: "biz-1", ideaId: "idea-a", archived: false }],
+      runnerOpen: true,
+      runnerStep: "4.1",
+      runnerIndex: 0,
+    };
+    render(<Harness seed={seed} />);
+    expect(
+      screen.getByText("Phase 4 · Grow · Criterion 1 of 5 · Your business · Slime kits"),
+    ).toBeTruthy();
+  });
+
+  it("themes the runner chrome in PHASE COLORS on a Build criterion (2.1)", () => {
+    const s = initialState();
+    const seed: GameState = {
+      ...s,
+      stage: "app",
+      ideas: [{ fields: {}, done: {} }],
+      activeIdea: 0,
+      runnerOpen: true,
+      runnerStep: "2.1",
+      runnerIndex: 0,
+    };
+    const { container } = render(<Harness seed={seed} />);
+    const build = phaseById("build");
+    // Header wash + label text carry the Build hsl chrome from PHASES (jsdom
+    // normalizes hsl to rgba, so compare via the same normalization).
+    const header = container.querySelector("header") as HTMLElement;
+    expect(header.style.background).toBe(cssBackground(build.wash));
+    const label = screen.getByText(/Phase 2 · Build · Criterion 1 of 5/) as HTMLElement;
+    expect(label.style.color).toBe(cssColor(build.text));
+    // The primary CTA takes the Build accent (non-sell phases only).
+    const cta = screen.getByText("✓ I did it") as HTMLElement;
+    expect(cta.style.background).toBe(cssBackground(build.accent));
+  });
+
+  it("keeps the SELL runner exactly as before Unit 8 (verified-green CTA, sell wash)", () => {
+    const { container } = render(<Harness seed={seedAtLastTaskOf11()} />);
+    const header = container.querySelector("header") as HTMLElement;
+    // The exact pre-Unit-8 header wash: hsl(14 78% 54% / 0.09).
+    expect(header.style.background).toBe(cssBackground("hsl(14 78% 54% / 0.09)"));
+    expect(header.style.background).toBe(cssBackground(phaseById("sell").wash));
+    // Sell's CTA keeps the bg-verified class with NO inline phase override.
+    const cta = screen.getByText("✓ I did it") as HTMLElement;
+    expect(cta.className).toContain("bg-verified");
+    expect(cta.style.background).toBe("");
+  });
+
   it("completing the last task swaps the runner for the celebration listing 1.2", () => {
     render(<Harness seed={seedAtLastTaskOf11()} />);
     fireEvent.click(screen.getByText("✓ I did it"));
@@ -221,7 +298,7 @@ describe("Celebration after 1.2", () => {
   });
 });
 
-describe("Celebration beyond the Sell room map (FIX-4 coverage)", () => {
+describe("Celebration across phase boundaries (Unit 8)", () => {
   function seedCelebrating(celebrate: string): GameState {
     return {
       ...initialState(),
@@ -232,23 +309,49 @@ describe("Celebration beyond the Sell room map (FIX-4 coverage)", () => {
     };
   }
 
-  it("at 1.5 (phase boundary: next is 2.1) the 'New on The Path' block hides, no crash", () => {
+  it("at 1.5 (phase boundary) the next-step block names 2.1 · The Build Room", () => {
     render(<Harness seed={seedCelebrating("1.5")} />);
     expect(screen.getByText("Criterion passed")).toBeTruthy();
     expect(screen.getByText("25 supervised outreach attempts")).toBeTruthy();
     expect(screen.getByText("+100 XP")).toBeTruthy();
-    // 2.1 has no SELL_ROOMS entry -> the unlock block simply hides.
-    expect(screen.queryByText("New on The Path")).toBeNull();
+    // Unit 8: the block generalizes across the boundary via Step.roomName.
+    expect(screen.getByText("New on The Path")).toBeTruthy();
+    expect(screen.getByText("2.1 · The Build Room")).toBeTruthy();
   });
 
-  it("at 5.5 (terminal criterion: no next id at all) it renders cleanly", () => {
-    render(<Harness seed={seedCelebrating("5.5")} />);
+  it("at 2.5 (Build -> Validate boundary) it names 3.1 · The Loop Bench", () => {
+    render(<Harness seed={seedCelebrating("2.5")} />);
+    expect(screen.getByText("3.1 · The Loop Bench")).toBeTruthy();
+  });
+
+  it("at 3.5 with NO business it points at PROMOTION, not a room", () => {
+    render(<Harness seed={seedCelebrating("3.5")} />);
     expect(screen.getByText("Criterion passed")).toBeTruthy();
-    expect(screen.getByText("Pitch next year, on stage")).toBeTruthy();
+    expect(screen.queryByText("New on The Path")).toBeNull();
+    expect(screen.getByText(/Make it your business/)).toBeTruthy();
+    expect(screen.getByText(/Promote it to open Phase 4/)).toBeTruthy();
+  });
+
+  it("at 3.5 WITH an active business it names 4.1 · The Checkout Booth", () => {
+    const seed = seedCelebrating("3.5");
+    seed.ideas = [{ id: "idea-a", fields: {}, done: {} }];
+    seed.businesses = [{ id: "biz-1", ideaId: "idea-a", archived: false }];
+    render(<Harness seed={seed} />);
+    expect(screen.queryByText(/Promote it to open/)).toBeNull();
+    expect(screen.getByText("4.1 · The Checkout Booth")).toBeTruthy();
+  });
+
+  it("at 5.5 the TERMINAL state uses the Celebration chrome with terminal copy, no next-step CTA", () => {
+    render(<Harness seed={seedCelebrating("5.5")} />);
+    expect(screen.getByText("Path complete")).toBeTruthy();
+    expect(screen.getByText("You built the whole path")).toBeTruthy();
     expect(screen.getByText("+200 XP")).toBeTruthy();
     expect(screen.queryByText("New on The Path")).toBeNull();
+    expect(screen.queryByText("Keep going →")).toBeNull();
+    // No em dashes in the terminal copy (house rule).
+    expect(document.body.textContent).not.toMatch(/—/);
     // Dismiss works from the terminal state too.
-    fireEvent.click(screen.getByText("Keep going →"));
-    expect(screen.queryByText("Criterion passed")).toBeNull();
+    fireEvent.click(screen.getByText("Back to the floor"));
+    expect(screen.queryByText("Path complete")).toBeNull();
   });
 });
