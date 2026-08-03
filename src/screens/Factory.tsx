@@ -173,7 +173,11 @@ function PickerDialog() {
         <p className="mt-1 text-[13px] text-[hsl(25_20%_38%)]">Pick the product you are working on for {pickFor}.</p>
         <div className="mt-4 flex flex-col gap-2">
           {eligible.map((n) => {
-            const oneLiner = ideaOneLiner(game, n) || "Not named yet";
+            // Product name first and foremost (ideaSummaryName prefers it); the
+            // one-liner drops to a secondary line when a name exists.
+            const name = ideaSummaryName(game, n);
+            const oneLiner = ideaOneLiner(game, n);
+            const showLiner = oneLiner.length > 0 && oneLiner !== name;
             return (
               <button
                 key={n}
@@ -182,7 +186,8 @@ function PickerDialog() {
                 className="flex min-h-[48px] flex-col rounded-2xl border-2 border-[hsl(25_34%_20%/0.15)] bg-white px-4 py-3 text-left hover:border-sell"
               >
                 <span className="font-mono text-[11px] font-bold text-[hsl(14_78%_44%)]">Idea #{n + 1}</span>
-                <span className="text-[13px] text-[hsl(25_34%_20%)]">{oneLiner}</span>
+                <span className="text-[13px] font-bold text-[hsl(25_34%_20%)]">{name}</span>
+                {showLiner && <span className="text-[12px] text-[hsl(25_20%_38%)]">{oneLiner}</span>}
               </button>
             );
           })}

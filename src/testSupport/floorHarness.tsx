@@ -14,7 +14,7 @@ import {
   isTaskDone as isTaskDoneFn,
   isCriterionDone as isCriterionDoneFn,
   isStepUnlocked as isStepUnlockedFn,
-  ideasEligibleFor as ideasEligibleForFn,
+  ideasEnterableFor as ideasEligibleForFn,
   nextUpFor as nextUpForFn,
   isPhaseComplete as isPhaseCompleteFn,
   activeBusiness as activeBusinessFn,

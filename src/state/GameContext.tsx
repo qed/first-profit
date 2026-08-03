@@ -36,7 +36,7 @@ import {
   isTaskDone as isTaskDoneFn,
   isCriterionDone as isCriterionDoneFn,
   isStepUnlocked as isStepUnlockedFn,
-  ideasEligibleFor as ideasEligibleForFn,
+  ideasEnterableFor as ideasEnterableForFn,
   activeBusiness as activeBusinessFn,
   isPhaseComplete as isPhaseCompleteFn,
   type GameState,
@@ -99,6 +99,8 @@ export interface GameApi extends GameState {
   isTaskDone: (ideaIndex: number, stepId: string, index: number) => boolean;
   isCriterionDone: (ideaIndex: number, stepId: string) => boolean;
   isStepUnlocked: (ideaIndex: number, stepId: string) => boolean;
+  /** Room-enterable ideas for a criterion: in-progress first, else completed
+   *  ideas in review mode (one rule with roomEntryFor — see ideasEnterableFor). */
   ideasEligibleFor: (stepId: string) => number[];
   grossSalesSumCents: () => number;
   salesSumCents: () => number;
@@ -849,7 +851,7 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
       isTaskDone: (ideaIndex, stepId, index) => isTaskDoneFn(state, ideaIndex, stepId, index),
       isCriterionDone: (ideaIndex, stepId) => isCriterionDoneFn(state, ideaIndex, stepId),
       isStepUnlocked: (ideaIndex, stepId) => isStepUnlockedFn(state, ideaIndex, stepId),
-      ideasEligibleFor: (stepId) => ideasEligibleForFn(state, stepId),
+      ideasEligibleFor: (stepId) => ideasEnterableForFn(state, stepId),
       grossSalesSumCents: () => grossSalesSumCentsFn(state),
       salesSumCents: () => salesSumCentsFn(state),
       promoteIdea,

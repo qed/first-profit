@@ -13,6 +13,8 @@ import {
   fromSaveDoc,
   grossSalesSumCents,
   ideasEligibleFor,
+  ideasEnterableFor,
+  ideasReviewableFor,
   initialState,
   isCriterionDone,
   isIdeaEligibleFor,
@@ -670,6 +672,33 @@ describe("idea eligibility (room click)", () => {
     expect(isIdeaEligibleFor(s, 0, "1.2")).toBe(false);
     s = completeCriterion(s, 0, "1.1");
     expect(isIdeaEligibleFor(s, 0, "1.2")).toBe(true);
+  });
+
+  it("a DONE criterion stays reviewable (unlocked+done), and enterable falls back to it", () => {
+    let s = withOneIdea();
+    // In progress: enterable == eligible, reviewable empty.
+    expect(ideasReviewableFor(s, "1.1")).toEqual([]);
+    expect(ideasEnterableFor(s, "1.1")).toEqual([0]);
+    s = completeCriterion(s, 0, "1.1");
+    // Done: eligible empty, but the room stays enterable in review mode.
+    expect(ideasEligibleFor(s, "1.1")).toEqual([]);
+    expect(ideasReviewableFor(s, "1.1")).toEqual([0]);
+    expect(ideasEnterableFor(s, "1.1")).toEqual([0]);
+    // A LOCKED criterion is neither (never reviewable ahead of unlock).
+    expect(ideasReviewableFor(s, "1.3")).toEqual([]);
+  });
+
+  it("enterable keeps in-progress priority over done ideas (no picker regression)", () => {
+    let s = apply(
+      initialState(),
+      { type: "CREATE_IDEA" },
+      { type: "CLOSE_RUNNER" },
+      { type: "CREATE_IDEA" },
+      { type: "CLOSE_RUNNER" },
+    );
+    s = completeCriterion(s, 0, "1.1");
+    // Idea 1 still mid-1.1 → it alone is enterable, exactly the old behavior.
+    expect(ideasEnterableFor(s, "1.1")).toEqual([1]);
   });
 });
 

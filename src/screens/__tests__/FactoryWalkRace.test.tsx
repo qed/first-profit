@@ -123,14 +123,36 @@ describe("Factory — walk-race proofing (unit review FIX 1)", () => {
     expect(screen.queryByRole("dialog")).toBeNull();
   });
 
-  it("arrival computes against LIVE state: eligibility that evaporates mid-walk dispatches nothing", () => {
+  it("arrival computes against LIVE state: progress made mid-walk shifts the entry task", () => {
     // Idea #1 finished 1.1 (the only idea eligible for 1.2); idea #2 active.
     const seed = completeStep(withIdeas(2), 0, "1.1");
     const { actions, api } = mountFactory(seed);
     openSellFloor();
     fireEvent.click(screen.getByText("The Sales Room").closest("button")!);
-    // Mid-walk, idea #1 completes 1.2 externally (e.g. a cross-tab union):
-    // by arrival time NO idea is eligible for 1.2 any more.
+    // Mid-walk, idea #1 completes the first two 1.2 tasks externally (e.g. a
+    // cross-tab union): by arrival time the frontier has moved.
+    act(() => {
+      for (const i of [0, 1]) {
+        api.current!.dispatch({ type: "COMPLETE_TASK", ideaIndex: 0, stepId: "1.2", index: i });
+      }
+    });
+    const before = actions.length;
+    arrive();
+    // A stale-closure arrival would open at the pre-completion frontier
+    // (index 0); the live computation opens at the moved frontier (index 2).
+    const after = actions.slice(before);
+    expect(after.some((a) => a.type === "OPEN_RUNNER" && a.stepId === "1.2" && a.index === 2)).toBe(true);
+    expect(after.some((a) => a.type === "OPEN_RUNNER" && a.index === 0)).toBe(false);
+  });
+
+  it("arrival at a criterion completed mid-walk opens it in REVIEW mode, not a dead tap", () => {
+    // Review-entry rule (ideasEnterableFor): a done room stays reachable so
+    // authored fields (1.1 productName/oneLiner) are never orphaned — arrival
+    // opens task 1 with idempotent completion, never a silent no-op.
+    const seed = completeStep(withIdeas(2), 0, "1.1");
+    const { actions, api } = mountFactory(seed);
+    openSellFloor();
+    fireEvent.click(screen.getByText("The Sales Room").closest("button")!);
     const tasks = stepById("1.2")!.tasks.length;
     act(() => {
       for (let i = 0; i < tasks; i++) {
@@ -139,10 +161,8 @@ describe("Factory — walk-race proofing (unit review FIX 1)", () => {
     });
     const before = actions.length;
     arrive();
-    // A stale-closure arrival would have dispatched SET_ACTIVE_IDEA +
-    // OPEN_RUNNER from the pre-completion snapshot; the live computation
-    // sees roomEntryFor → noop and dispatches nothing.
-    expect(actions.slice(before)).toEqual([]);
+    const after = actions.slice(before);
+    expect(after.some((a) => a.type === "OPEN_RUNNER" && a.stepId === "1.2" && a.index === 0)).toBe(true);
   });
 
   it("the coach walk still lands: arrival opens the runner for the coach's target", () => {

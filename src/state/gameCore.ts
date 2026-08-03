@@ -1024,6 +1024,32 @@ export function ideasEligibleFor(state: GameState, stepId: string): number[] {
 }
 
 /**
+ * Idea indexes that may RE-ENTER a COMPLETED criterion to review it and edit
+ * its authored fields (unlocked AND done). Completing 1.1 must never orphan
+ * `productName`/`oneLiner` — a done room stays reachable. Task completion is
+ * idempotent (markTaskDone no-ops on done tasks), so review entry can never
+ * re-fire a celebration or advance progress.
+ */
+export function ideasReviewableFor(state: GameState, stepId: string): number[] {
+  const result: number[] = [];
+  for (let i = 0; i < state.ideas.length; i++) {
+    if (isStepUnlocked(state, i, stepId) && isCriterionDone(state, i, stepId)) result.push(i);
+  }
+  return result;
+}
+
+/**
+ * The room-entry list: in-progress ideas keep EXACT pre-existing priority
+ * (auto-select/picker behave as before whenever any idea still has work
+ * here); only when none is in progress do completed ideas enter, in review
+ * mode. Consumed by roomEntryFor and the "Which idea?" picker — one rule.
+ */
+export function ideasEnterableFor(state: GameState, stepId: string): number[] {
+  const eligible = ideasEligibleFor(state, stepId);
+  return eligible.length > 0 ? eligible : ideasReviewableFor(state, stepId);
+}
+
+/**
  * Total NET of all `sale` ledger rows, in cents (the provider fee is felt). A
  * row with no fee snapshot (legacy / no-provider) counts at its gross amount via
  * the `netCents ?? amountCents` default.
