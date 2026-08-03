@@ -118,6 +118,10 @@ the project-level value only governs the blocked-in-Slice-A email-signup path.
 3. **Handle is a minor's derived identity.** `fp_player_profiles.handle` derives
    from the child's first name and is published at `firstprofit.school/<handle>`;
    bounded/validated but flagged in-migration for pre-launch product review.
+   **RESOLVED 2026-08-03 (owner decision): accepted with parent disclosure.**
+   First-name handles stay (core to the real-storefront product feel); the
+   parent notice email (The120 `artifacts/First Profit/parent-notice-2026-08-03-draft.md`)
+   discloses the URL shape and offers a different handle on request.
 
 ## Re-checks
 
