@@ -83,7 +83,8 @@ describe("Onboarding screens", () => {
     fireEvent.click(screen.getByText("Start Unit Task #1 →"));
     const dispatched = dispatch.mock.calls.map((c) => c[0] as Action);
     expect(dispatched).toEqual([
-      { type: "CREATE_IDEA" },
+      // The idea's stable id is minted at the dispatch boundary (Unit 7).
+      { type: "CREATE_IDEA", ideaId: expect.any(String) },
       { type: "SET_ONBOARDING_COMPLETE" },
       { type: "SET_STAGE", stage: "app" },
     ]);

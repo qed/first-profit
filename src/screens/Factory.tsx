@@ -253,7 +253,8 @@ export function Factory() {
           break;
         }
         case "createIdea":
-          dispatch({ type: "CREATE_IDEA" });
+          // The idea's stable id is minted at this caller boundary (Unit 7).
+          dispatch({ type: "CREATE_IDEA", ideaId: crypto.randomUUID() });
           break;
       }
       setWalkTo(null);

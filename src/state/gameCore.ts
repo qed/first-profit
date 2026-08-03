@@ -115,6 +115,18 @@ export interface ChosenProvider {
 }
 
 export interface Idea {
+  /**
+   * Stable idea identity (Unit 7). ADDITIVE OPTIONAL (the doneAt precedent — no
+   * DOC_VERSION bump): NEW ideas are minted a caller-stamped crypto UUID via
+   * CREATE_IDEA's `ideaId` field (this module stays Math.random()-free), while
+   * LEGACY ideas get a DETERMINISTIC id minted on load inside fromSaveDoc
+   * (`legacy-idea-{index}`). Determinism there is load-bearing: the rebase-union
+   * path (sync.ts unionCompletionMaps) matches businesses to ideas BY ID across
+   * tabs/devices, so two tabs independently loading the same legacy doc must
+   * mint the SAME id — random minting would fork the identity and orphan a
+   * business promoted in the other tab.
+   */
+  id?: string;
   /** Task text answers, keyed by field key (e.g. `oneLiner`). */
   fields: Record<string, string>;
   /** Task completion, keyed by `${stepId}#${index}`. */
@@ -143,16 +155,29 @@ export interface Idea {
 }
 
 /**
- * A promoted business (the Unit 7 model, pre-wired here as a SEAM). One idea is
- * PROMOTED into a business to open phases 4-5; a business can be archived (and
- * later unarchived) rather than deleted. `ideaId` ties it back to the idea it
- * grew from. NO reducer action writes this list yet — Unit 7 adds
- * PROMOTE/ARCHIVE/UNARCHIVE; until then only tests construct states with it.
+ * A promoted business (Unit 7). One idea is PROMOTED into a business to open
+ * phases 4-5; a business can be archived (and later unarchived) rather than
+ * deleted. `ideaId` ties it back to the idea it grew from. Written by the
+ * PROMOTE_IDEA / ARCHIVE_BUSINESS / UNARCHIVE_BUSINESS reducer actions.
+ *
+ * Phase 4-5 progress BELONGS TO THE BUSINESS (origin R7): `doneByTask` /
+ * `doneAtByTask` mirror the Idea stable-id maps but live on the business
+ * record, so archiving preserves Grow/Scale progress with the record and a
+ * LATER promotion of a different idea starts a fresh record with no
+ * inheritance. Grow/Scale tasks never had legacy `${stepId}#${index}` keys
+ * (no pre-Unit-7 build could complete them), so only the stable-id maps exist
+ * here — there is deliberately no legacy `done` map.
  */
 export interface Business {
   id: string;
   ideaId?: string;
   archived?: boolean;
+  /** Caller-stamped epoch ms of the promotion (module stays Date.now()-free). */
+  promotedAt?: number;
+  /** Grow/Scale task completion, keyed by STABLE task id ("4.1.2"). */
+  doneByTask?: Record<string, boolean>;
+  /** Completion timestamps (caller-stamped epoch ms), keyed by stable task id. */
+  doneAtByTask?: Record<string, number>;
 }
 
 export interface Profile {
@@ -193,10 +218,10 @@ export interface GameState {
   /** The chosen payment provider (durable, in the save doc), or null. */
   chosenProvider: ChosenProvider | null;
   /**
-   * Promoted businesses (Unit 7 seam). ADDITIVE OPTIONAL per the house
-   * discipline (the chosenProvider/doneAt precedent): absent on every existing
-   * state/doc and STAYS absent until Unit 7's PROMOTE writes it — no
-   * DOC_VERSION bump. activeBusinessExists reads it defensively today.
+   * Promoted businesses (Unit 7). ADDITIVE OPTIONAL per the house discipline
+   * (the chosenProvider/doneAt precedent): absent on every pre-Unit-7
+   * state/doc and STAYS absent until PROMOTE_IDEA writes it — no DOC_VERSION
+   * bump. activeBusinessExists reads it defensively.
    */
   businesses?: Business[];
   /** True once onboarding screens 2..5 are complete (persisted in the save doc). */
@@ -246,6 +271,15 @@ export interface SaveDoc {
   businesses?: Business[];
 }
 
+/** Deep-copy one business record (its completion maps must never be aliased). */
+function copyBusiness(b: Business): Business {
+  return {
+    ...b,
+    ...(b.doneByTask ? { doneByTask: { ...b.doneByTask } } : {}),
+    ...(b.doneAtByTask ? { doneAtByTask: { ...b.doneAtByTask } } : {}),
+  };
+}
+
 /**
  * Serialize the persistent slice of state. The ledger is deliberately excluded
  * (it lives append-only in fp_ledger, not the JSONB save doc).
@@ -254,6 +288,9 @@ export function toSaveDoc(state: GameState): SaveDoc {
   return {
     docVersion: DOC_VERSION,
     ideas: state.ideas.map((idea) => ({
+      // Emit the id only when it exists (absent-stays-absent; legacy in-memory
+      // ideas without one get a deterministic id on the NEXT load).
+      ...(idea.id ? { id: idea.id } : {}),
       fields: { ...idea.fields },
       done: { ...idea.done },
       // Emit doneAt only when it exists so an untimestamped doc stays byte-stable.
@@ -268,9 +305,10 @@ export function toSaveDoc(state: GameState): SaveDoc {
     siteHeadline: state.profile.siteHeadline,
     onboardingComplete: state.onboardingComplete,
     chosenProvider: state.chosenProvider,
-    // Absent-stays-absent (Unit 7 seam): a state that never promoted a
-    // business emits a byte-identical doc to before the field existed.
-    ...(state.businesses ? { businesses: state.businesses.map((b) => ({ ...b })) } : {}),
+    // Absent-stays-absent (Unit 7): a state that never promoted a business
+    // emits a byte-identical doc to before the field existed. Per-business
+    // completion maps are deep-copied so the doc never aliases live state.
+    ...(state.businesses ? { businesses: state.businesses.map(copyBusiness) } : {}),
   };
 }
 
@@ -300,7 +338,15 @@ function coerceIdea(value: unknown): Idea {
       if (typeof leaf === "boolean") done[key] = leaf;
     }
   }
-  const idea: Idea = { fields, done };
+  // Additive-optional id (Unit 7): kept only when a well-typed string (a
+  // missing/malformed one is minted deterministically in fromSaveDoc below).
+  // The id leads the literal so a minted and a persisted id serialize with the
+  // SAME key order (byte-stability across repeated loads).
+  const idea: Idea = {
+    ...(typeof value.id === "string" && value.id ? { id: value.id } : {}),
+    fields,
+    done,
+  };
   // Additive-optional doneAt: absent on old docs -> stays absent (never invented).
   // Only finite, non-negative numeric leaves survive (NaN would JSON.stringify to
   // null and poison the next load, mirroring the chosenAt discipline).
@@ -427,11 +473,11 @@ function coerceChosenProvider(value: unknown): ChosenProvider | null {
   return null;
 }
 
-// Coerce the persisted businesses list (Unit 7 seam). ADDITIVE OPTIONAL:
+// Coerce the persisted businesses list (Unit 7). ADDITIVE OPTIONAL:
 // absent (or not an array) stays ABSENT — never invented as []. Each entry
 // needs a string id to survive; the optional leaves are kept only when
 // well-typed (the coerceIdea leaf-filtering discipline), so a malformed entry
-// can neither fail the load nor half-poison the seam.
+// can neither fail the load nor half-poison the model.
 function coerceBusinesses(value: unknown): Business[] | undefined {
   if (!Array.isArray(value)) return undefined;
   const businesses: Business[] = [];
@@ -440,6 +486,31 @@ function coerceBusinesses(value: unknown): Business[] | undefined {
     const business: Business = { id: entry.id };
     if (typeof entry.ideaId === "string") business.ideaId = entry.ideaId;
     if (typeof entry.archived === "boolean") business.archived = entry.archived;
+    // Timestamp leaves follow the chosenAt discipline: finite, non-negative
+    // only (NaN would JSON.stringify to null and poison the next load).
+    if (
+      typeof entry.promotedAt === "number" &&
+      Number.isFinite(entry.promotedAt) &&
+      entry.promotedAt >= 0
+    ) {
+      business.promotedAt = entry.promotedAt;
+    }
+    if (isRecord(entry.doneByTask)) {
+      const doneByTask: Record<string, boolean> = {};
+      for (const [key, leaf] of Object.entries(entry.doneByTask)) {
+        if (typeof leaf === "boolean") doneByTask[key] = leaf;
+      }
+      business.doneByTask = doneByTask;
+    }
+    if (isRecord(entry.doneAtByTask)) {
+      const doneAtByTask: Record<string, number> = {};
+      for (const [key, leaf] of Object.entries(entry.doneAtByTask)) {
+        if (typeof leaf === "number" && Number.isFinite(leaf) && leaf >= 0) {
+          doneAtByTask[key] = leaf;
+        }
+      }
+      business.doneAtByTask = doneAtByTask;
+    }
     businesses.push(business);
   }
   return businesses;
@@ -461,7 +532,20 @@ export function fromSaveDoc(
   if (!isRecord(raw)) return { ok: false, reason: "malformed" };
   if (raw.docVersion !== DOC_VERSION) return { ok: false, reason: "unknown-version" };
   const ideas = Array.isArray(raw.ideas)
-    ? raw.ideas.map(coerceIdea).map((idea) => migrateIdeaProgress(idea, remap))
+    ? raw.ideas
+        .map(coerceIdea)
+        .map((idea) => migrateIdeaProgress(idea, remap))
+        // Legacy-id minting (Unit 7): an idea saved before ids existed gets a
+        // DETERMINISTIC id derived from its position. Determinism is required
+        // (never crypto-random here): two tabs/devices independently loading
+        // the same legacy doc must mint IDENTICAL ids, or the rebase-union
+        // path would fork the idea's identity and orphan any business promoted
+        // from it in the other tab. Idea order is append-only (ideas are never
+        // reordered or deleted), so the index is stable. NEW ideas get
+        // caller-minted crypto UUIDs via CREATE_IDEA's `ideaId` instead.
+        // (Id first, matching coerceIdea's key order, so a minted doc is
+        // byte-identical to its own re-load.)
+        .map((idea, index) => (idea.id ? idea : { id: `legacy-idea-${index}`, ...idea }))
     : [];
   const activeIdea = typeof raw.activeIdea === "number" ? raw.activeIdea : 0;
   const siteHeadline = typeof raw.siteHeadline === "string" ? raw.siteHeadline : "";
@@ -503,6 +587,18 @@ export function isTaskDone(
   index: number,
 ): boolean {
   if (!hasIdea(state, ideaIndex)) return false;
+  // Grow/Scale progress belongs to the BUSINESS (Unit 7; origin R7): read the
+  // ACTIVE business's stable-id map — never an idea's — and NOTHING is done
+  // when no active business exists (an archived business keeps its maps, but
+  // they are unreadable until unarchived). No legacy fallback: grow/scale
+  // tasks never had `${stepId}#${index}` keys.
+  const taskPhase = PHASE_BY_CRITERION.get(stepId);
+  if (taskPhase === "grow" || taskPhase === "scale") {
+    const business = activeBusiness(state);
+    if (!business) return false;
+    const businessTaskId = taskIdAt(stepId, index);
+    return Boolean(businessTaskId && business.doneByTask?.[resolveTaskId(businessTaskId)]);
+  }
   const idea = state.ideas[ideaIndex];
   // fpv2 core carries no artifact map yet; an @artifact task (parseTask's
   // `auto` hook) is only ever complete via the explicit done maps until
@@ -530,15 +626,34 @@ export function stepPips(state: GameState, ideaIndex: number, stepId: string): b
 }
 
 /**
- * The Grow/Scale business seam: phases 4-5 belong to the promoted BUSINESS,
+ * The single ACTIVE (non-archived) business, or null. The reducer's
+ * PROMOTE/UNARCHIVE invariant keeps at most one business unarchived; should a
+ * rebase-union ever surface two (a server-only active business unioned beside
+ * a local one — accepted as monotonic-ish), the FIRST in list order wins,
+ * which is the earliest-promoted record on both sides.
+ */
+export function activeBusiness(state: GameState): Business | null {
+  return state.businesses?.find((b) => !b.archived) ?? null;
+}
+
+/**
+ * The business promoted from `ideaId`, or undefined. A re-promotion after an
+ * archive creates a NEW record for the same idea, so the LAST match is the
+ * current one (earlier records are the archived history).
+ */
+export function businessFor(state: GameState, ideaId: string): Business | undefined {
+  const matches = state.businesses?.filter((b) => b.ideaId === ideaId) ?? [];
+  return matches.length > 0 ? matches[matches.length - 1] : undefined;
+}
+
+/**
+ * The Grow/Scale business gate: phases 4-5 belong to the promoted BUSINESS,
  * not an idea, so they gate on an active (non-archived) business existing in
- * `state.businesses`. NO reducer action writes that list yet — Unit 7 adds
- * PROMOTE/ARCHIVE/UNARCHIVE — so phases 4-5 stay locked in practice for every
- * real save, and the app is shippable after this unit alone. The read is
- * defensive: an absent list is simply "no business".
+ * `state.businesses` (written by PROMOTE_IDEA / UNARCHIVE_BUSINESS). The read
+ * is defensive: an absent list is simply "no business".
  */
 export function activeBusinessExists(state: GameState): boolean {
-  return state.businesses?.some((b) => !b.archived) ?? false;
+  return activeBusiness(state) !== null;
 }
 
 /** Whether every criterion of a phase is complete for an idea. */
@@ -684,7 +799,13 @@ export type Action =
   | { type: "SET_OB"; ob: number }
   | { type: "SET_PROFILE"; patch: Partial<Profile> }
   | { type: "SET_ONBOARDING_COMPLETE"; value?: boolean }
-  | { type: "CREATE_IDEA" }
+  /**
+   * `ideaId` is the CALLER-minted stable identity for the new idea (crypto
+   * UUID at the GameContext boundary — this module stays Math.random()-free,
+   * the chosenAt/at precedent). Optional so legacy callers/tests stay valid;
+   * an idea created without one gets a deterministic id on the next load.
+   */
+  | { type: "CREATE_IDEA"; ideaId?: string }
   | { type: "SET_ACTIVE_IDEA"; ideaIndex: number }
   | { type: "SET_FIELD"; ideaIndex: number; key: string; value: string }
   /**
@@ -708,6 +829,20 @@ export type Action =
   | ({ type: "ADD_LEDGER"; mock?: boolean } & LedgerEntry)
   | { type: "SET_LEDGER"; ledger: LedgerEntry[] }
   | { type: "DISMISS_CELEBRATION" }
+  /**
+   * Promote a phase-3-complete idea to THE business (origin R7: an explicit
+   * moment, one active business at a time). `businessId` and `at` are
+   * caller-stamped (crypto UUID / Date.now at the GameContext boundary).
+   * REFUSED (state unchanged) unless the idea exists, completed every
+   * Validate criterion, no unarchived business exists, and the businessId is
+   * unused. A promotion after an archive creates a NEW record — Grow/Scale
+   * progress is never inherited across promotions (origin decision).
+   */
+  | { type: "PROMOTE_IDEA"; ideaId: string; businessId: string; at: number }
+  /** Archive the business (kept, never deleted; its 4-5 progress rides along). */
+  | { type: "ARCHIVE_BUSINESS"; businessId: string }
+  /** Restore an archived business — refused while another business is active. */
+  | { type: "UNARCHIVE_BUSINESS"; businessId: string }
   | { type: "SET_PROVIDER"; providerId: ProviderId; chosenAt: number }
   | { type: "RESET_SESSION" }
   | { type: "HYDRATE"; doc: SaveDoc };
@@ -748,6 +883,31 @@ function markTaskDone(
   // a missing/malformed stamp completes the task with no doneAt entry.
   const stampValid = typeof at === "number" && Number.isFinite(at) && at >= 0;
   const wasCriterionDone = isCriterionDone(state, ideaIndex, stepId);
+
+  // Grow/Scale completion writes the ACTIVE business's maps (Unit 7; origin
+  // R7) — never an idea's. With no active business there is nothing to write
+  // (the phase is gated anyway); stable ids only, no legacy key is ever
+  // minted for a business task.
+  const phase = PHASE_BY_CRITERION.get(stepId);
+  if (phase === "grow" || phase === "scale") {
+    const business = activeBusiness(state);
+    const rawId = taskIdAt(stepId, index);
+    const businessTaskId = rawId ? resolveTaskId(rawId) : undefined;
+    if (!business || !businessTaskId) return state;
+    const businesses = (state.businesses ?? []).map((b) =>
+      b.id === business.id
+        ? {
+            ...b,
+            doneByTask: { ...(b.doneByTask ?? {}), [businessTaskId]: true },
+            ...(stampValid
+              ? { doneAtByTask: { ...(b.doneAtByTask ?? {}), [businessTaskId]: at } }
+              : {}),
+          }
+        : b,
+    );
+    return withCelebration({ ...state, businesses }, ideaIndex, stepId, wasCriterionDone);
+  }
+
   // DUAL-WRITE (Unit 5 transition; retirement condition in the doc comment
   // above): the stable-id maps are the forward shape; the legacy
   // `${stepId}#${index}` key is ALSO written when the task maps back through
@@ -775,23 +935,32 @@ function markTaskDone(
         }
       : idea,
   );
-  let next: GameState = { ...state, ideas };
+  return withCelebration({ ...state, ideas }, ideaIndex, stepId, wasCriterionDone);
+}
 
-  const nowCriterionDone = isCriterionDone(next, ideaIndex, stepId);
-  if (!wasCriterionDone && nowCriterionDone) {
-    const advanced = nextUpFor(next, ideaIndex);
-    next = {
-      ...next,
-      celebrate: stepId,
-      // The celebration takes over the whole screen. Close the runner so the
-      // two fixed aria-modal dialogs never stack (and focus never lands on the
-      // hidden runner underneath). DISMISS_CELEBRATION decides what re-opens.
-      runnerOpen: false,
-      runnerStep: advanced ?? next.runnerStep,
-      runnerIndex: 0,
-    };
-  }
-  return next;
+/**
+ * Shared criterion-completion tail of markTaskDone (idea and business writes):
+ * if the write just completed the criterion, fire the celebration and advance
+ * the runner to the next playable criterion.
+ */
+function withCelebration(
+  next: GameState,
+  ideaIndex: number,
+  stepId: string,
+  wasCriterionDone: boolean,
+): GameState {
+  if (wasCriterionDone || !isCriterionDone(next, ideaIndex, stepId)) return next;
+  const advanced = nextUpFor(next, ideaIndex);
+  return {
+    ...next,
+    celebrate: stepId,
+    // The celebration takes over the whole screen. Close the runner so the
+    // two fixed aria-modal dialogs never stack (and focus never lands on the
+    // hidden runner underneath). DISMISS_CELEBRATION decides what re-opens.
+    runnerOpen: false,
+    runnerStep: advanced ?? next.runnerStep,
+    runnerIndex: 0,
+  };
 }
 
 export function reducer(state: GameState, action: Action): GameState {
@@ -812,7 +981,12 @@ export function reducer(state: GameState, action: Action): GameState {
 
     case "CREATE_IDEA": {
       if (state.ideas.length >= MAX_IDEAS) return state;
-      const ideas = [...state.ideas, { fields: {}, done: {} }];
+      // The caller-minted stable id rides in when supplied (absent-stays-absent
+      // for legacy dispatchers; see the Idea.id doc).
+      const ideas = [
+        ...state.ideas,
+        { ...(action.ideaId ? { id: action.ideaId } : {}), fields: {}, done: {} },
+      ];
       return {
         ...state,
         ideas,
@@ -987,6 +1161,56 @@ export function reducer(state: GameState, action: Action): GameState {
       };
     }
 
+    case "PROMOTE_IDEA": {
+      // REFUSALS (state unchanged, never a throw): unknown idea, idea not
+      // through Validate, an active business already exists (archive first),
+      // or a replayed/duplicate businessId.
+      const ideaIndex = state.ideas.findIndex((idea) => idea.id === action.ideaId);
+      if (ideaIndex < 0) return state;
+      if (!isPhaseComplete(state, ideaIndex, "validate")) return state;
+      if (activeBusinessExists(state)) return state;
+      if (state.businesses?.some((b) => b.id === action.businessId)) return state;
+      const stampValid =
+        typeof action.at === "number" && Number.isFinite(action.at) && action.at >= 0;
+      // A NEW record every time (origin decision: no progress inheritance
+      // across promotions — an unarchived business resumes its OWN maps, but a
+      // fresh promotion starts empty).
+      const business: Business = {
+        id: action.businessId,
+        ideaId: action.ideaId,
+        archived: false,
+        ...(stampValid ? { promotedAt: action.at } : {}),
+      };
+      return { ...state, businesses: [...(state.businesses ?? []), business] };
+    }
+
+    case "ARCHIVE_BUSINESS": {
+      // Archive keeps the record AND its Grow/Scale maps (weeks of progress
+      // must never be a one-way door — UNARCHIVE_BUSINESS restores both).
+      const target = state.businesses?.find((b) => b.id === action.businessId);
+      if (!target || target.archived) return state;
+      return {
+        ...state,
+        businesses: state.businesses!.map((b) =>
+          b.id === action.businessId ? { ...b, archived: true } : b,
+        ),
+      };
+    }
+
+    case "UNARCHIVE_BUSINESS": {
+      // Refused while ANY business is active (the one-active invariant): the
+      // child archives the current business first, then unarchives.
+      const target = state.businesses?.find((b) => b.id === action.businessId);
+      if (!target || !target.archived) return state;
+      if (activeBusinessExists(state)) return state;
+      return {
+        ...state,
+        businesses: state.businesses!.map((b) =>
+          b.id === action.businessId ? { ...b, archived: false } : b,
+        ),
+      };
+    }
+
     case "SET_PROVIDER":
       // Record (or switch to) the chosen provider. The choice is durable (rides
       // the save doc); a switch stamps a fresh chosenAt. Past ledger rows keep
@@ -1023,6 +1247,9 @@ export function reducer(state: GameState, action: Action): GameState {
       return {
         ...state,
         ideas: doc.ideas.map((idea) => ({
+          // Stable idea identity (Unit 7): fromSaveDoc guarantees one on every
+          // loaded idea (minted deterministically when legacy).
+          ...(idea.id ? { id: idea.id } : {}),
           fields: { ...idea.fields },
           done: { ...idea.done },
           // Split-storage learning: HYDRATE must source every persisted slice it
@@ -1039,10 +1266,11 @@ export function reducer(state: GameState, action: Action): GameState {
         profile: { ...state.profile, siteHeadline: doc.siteHeadline },
         // Additive-optional: an existing v1 doc may omit it -> null.
         chosenProvider: doc.chosenProvider ?? null,
-        // Businesses (Unit 7 seam), sourced per the split-storage learning:
+        // Businesses (Unit 7), sourced per the split-storage learning:
         // HYDRATE must reset every persisted slice — a doc without the field
-        // clears any resident list (undefined), absent-stays-absent.
-        businesses: doc.businesses?.map((b) => ({ ...b })),
+        // clears any resident list (undefined), absent-stays-absent. Deep copy
+        // so the doc's per-business maps are never aliased into live state.
+        businesses: doc.businesses?.map(copyBusiness),
         onboardingComplete: doc.onboardingComplete,
         docVersion: DOC_VERSION,
         stage: doc.onboardingComplete ? "app" : "onboard",

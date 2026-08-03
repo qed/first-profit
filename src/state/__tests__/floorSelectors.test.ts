@@ -225,6 +225,14 @@ describe("floorSelectors — Next Step coach target", () => {
     expect(s.activeIdea).toBe(1);
     expect(nextCoachTarget(s)).toEqual({ kind: "promote", ideaIndex: 1 });
   });
+
+  it("the promote target CARRIES the eligible idea's stable id (Unit 7)", () => {
+    let s = apply(initialState(), { type: "CREATE_IDEA", ideaId: "idea-a" }, { type: "CLOSE_RUNNER" });
+    s = completePhase(s, 0, "sell");
+    s = completePhase(s, 0, "build");
+    s = completePhase(s, 0, "validate");
+    expect(nextCoachTarget(s)).toEqual({ kind: "promote", ideaIndex: 0, ideaId: "idea-a" });
+  });
 });
 
 describe("floorSelectors — locked-phase entry is a no-op (Unit 6)", () => {

@@ -38,6 +38,7 @@ import { getSupabase } from "./supabase";
 import {
   fromSaveDoc,
   DOC_VERSION,
+  type Business,
   type Idea,
   type SaveDoc,
   type LedgerEntry,
@@ -520,6 +521,39 @@ function unionIdeaCompletions(local: Idea, server: Idea): Idea {
 }
 
 /**
+ * Union the businesses lists (Unit 7). Businesses are MONOTONIC-ish:
+ * - a business present only on the SERVER is KEPT (appended in server order —
+ *   a concurrent session promoted it; dropping it would erase a promotion);
+ * - matched BY BUSINESS ID, each business's completion maps union exactly like
+ *   an idea's (server-only entries added, local wins on conflicts);
+ * - `archived` (and the other scalar leaves) is LATEST-INTENT: the LOCAL value
+ *   wins, like fields/chosenProvider — an archive/unarchive tap in the live
+ *   tab is the intent to honor, and there is no well-defined union of a flag.
+ * Absent-stays-absent: when neither side carries the list, none is invented.
+ */
+function unionBusinesses(
+  local: Business[] | undefined,
+  server: Business[] | undefined,
+): Business[] | undefined {
+  if (!server || server.length === 0) return local;
+  if (!local || local.length === 0) return server.map((b) => ({ ...b }));
+  const merged = local.map((lb) => {
+    const sb = server.find((b) => b.id === lb.id);
+    if (!sb) return lb;
+    const out: Business = { ...lb }; // scalar leaves: local wins (latest intent)
+    const doneByTask = unionMap(lb.doneByTask, sb.doneByTask);
+    const doneAtByTask = unionMap(lb.doneAtByTask, sb.doneAtByTask);
+    if (doneByTask) out.doneByTask = doneByTask;
+    if (doneAtByTask) out.doneAtByTask = doneAtByTask;
+    return out;
+  });
+  for (const sb of server) {
+    if (!local.some((b) => b.id === sb.id)) merged.push({ ...sb }); // kept, never dropped
+  }
+  return merged;
+}
+
+/**
  * The CAS-rebase merge contract (fix for the concurrent-session clobber): when
  * this tab loses the CAS race, the doc it re-saves is its OWN doc with the
  * server doc's COMPLETION MAPS unioned in — never a raw replacement that would
@@ -537,6 +571,9 @@ function unionIdeaCompletions(local: Idea, server: Idea): Idea {
  * - EXTRA SERVER IDEAS (server has more ideas than local — a concurrent tab
  *   created an idea) are APPENDED to the local list: dropping them would be
  *   data loss, and idea creation is itself monotonic/append-only.
+ * - BUSINESSES (Unit 7) union per `unionBusinesses`: server-only records are
+ *   kept, per-business completion maps union like an idea's, and `archived`
+ *   is latest-intent (local wins).
  *
  * Pure and exported for direct testing; `serverDoc` is null when the server row
  * was empty/unreadable (nothing to union — local is returned unchanged).
@@ -550,7 +587,9 @@ export function unionCompletionMaps(localDoc: SaveDoc, serverDoc: SaveDoc | null
   for (let i = localDoc.ideas.length; i < serverDoc.ideas.length; i++) {
     ideas.push(serverDoc.ideas[i]); // appended, never dropped
   }
-  return { ...localDoc, ideas };
+  // Businesses union (Unit 7) — see unionBusinesses for the exact rules.
+  const businesses = unionBusinesses(localDoc.businesses, serverDoc.businesses);
+  return { ...localDoc, ideas, ...(businesses ? { businesses } : {}) };
 }
 
 // ── Ledger insert ────────────────────────────────────────────────────────────

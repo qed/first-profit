@@ -6,7 +6,9 @@ import {
   MAX_IDEAS,
   type Action,
   type GameState,
+  activeBusiness,
   activeBusinessExists,
+  businessFor,
   criterionIdsForPhase,
   fromSaveDoc,
   grossSalesSumCents,
@@ -1212,7 +1214,12 @@ describe("serialization round-trip", () => {
     if (!parsed.ok) return;
 
     const hydrated = reducer(initialState(), { type: "HYDRATE", doc: parsed.doc });
-    expect(hydrated.ideas).toEqual(s.ideas);
+    // These ideas were created WITHOUT caller-minted ids (legacy dispatch), so
+    // the load minted the deterministic `legacy-idea-{index}` ids (Unit 7);
+    // everything else round-trips untouched.
+    expect(hydrated.ideas).toEqual(
+      s.ideas.map((idea, i) => ({ ...idea, id: `legacy-idea-${i}` })),
+    );
     expect(hydrated.activeIdea).toBe(s.activeIdea);
     expect(hydrated.profile.siteHeadline).toBe("My first company");
     expect(hydrated.onboardingComplete).toBe(s.onboardingComplete);
@@ -1655,16 +1662,20 @@ describe("generic phase engine (Unit 6): full 25-criterion sequence", () => {
     expect(phaseProgress(s, 0, "build")).toEqual({ done: 0, total: 26 });
   });
 
-  it("an ACTIVE business unlocks 4.1 through the seam (Unit 7 red/green target)", () => {
-    let s = withOneIdea();
+  it("an ACTIVE business unlocks 4.1 through the gate (the Unit 7 red/green target, now via PROMOTE_IDEA)", () => {
+    let s = apply(initialState(), { type: "CREATE_IDEA", ideaId: "idea-a" }, { type: "CLOSE_RUNNER" });
     s = completePhase(s, 0, "sell");
     s = completePhase(s, 0, "build");
     s = completePhase(s, 0, "validate");
-    // No reducer action can write businesses yet (Unit 7 adds PROMOTE/ARCHIVE/
-    // UNARCHIVE), so the state is constructed directly — this is the exact
-    // green state Unit 7's PROMOTE must produce.
-    const promoted: GameState = { ...s, businesses: [{ id: "biz-1", ideaId: "idea-0" }] };
+    // The seam is now a real action: PROMOTE_IDEA produces the exact green
+    // state this test pinned before Unit 7 by direct construction.
+    const promoted = reducer(s, { type: "PROMOTE_IDEA", ideaId: "idea-a", businessId: "biz-1", at: 111 });
+    expect(promoted.businesses).toEqual([
+      { id: "biz-1", ideaId: "idea-a", archived: false, promotedAt: 111 },
+    ]);
     expect(activeBusinessExists(promoted)).toBe(true);
+    expect(activeBusiness(promoted)?.id).toBe("biz-1");
+    expect(businessFor(promoted, "idea-a")?.id).toBe("biz-1");
     expect(isPhaseUnlocked(promoted, 0, "grow")).toBe(true);
     expect(isStepUnlocked(promoted, 0, "4.1")).toBe(true);
     expect(nextUpFor(promoted, 0)).toBe("4.1");
@@ -1801,5 +1812,300 @@ describe("businesses seam persistence (additive-optional, NO DOC_VERSION bump)",
     const hydrated = reducer(s, { type: "HYDRATE", doc });
     expect(hydrated.businesses).toBeUndefined();
     expect(activeBusinessExists(hydrated)).toBe(false);
+  });
+
+  it("round-trips the Unit 7 business leaves: promotedAt + per-business completion maps", () => {
+    const s: GameState = {
+      ...withOneIdea(),
+      businesses: [
+        {
+          id: "biz-1",
+          ideaId: "idea-a",
+          archived: true,
+          promotedAt: 111,
+          doneByTask: { "4.1.1": true },
+          doneAtByTask: { "4.1.1": 222 },
+        },
+      ],
+    };
+    const doc = toSaveDoc(s);
+    expect(doc.docVersion).toBe(DOC_VERSION); // still additive-optional
+    const parsed = fromSaveDoc(JSON.parse(JSON.stringify(doc)));
+    if (!parsed.ok) throw new Error("round-trip refused");
+    const hydrated = reducer(initialState(), { type: "HYDRATE", doc: parsed.doc });
+    expect(hydrated.businesses).toEqual(s.businesses);
+    // Deep-copied, never aliased: mutating state maps must not touch the doc.
+    expect(hydrated.businesses?.[0].doneByTask).not.toBe(s.businesses?.[0].doneByTask);
+  });
+
+  it("coerces the new business leaves defensively (NaN promotedAt and bad map leaves dropped)", () => {
+    const parsed = fromSaveDoc({
+      docVersion: DOC_VERSION,
+      ideas: [],
+      activeIdea: 0,
+      siteHeadline: "",
+      onboardingComplete: false,
+      businesses: [
+        {
+          id: "biz-1",
+          promotedAt: Number.NaN, // JSON round-trips as null; must be dropped
+          doneByTask: { "4.1.1": true, "4.1.2": "yes", x: 1 },
+          doneAtByTask: { "4.1.1": 500, neg: -1, str: "now" },
+        },
+      ],
+    });
+    if (!parsed.ok) throw new Error("doc refused");
+    expect(parsed.doc.businesses).toEqual([
+      { id: "biz-1", doneByTask: { "4.1.1": true }, doneAtByTask: { "4.1.1": 500 } },
+    ]);
+  });
+});
+
+// ── Unit 7: idea ids + explicit promotion ────────────────────────────────────
+
+/** One caller-minted-id idea driven through phases 1-3 (Validate complete). */
+function withValidatedIdea(ideaId = "idea-a"): GameState {
+  let s = apply(initialState(), { type: "CREATE_IDEA", ideaId }, { type: "CLOSE_RUNNER" });
+  s = completePhase(s, 0, "sell");
+  s = completePhase(s, 0, "build");
+  s = completePhase(s, 0, "validate");
+  return reducer(s, { type: "DISMISS_CELEBRATION" });
+}
+
+describe("idea ids (Unit 7: caller-minted new, deterministic legacy)", () => {
+  it("CREATE_IDEA stores the caller-minted id; without one the idea has NO id key", () => {
+    const minted = reducer(initialState(), { type: "CREATE_IDEA", ideaId: "uuid-1" });
+    expect(minted.ideas[0]).toEqual({ id: "uuid-1", fields: {}, done: {} });
+    const legacy = reducer(initialState(), { type: "CREATE_IDEA" });
+    expect(legacy.ideas[0]).toEqual({ fields: {}, done: {} });
+    expect(legacy.ideas[0]).not.toHaveProperty("id");
+  });
+
+  it("legacy ideas get DETERMINISTIC ids on load: two independent loads mint identical ids", () => {
+    // Determinism is load-bearing: two tabs loading the same legacy doc must
+    // agree on the ids, or the rebase-union would fork the idea's identity.
+    const legacyDoc = {
+      docVersion: DOC_VERSION,
+      ideas: [
+        { fields: {}, done: {} },
+        { fields: { oneLiner: "second" }, done: {} },
+      ],
+      activeIdea: 0,
+      siteHeadline: "",
+      onboardingComplete: true,
+    };
+    const a = fromSaveDoc(JSON.parse(JSON.stringify(legacyDoc)));
+    const b = fromSaveDoc(JSON.parse(JSON.stringify(legacyDoc)));
+    if (!a.ok || !b.ok) throw new Error("legacy doc refused");
+    expect(a.doc.ideas.map((i) => i.id)).toEqual(["legacy-idea-0", "legacy-idea-1"]);
+    expect(b.doc.ideas.map((i) => i.id)).toEqual(a.doc.ideas.map((i) => i.id));
+  });
+
+  it("an idea that already HAS an id keeps it through load and HYDRATE (never re-minted)", () => {
+    let s = apply(initialState(), { type: "CREATE_IDEA", ideaId: "uuid-keep" }, { type: "CLOSE_RUNNER" });
+    s = reducer(s, { type: "CREATE_IDEA" }); // legacy sibling, no id
+    const parsed = fromSaveDoc(JSON.parse(JSON.stringify(toSaveDoc(s))));
+    if (!parsed.ok) throw new Error("round-trip refused");
+    expect(parsed.doc.ideas.map((i) => i.id)).toEqual(["uuid-keep", "legacy-idea-1"]);
+    const hydrated = reducer(initialState(), { type: "HYDRATE", doc: parsed.doc });
+    expect(hydrated.ideas.map((i) => i.id)).toEqual(["uuid-keep", "legacy-idea-1"]);
+  });
+});
+
+describe("PROMOTE_IDEA / ARCHIVE_BUSINESS / UNARCHIVE_BUSINESS (Unit 7)", () => {
+  it("REFUSES promotion before Validate is complete (state unchanged)", () => {
+    let s = apply(initialState(), { type: "CREATE_IDEA", ideaId: "idea-a" }, { type: "CLOSE_RUNNER" });
+    s = completePhase(s, 0, "sell");
+    const refused = reducer(s, { type: "PROMOTE_IDEA", ideaId: "idea-a", businessId: "biz-1", at: 1 });
+    expect(refused).toBe(s);
+    expect(activeBusinessExists(refused)).toBe(false);
+  });
+
+  it("REFUSES promotion of an unknown ideaId and a duplicate businessId", () => {
+    const s = withValidatedIdea("idea-a");
+    expect(reducer(s, { type: "PROMOTE_IDEA", ideaId: "nope", businessId: "biz-1", at: 1 })).toBe(s);
+    const promoted = reducer(s, { type: "PROMOTE_IDEA", ideaId: "idea-a", businessId: "biz-1", at: 1 });
+    const archived = reducer(promoted, { type: "ARCHIVE_BUSINESS", businessId: "biz-1" });
+    // Replayed/duplicate business id: refused even though no business is active.
+    expect(reducer(archived, { type: "PROMOTE_IDEA", ideaId: "idea-a", businessId: "biz-1", at: 2 })).toBe(archived);
+  });
+
+  it("REFUSES promotion while another business is ACTIVE (archive first)", () => {
+    let s = apply(
+      initialState(),
+      { type: "CREATE_IDEA", ideaId: "idea-a" },
+      { type: "CLOSE_RUNNER" },
+      { type: "CREATE_IDEA", ideaId: "idea-b" },
+      { type: "CLOSE_RUNNER" },
+    );
+    for (const phase of ["sell", "build", "validate"] as const) {
+      s = completePhase(s, 0, phase);
+      s = completePhase(s, 1, phase);
+    }
+    s = reducer(s, { type: "PROMOTE_IDEA", ideaId: "idea-a", businessId: "biz-1", at: 1 });
+    expect(activeBusiness(s)?.id).toBe("biz-1");
+    const refused = reducer(s, { type: "PROMOTE_IDEA", ideaId: "idea-b", businessId: "biz-2", at: 2 });
+    expect(refused).toBe(s);
+  });
+
+  it("a malformed `at` still promotes, just without a promotedAt stamp", () => {
+    const s = withValidatedIdea();
+    const promoted = reducer(s, { type: "PROMOTE_IDEA", ideaId: "idea-a", businessId: "biz-1", at: Number.NaN });
+    expect(promoted.businesses).toEqual([{ id: "biz-1", ideaId: "idea-a", archived: false }]);
+  });
+
+  it("phase-4 COMPLETE_TASK writes the ACTIVE BUSINESS's maps — never the idea's", () => {
+    let s = withValidatedIdea();
+    s = reducer(s, { type: "PROMOTE_IDEA", ideaId: "idea-a", businessId: "biz-1", at: 1 });
+    s = reducer(s, { type: "COMPLETE_TASK", ideaIndex: 0, stepId: "4.1", index: 0, at: 500 });
+    const business = activeBusiness(s);
+    expect(business?.doneByTask).toEqual({ "4.1.1": true });
+    expect(business?.doneAtByTask).toEqual({ "4.1.1": 500 });
+    expect(isTaskDone(s, 0, "4.1", 0)).toBe(true);
+    // The idea carries NO trace of the grow task, in either shape.
+    expect(s.ideas[0].doneByTask?.["4.1.1"]).toBeUndefined();
+    expect(s.ideas[0].done[taskKey("4.1", 0)]).toBeUndefined();
+    // Completing the criterion fires the celebration exactly like phases 1-3.
+    const step = getStep("4.1");
+    for (let i = 1; i < step.tasks.length; i++) {
+      s = reducer(s, { type: "COMPLETE_TASK", ideaIndex: 0, stepId: "4.1", index: i });
+    }
+    expect(isCriterionDone(s, 0, "4.1")).toBe(true);
+    expect(s.celebrate).toBe("4.1");
+    expect(nextUpFor(s, 0)).toBe("4.2");
+  });
+
+  it("phase-4 COMPLETE_TASK with NO active business is a no-op (nothing to write)", () => {
+    const s = withValidatedIdea();
+    expect(reducer(s, { type: "COMPLETE_TASK", ideaIndex: 0, stepId: "4.1", index: 0 })).toBe(s);
+    const archived: GameState = { ...s, businesses: [{ id: "biz-1", archived: true }] };
+    expect(reducer(archived, { type: "COMPLETE_TASK", ideaIndex: 0, stepId: "4.1", index: 0 })).toBe(archived);
+  });
+
+  it("ARCHIVE locks 4-5 again but PRESERVES the record and its progress; UNARCHIVE resumes it", () => {
+    let s = withValidatedIdea();
+    s = reducer(s, { type: "PROMOTE_IDEA", ideaId: "idea-a", businessId: "biz-1", at: 1 });
+    s = reducer(s, { type: "COMPLETE_TASK", ideaIndex: 0, stepId: "4.1", index: 0, at: 500 });
+    s = reducer(s, { type: "ARCHIVE_BUSINESS", businessId: "biz-1" });
+    // Locked again: no active business, 4.1 unreadable and unworkable.
+    expect(activeBusinessExists(s)).toBe(false);
+    expect(isStepUnlocked(s, 0, "4.1")).toBe(false);
+    expect(isTaskDone(s, 0, "4.1", 0)).toBe(false);
+    expect(nextUpFor(s, 0)).toBeNull();
+    // The record and its maps survive the archive untouched.
+    expect(s.businesses).toEqual([
+      {
+        id: "biz-1",
+        ideaId: "idea-a",
+        archived: true,
+        promotedAt: 1,
+        doneByTask: { "4.1.1": true },
+        doneAtByTask: { "4.1.1": 500 },
+      },
+    ]);
+    // Unarchive resumes the SAME record's preserved progress.
+    s = reducer(s, { type: "UNARCHIVE_BUSINESS", businessId: "biz-1" });
+    expect(activeBusiness(s)?.id).toBe("biz-1");
+    expect(isTaskDone(s, 0, "4.1", 0)).toBe(true);
+    expect(isStepUnlocked(s, 0, "4.1")).toBe(true);
+  });
+
+  it("ARCHIVE/UNARCHIVE are refusal-safe: unknown id, double archive, unarchive beside an active business", () => {
+    let s = withValidatedIdea();
+    expect(reducer(s, { type: "ARCHIVE_BUSINESS", businessId: "nope" })).toBe(s);
+    expect(reducer(s, { type: "UNARCHIVE_BUSINESS", businessId: "nope" })).toBe(s);
+    s = reducer(s, { type: "PROMOTE_IDEA", ideaId: "idea-a", businessId: "biz-1", at: 1 });
+    // Unarchiving an ACTIVE business is a no-op (nothing to restore).
+    expect(reducer(s, { type: "UNARCHIVE_BUSINESS", businessId: "biz-1" })).toBe(s);
+    const archived = reducer(s, { type: "ARCHIVE_BUSINESS", businessId: "biz-1" });
+    expect(reducer(archived, { type: "ARCHIVE_BUSINESS", businessId: "biz-1" })).toBe(archived);
+    // A second business promoted and active: biz-1 cannot be unarchived beside it.
+    const second = reducer(archived, { type: "PROMOTE_IDEA", ideaId: "idea-a", businessId: "biz-2", at: 2 });
+    expect(activeBusiness(second)?.id).toBe("biz-2");
+    expect(reducer(second, { type: "UNARCHIVE_BUSINESS", businessId: "biz-1" })).toBe(second);
+  });
+
+  it("a LATER promotion starts a NEW record — Grow progress is never inherited (origin decision)", () => {
+    let s = withValidatedIdea();
+    s = reducer(s, { type: "PROMOTE_IDEA", ideaId: "idea-a", businessId: "biz-1", at: 1 });
+    s = reducer(s, { type: "COMPLETE_TASK", ideaIndex: 0, stepId: "4.1", index: 0, at: 500 });
+    s = reducer(s, { type: "ARCHIVE_BUSINESS", businessId: "biz-1" });
+    s = reducer(s, { type: "PROMOTE_IDEA", ideaId: "idea-a", businessId: "biz-2", at: 2 });
+    // Both records intact (archive + re-promote leaves the history whole)…
+    expect(s.businesses?.map((b) => b.id)).toEqual(["biz-1", "biz-2"]);
+    // …and the fresh record starts EMPTY: 4.1.1 is not done on the new business.
+    expect(activeBusiness(s)?.id).toBe("biz-2");
+    expect(isTaskDone(s, 0, "4.1", 0)).toBe(false);
+    expect(activeBusiness(s)?.doneByTask).toBeUndefined();
+    // businessFor answers the CURRENT (latest) record for the idea.
+    expect(businessFor(s, "idea-a")?.id).toBe("biz-2");
+  });
+
+  it("other ideas remain playable through phases 1-3 AFTER a promotion (origin decision)", () => {
+    let s = apply(
+      initialState(),
+      { type: "CREATE_IDEA", ideaId: "idea-a" },
+      { type: "CLOSE_RUNNER" },
+      { type: "CREATE_IDEA", ideaId: "idea-b" },
+      { type: "CLOSE_RUNNER" },
+    );
+    for (const phase of ["sell", "build", "validate"] as const) s = completePhase(s, 0, phase);
+    s = reducer(s, { type: "PROMOTE_IDEA", ideaId: "idea-a", businessId: "biz-1", at: 1 });
+    // Idea B still plays 1.1 exactly as before the promotion.
+    expect(isIdeaEligibleFor(s, 1, "1.1")).toBe(true);
+    expect(ideasEligibleFor(s, "1.1")).toEqual([1]);
+    expect(nextUpFor(s, 1)).toBe("1.1");
+    s = completeCriterion(s, 1, "1.1");
+    expect(isCriterionDone(s, 1, "1.1")).toBe(true);
+    expect(nextUpFor(s, 1)).toBe("1.2");
+  });
+
+  it("a promoted business round-trips with its progress (save/load/HYDRATE)", () => {
+    let s = withValidatedIdea();
+    s = reducer(s, { type: "PROMOTE_IDEA", ideaId: "idea-a", businessId: "biz-1", at: 1 });
+    s = reducer(s, { type: "COMPLETE_TASK", ideaIndex: 0, stepId: "4.1", index: 0, at: 500 });
+    const parsed = fromSaveDoc(JSON.parse(JSON.stringify(toSaveDoc(s))));
+    if (!parsed.ok) throw new Error("round-trip refused");
+    const hydrated = reducer(initialState(), { type: "HYDRATE", doc: parsed.doc });
+    expect(hydrated.businesses).toEqual(s.businesses);
+    expect(isTaskDone(hydrated, 0, "4.1", 0)).toBe(true);
+    expect(isStepUnlocked(hydrated, 0, "4.1")).toBe(true);
+  });
+
+  it("RESET_SESSION clears businesses minted by PROMOTE_IDEA (shared-device safety)", () => {
+    let s = withValidatedIdea();
+    s = reducer(s, { type: "PROMOTE_IDEA", ideaId: "idea-a", businessId: "biz-1", at: 1 });
+    const reset = reducer(s, { type: "RESET_SESSION" });
+    expect(reset.businesses).toBeUndefined();
+    expect(activeBusinessExists(reset)).toBe(false);
+  });
+
+  it("VERIFICATION GATE: a scripted fresh save drives 1.1 -> 5.5 including the promotion, no dead end", () => {
+    let s = apply(initialState(), { type: "CREATE_IDEA", ideaId: "idea-a" }, { type: "CLOSE_RUNNER" });
+    let criteria = 0;
+    let promotions = 0;
+    for (;;) {
+      const stepId = nextUpFor(s, 0);
+      if (!stepId) {
+        if (isPhaseComplete(s, 0, "scale")) break; // 5.5 done: the path's end
+        // Gated frontier: this must be the promotion moment, exactly once.
+        if (++promotions > 1) throw new Error("promotion gate hit twice");
+        s = reducer(s, { type: "PROMOTE_IDEA", ideaId: "idea-a", businessId: "biz-1", at: 1 });
+        if (!activeBusinessExists(s)) throw new Error("promotion refused mid-walk");
+        continue;
+      }
+      if (++criteria > 25) throw new Error("engine loop did not terminate");
+      s = completeCriterion(s, 0, stepId);
+      expect(s.celebrate).toBe(stepId);
+      s = reducer(s, { type: "DISMISS_CELEBRATION" });
+    }
+    expect(criteria).toBe(25);
+    expect(promotions).toBe(1);
+    expect(isPhaseComplete(s, 0, "grow")).toBe(true);
+    expect(isPhaseComplete(s, 0, "scale")).toBe(true);
+    // Every grow/scale completion lives on the business, none on the idea.
+    const businessDone = activeBusiness(s)?.doneByTask ?? {};
+    expect(Object.keys(businessDone).every((k) => /^[45]\./.test(k))).toBe(true);
+    expect(Object.keys(s.ideas[0].doneByTask ?? {}).some((k) => /^[45]\./.test(k))).toBe(false);
   });
 });

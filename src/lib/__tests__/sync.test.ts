@@ -501,6 +501,86 @@ describe("unionCompletionMaps", () => {
     expect(merged.ideas[0]).not.toHaveProperty("doneAtByTask");
     expect(merged.ideas[0]).not.toHaveProperty("doneAt");
   });
+
+  // ── Businesses (Unit 7): monotonic-ish union, matched by business id ───────
+  it("KEEPS a business present only on the server (a concurrent session promoted it)", () => {
+    const local = docWith({ ideas: [idea()] });
+    const server = docWith({
+      ideas: [idea()],
+      businesses: [{ id: "biz-1", ideaId: "idea-a", archived: false, promotedAt: 1 }],
+    });
+    const merged = unionCompletionMaps(local, server);
+    expect(merged.businesses).toEqual([
+      { id: "biz-1", ideaId: "idea-a", archived: false, promotedAt: 1 },
+    ]);
+  });
+
+  it("unions per-business completion maps BY BUSINESS ID (server-only added, local wins on conflicts)", () => {
+    const local = docWith({
+      ideas: [idea()],
+      businesses: [
+        { id: "biz-1", doneByTask: { "4.1.2": true }, doneAtByTask: { "4.1.2": 100 } },
+      ],
+    });
+    const server = docWith({
+      ideas: [idea()],
+      businesses: [
+        {
+          id: "biz-1",
+          doneByTask: { "4.1.1": true, "4.1.2": true },
+          doneAtByTask: { "4.1.1": 50, "4.1.2": 999 },
+        },
+      ],
+    });
+    const merged = unionCompletionMaps(local, server);
+    expect(merged.businesses).toHaveLength(1);
+    expect(merged.businesses?.[0].doneByTask).toEqual({ "4.1.1": true, "4.1.2": true });
+    // Local timestamp wins on the both-present conflict; server-only unions in.
+    expect(merged.businesses?.[0].doneAtByTask).toEqual({ "4.1.1": 50, "4.1.2": 100 });
+  });
+
+  it("`archived` is LATEST-INTENT: the local flag wins over the server's", () => {
+    const local = docWith({
+      ideas: [idea()],
+      businesses: [{ id: "biz-1", archived: true }],
+    });
+    const server = docWith({
+      ideas: [idea()],
+      businesses: [{ id: "biz-1", archived: false, doneByTask: { "4.1.1": true } }],
+    });
+    const merged = unionCompletionMaps(local, server);
+    // Local archive intent honored; the server's completion still unions in.
+    expect(merged.businesses).toEqual([
+      { id: "biz-1", archived: true, doneByTask: { "4.1.1": true } },
+    ]);
+  });
+
+  it("local-only businesses survive; a server-only one is APPENDED beside them", () => {
+    const local = docWith({
+      ideas: [idea()],
+      businesses: [{ id: "biz-local", archived: false }],
+    });
+    const server = docWith({
+      ideas: [idea()],
+      businesses: [{ id: "biz-server", archived: true, doneByTask: { "4.1.1": true } }],
+    });
+    const merged = unionCompletionMaps(local, server);
+    expect(merged.businesses).toEqual([
+      { id: "biz-local", archived: false },
+      { id: "biz-server", archived: true, doneByTask: { "4.1.1": true } },
+    ]);
+  });
+
+  it("does not invent an absent businesses list (absent-stays-absent on both sides)", () => {
+    const merged = unionCompletionMaps(docWith({ ideas: [idea()] }), docWith({ ideas: [idea()] }));
+    expect(merged).not.toHaveProperty("businesses");
+    // Local-only list passes through untouched when the server has none.
+    const localOnly = unionCompletionMaps(
+      docWith({ ideas: [idea()], businesses: [{ id: "biz-1" }] }),
+      docWith({ ideas: [idea()] }),
+    );
+    expect(localOnly.businesses).toEqual([{ id: "biz-1" }]);
+  });
 });
 
 // ── insertLedger ─────────────────────────────────────────────────────────────

@@ -134,11 +134,13 @@ export type CoachTarget =
   | { kind: "create" }
   | { kind: "criterion"; stepId: string; room: RoomId }
   /**
-   * The promotion seam (Unit 6): the idea finished phases 1-3 and Grow waits
-   * on a promoted business that does not exist yet. Unit 8's UI consumes this
-   * (the promotion screen); until then the coach simply hides on it.
+   * The promotion target: the idea finished phases 1-3 and Grow waits on a
+   * promoted business that does not exist yet. Carries the eligible idea's
+   * STABLE id (Unit 7) so Unit 8's promotion screen can dispatch PROMOTE_IDEA
+   * directly; absent only for an unsaved legacy idea that has no id yet.
+   * Until Unit 8 ships the screen, the coach simply hides on this target.
    */
-  | { kind: "promote"; ideaIndex: number };
+  | { kind: "promote"; ideaIndex: number; ideaId?: string };
 
 /**
  * The Next Step coach's destination: with no ideas yet, creating the first idea
@@ -175,9 +177,10 @@ export function nextCoachTarget(
       if (room) return { kind: "criterion", stepId, room };
       continue;
     }
-    // No workable criterion: validated but unpromoted → the promotion seam.
+    // No workable criterion: validated but unpromoted → the promotion target.
     if (isPhaseComplete(state, ideaIndex, "validate") && !activeBusinessExists(state)) {
-      return { kind: "promote", ideaIndex };
+      const ideaId = state.ideas[ideaIndex]?.id;
+      return { kind: "promote", ideaIndex, ...(ideaId ? { ideaId } : {}) };
     }
   }
   return null;

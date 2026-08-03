@@ -37,6 +37,7 @@ import {
   isCriterionDone as isCriterionDoneFn,
   isStepUnlocked as isStepUnlockedFn,
   ideasEligibleFor as ideasEligibleForFn,
+  activeBusiness as activeBusinessFn,
   type GameState,
   type Action,
 } from "./gameCore";
@@ -94,6 +95,18 @@ export interface GameApi extends GameState {
   ideasEligibleFor: (stepId: string) => number[];
   grossSalesSumCents: () => number;
   salesSumCents: () => number;
+
+  // ── Business promotion (Unit 7; origin R7) ───────────────────────────────
+  // Ids/timestamps are minted HERE at the caller boundary (crypto.randomUUID /
+  // Date.now — gameCore stays clock- and randomness-free). Each is a no-op
+  // when the reducer's refusal conditions hold; Unit 8's promotion screen only
+  // offers eligible ideas, so the refusals are unreachable from the UI.
+  /** Promote the idea at `ideaIndex` to THE business (mints the business id). */
+  promoteIdea: (ideaIndex: number) => void;
+  /** Archive the currently active business (record + 4-5 progress preserved). */
+  archiveBusiness: () => void;
+  /** Restore an archived business — refused while another business is active. */
+  unarchiveBusiness: (businessId: string) => void;
 
   // Auth / session actions.
   login: (identifier: string, password: string) => Promise<boolean>;
@@ -555,6 +568,32 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
     [],
   );
 
+  // ── Business promotion (Unit 7) ───────────────────────────────────────────
+  // The id/timestamp minting boundary (crypto.randomUUID / Date.now stay out
+  // of gameCore). Reads go through stateRef so the callbacks stay stable.
+  const promoteIdea = useCallback((ideaIndex: number) => {
+    // Legacy in-memory ideas without an id cannot be promoted this session;
+    // the next load mints their deterministic id (see gameCore fromSaveDoc).
+    const ideaId = stateRef.current.ideas[ideaIndex]?.id;
+    if (!ideaId) return;
+    dispatch({
+      type: "PROMOTE_IDEA",
+      ideaId,
+      businessId: crypto.randomUUID(),
+      at: Date.now(),
+    });
+  }, []);
+
+  const archiveBusiness = useCallback(() => {
+    const active = activeBusinessFn(stateRef.current);
+    if (!active) return;
+    dispatch({ type: "ARCHIVE_BUSINESS", businessId: active.id });
+  }, []);
+
+  const unarchiveBusiness = useCallback((businessId: string) => {
+    dispatch({ type: "UNARCHIVE_BUSINESS", businessId });
+  }, []);
+
   // ── Idle timeout: revoke after ~45 min of no interaction while logged in. ──
   useEffect(() => {
     if (!isLoggedInStage(state.stage)) return;
@@ -598,6 +637,9 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
       ideasEligibleFor: (stepId) => ideasEligibleForFn(state, stepId),
       grossSalesSumCents: () => grossSalesSumCentsFn(state),
       salesSumCents: () => salesSumCentsFn(state),
+      promoteIdea,
+      archiveBusiness,
+      unarchiveBusiness,
       login,
       logout,
       submitFeedback,
@@ -607,7 +649,19 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
       skipGradeAsk,
       submitGradeAnswer,
     }),
-    [state, syncStatus, login, logout, submitFeedback, gradeAskDone, skipGradeAsk, submitGradeAnswer],
+    [
+      state,
+      syncStatus,
+      promoteIdea,
+      archiveBusiness,
+      unarchiveBusiness,
+      login,
+      logout,
+      submitFeedback,
+      gradeAskDone,
+      skipGradeAsk,
+      submitGradeAnswer,
+    ],
   );
 
   return <GameContext.Provider value={value}>{children}</GameContext.Provider>;
