@@ -15,7 +15,12 @@
  *      and per-criterion totals, closers, field-level checks);
  *   3. ASSEMBLY — the hooks registry or STEP_META chrome no longer lines up
  *      with the content (importing `src/data/path.ts` runs both the runtime
- *      manifest assert and the full `assembleSteps` hook/chrome validation).
+ *      manifest assert and the full `assembleSteps` hook/chrome validation);
+ *   4. REMAP — the task-id remap tables (`src/data/taskRemap.ts`) are stale
+ *      against the content: a LEGACY_KEY_REMAP entry no longer points at the
+ *      task actually at its position, or a TASK_REMAP entry targets a task id
+ *      that does not exist / itself / a retired id. A stale table silently
+ *      credits the wrong task on migration, so it must never deploy.
  */
 
 import { readFileSync } from "node:fs";
@@ -61,9 +66,66 @@ async function main() {
     );
   }
 
+  // 4: remap-table alignment. Dynamic import (taskRemap pulls in the generated
+  // module) so steps 1–3 report first. Pure in-memory table checks — fast.
+  const { LEGACY_KEY_REMAP, TASK_REMAP, taskIdAt } = await import("../src/data/taskRemap");
+  const { PATH_CONTENT } = await import("../src/data/pathContent.generated");
+  const allTaskIds = new Set(
+    PATH_CONTENT.phases.flatMap((phase) =>
+      phase.criteria.flatMap((criterion) => criterion.tasks.map((task) => task.id)),
+    ),
+  );
+  const remapErrors: string[] = [];
+
+  // 4a: every legacy entry still points at the task actually AT that position.
+  for (const [legacyKey, target] of Object.entries(LEGACY_KEY_REMAP)) {
+    const [stepId, indexText] = legacyKey.split("#");
+    const actual = taskIdAt(stepId, Number(indexText));
+    if (actual !== target) {
+      remapErrors.push(
+        `LEGACY_KEY_REMAP["${legacyKey}"] = "${target}" but the task at that ` +
+          `position is ${actual ? `"${actual}"` : "absent"} — the table is stale ` +
+          `against the generated content.`,
+      );
+    }
+  }
+
+  // 4b: TASK_REMAP key/target sanity.
+  for (const [key, target] of Object.entries(TASK_REMAP)) {
+    if (target === null) continue; // retired: progress preserved in place — valid.
+    if (key === target) {
+      remapErrors.push(`TASK_REMAP["${key}"] targets itself — a no-op entry is a mistake.`);
+    }
+    if (!allTaskIds.has(target)) {
+      remapErrors.push(
+        `TASK_REMAP["${key}"] = "${target}" but no such task id exists in the ` +
+          `generated content (targets must be live ids or null).`,
+      );
+    }
+    // Overlap hazard: routing progress ONTO an id that is itself retired-null
+    // elsewhere strands it on a dead id (resolveTaskId stops at the null).
+    if (TASK_REMAP[target] === null) {
+      remapErrors.push(
+        `TASK_REMAP["${key}"] = "${target}" but "${target}" is itself retired ` +
+          `(null) — progress would be routed onto a dead id.`,
+      );
+    }
+  }
+
+  if (remapErrors.length > 0) {
+    console.error(
+      `[check-path-content] REMAP: ${remapErrors.length} stale/broken remap ` +
+        `table entr${remapErrors.length === 1 ? "y" : "ies"} in src/data/taskRemap.ts:\n` +
+        remapErrors.map((message) => `  - ${message}`).join("\n"),
+    );
+    process.exit(1);
+  }
+
   console.log(
-    `[check-path-content] OK — brief ↔ generated module in sync, manifest and ` +
-      `assembly (${STEPS.length} steps) pass.`,
+    `[check-path-content] OK — brief ↔ generated module in sync, manifest, ` +
+      `assembly (${STEPS.length} steps) and remap tables ` +
+      `(${Object.keys(LEGACY_KEY_REMAP).length} legacy + ` +
+      `${Object.keys(TASK_REMAP).length} remap entries) pass.`,
   );
 }
 

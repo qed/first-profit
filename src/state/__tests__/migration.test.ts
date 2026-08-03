@@ -66,17 +66,37 @@ function hydrate(doc: SaveDoc): GameState {
   return reducer(initialState(), { type: "HYDRATE", doc });
 }
 
+/** Legacy doneAt map matching legacyDoneFor: ascending Phase A epoch-ms stamps. */
+function legacyDoneAtFor(
+  stepId: string,
+  upTo?: number,
+  base = 1_753_000_000_000,
+): Record<string, number> {
+  const count = upTo ?? getStep(stepId).tasks.length;
+  return Object.fromEntries(
+    Array.from({ length: count }, (_, i) => [taskKey(stepId, i), base + i * 60_000]),
+  );
+}
+
 /**
  * The real Cedric save SHAPE (prod data, 2026-08): 1.1 fully done plus 1.2
- * tasks 0-3 done, all under legacy keys; fields oneLiner + productName.
+ * tasks 0-3 done, all under legacy keys with Phase A doneAt timestamps; fields
+ * oneLiner + productName; provider chosen (PP2 Checkout Booth shipped).
  */
 function cedricDoc(): Record<string, unknown> {
-  return docWith([
-    {
-      fields: { oneLiner: "Cold drinks for hot people", productName: "Lemonade" },
-      done: { ...legacyDoneFor("1.1"), ...legacyDoneFor("1.2", 4) },
-    },
-  ]);
+  return {
+    ...docWith([
+      {
+        fields: { oneLiner: "Cold drinks for hot people", productName: "Lemonade" },
+        done: { ...legacyDoneFor("1.1"), ...legacyDoneFor("1.2", 4) },
+        doneAt: {
+          ...legacyDoneAtFor("1.1"),
+          ...legacyDoneAtFor("1.2", 4, 1_753_500_000_000),
+        },
+      },
+    ]),
+    chosenProvider: { providerId: "first_profit_pay", chosenAt: 1_753_600_000_000 },
+  };
 }
 
 // ── The remap table itself ───────────────────────────────────────────────
@@ -317,12 +337,80 @@ describe("fromSaveDoc migration: merge-on-load union", () => {
       "1.2.3": true,
       "1.2.4": true,
     });
+    // Phase A timestamps migrate alongside (same keys, same remap), and the
+    // chosen provider (real prod shape) survives the load untouched.
+    expect(doc.ideas[0].doneAtByTask?.["1.1.1"]).toBe(1_753_000_000_000);
+    expect(doc.ideas[0].doneAtByTask?.["1.2.4"]).toBe(1_753_500_000_000 + 3 * 60_000);
+    expect(Object.keys(doc.ideas[0].doneAtByTask ?? {})).toHaveLength(9);
+    expect(doc.chosenProvider).toEqual({
+      providerId: "first_profit_pay",
+      chosenAt: 1_753_600_000_000,
+    });
     const s = hydrate(doc);
     expect(isCriterionDone(s, 0, "1.1")).toBe(true);
     expect(isCriterionDone(s, 0, "1.2")).toBe(false);
     expect(isTaskDone(s, 0, "1.2", 3)).toBe(true);
     expect(isTaskDone(s, 0, "1.2", 4)).toBe(false);
     expect(s.celebrate).toBeNull();
+  });
+
+  it("an ORPHANED legacy doneAt (timestamp without done:true) never mints a doneAtByTask entry", () => {
+    const doc = parse(
+      docWith([
+        {
+          fields: {},
+          done: {}, // 1.1#0 was never completed…
+          doneAt: { [taskKey("1.1", 0)]: 1234 }, // …but a stray stamp exists
+        },
+      ]),
+    );
+    expect(doc.ideas[0].doneAtByTask ?? {}).toEqual({});
+    expect(doc.ideas[0].doneByTask ?? {}).toEqual({});
+    // The orphan stays preserved raw in the legacy map, never dropped.
+    expect(doc.ideas[0].doneAt).toEqual({ [taskKey("1.1", 0)]: 1234 });
+  });
+
+  it("legacy-true + doneByTask-explicit-false contradiction: union flips to true (monotonic)", () => {
+    const doc = parse(
+      docWith([
+        {
+          fields: {},
+          done: { [taskKey("1.1", 0)]: true },
+          doneByTask: { "1.1.1": false },
+        },
+      ]),
+    );
+    expect(doc.ideas[0].doneByTask).toEqual({ "1.1.1": true });
+  });
+
+  it("reverse-direction timestamp conflict: the new shape wins even when the LEGACY stamp is newer", () => {
+    // The existing conflict test has legacy(2222) > new(1111); this pins the
+    // reverse: legacy(1111) < new(2222) — the new-shape value wins in BOTH
+    // directions (deterministic precedence, not min/max).
+    const doc = parse(
+      docWith([
+        {
+          fields: {},
+          done: { [taskKey("1.1", 0)]: true },
+          doneAt: { [taskKey("1.1", 0)]: 1111 },
+          doneByTask: { "1.1.1": true },
+          doneAtByTask: { "1.1.1": 2222 },
+        },
+      ]),
+    );
+    expect(doc.ideas[0].doneAtByTask).toEqual({ "1.1.1": 2222 });
+  });
+
+  it("forward-compat: an unknown doneByTask key ('9.9.9') survives migration and affects no criterion", () => {
+    const raw = docWith([{ fields: {}, done: {}, doneByTask: { "9.9.9": true } }]);
+    const doc = parse(raw);
+    expect(doc.ideas[0].doneByTask).toEqual({ "9.9.9": true }); // preserved verbatim
+    // Byte-stable across a second pass too (idempotence holds for unknown keys).
+    expect(JSON.stringify(parse(JSON.parse(JSON.stringify(doc))))).toBe(JSON.stringify(doc));
+    const s = hydrate(doc);
+    for (const stepId of ["1.1", "1.2", "1.3"]) {
+      expect(isCriterionDone(s, 0, stepId)).toBe(false);
+    }
   });
 });
 
@@ -348,6 +436,26 @@ describe("dual-write read/write paths", () => {
     expect(s.ideas[0].doneByTask?.["1.1.3"]).toBe(true);
     expect(s.ideas[0].doneAt?.[taskKey("1.1", 2)]).toBe(1_754_000_000_000);
     expect(s.ideas[0].doneAtByTask?.["1.1.3"]).toBe(1_754_000_000_000);
+  });
+
+  it("COMPLETE_TASK outside the legacy table (1.3#0) writes ONLY the stable-id maps — no legacy key minted", () => {
+    // Reducer-level, bypassing PLAYABLE_STEPS gating via the direct action:
+    // markTaskDone only requires the step to exist. Intended behavior (see its
+    // doc comment): no legacy reader ever existed for post-1.2 tasks, so no
+    // legacy `${stepId}#${index}` key is invented; the rebase-union in
+    // src/lib/sync.ts is their concurrent-loss protection instead.
+    const s = reducer(withOneIdea(), {
+      type: "COMPLETE_TASK",
+      ideaIndex: 0,
+      stepId: "1.3",
+      index: 0,
+      at: 4242,
+    });
+    expect(s.ideas[0].doneByTask).toEqual({ "1.3.1": true });
+    expect(s.ideas[0].doneAtByTask).toEqual({ "1.3.1": 4242 });
+    expect(s.ideas[0].done).toEqual({}); // no legacy key minted
+    expect(s.ideas[0].doneAt).toBeUndefined();
+    expect(isTaskDone(s, 0, "1.3", 0)).toBe(true);
   });
 
   it("isTaskDone reads doneByTask FIRST: a doc completed only under new keys still reads done", () => {

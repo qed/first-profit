@@ -48,7 +48,10 @@ Every UI change MUST look good and work well on mobile before it is considered d
   authored input fields), keyed by stable task id — regenerating content can never
   silently drop behavior, and `src/data/path.ts` asserts every hook resolves.
 - Editorial rule: a **copy tweak** to the brief keeps the task id; a **meaning change or
-  structural edit** mints a new id and needs a deliberate remap of any hooks on the old id
+  structural edit** mints a new id and needs BOTH a `src/data/pathHooks.ts` retarget of any
+  hooks on the old id AND a `src/data/taskRemap.ts` `TASK_REMAP` entry (old id → new id, or
+  old id → null to retire) so saved child progress moves with the edit — the build preflight
+  refuses a remap table that is stale against the content
   (see docs/plans/2026-08-03-001-feat-full-path-cohort-readiness-plan.md).
 
 ## Documented Solutions

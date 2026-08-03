@@ -101,8 +101,11 @@ const LEGACY_KEY_BY_TASK_ID: Readonly<Record<string, string>> = Object.fromEntri
 
 /**
  * The legacy `${stepId}#${index}` key a task id maps back to, if any — the
- * dual-write's reverse lookup (only tasks with a legacy representation keep
- * writing the legacy map during the transition).
+ * reverse of LEGACY_KEY_REMAP. STATUS: validation/tooling-only today (tests pin
+ * the inversion; the build gate exercises the table) — no production caller:
+ * the reducer's dual-write checks `legacyKey in LEGACY_KEY_REMAP` directly
+ * because it already holds the positional key. Kept exported as the canonical
+ * inverse for any future tooling that starts from a task id.
  */
 export function legacyKeyForTaskId(taskId: string): string | undefined {
   return LEGACY_KEY_BY_TASK_ID[taskId];

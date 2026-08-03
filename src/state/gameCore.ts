@@ -193,7 +193,8 @@ export function toSaveDoc(state: GameState): SaveDoc {
       // Emit doneAt only when it exists so an untimestamped doc stays byte-stable.
       ...(idea.doneAt ? { doneAt: { ...idea.doneAt } } : {}),
       // Emit BOTH shapes during the transition (dual-write): the new stable-id
-      // maps ride beside the legacy index maps, absent-stays-absent.
+      // maps ride beside the legacy index maps, absent-stays-absent. Retirement
+      // condition for the dual-write: see markTaskDone's doc comment.
       ...(idea.doneByTask ? { doneByTask: { ...idea.doneByTask } } : {}),
       ...(idea.doneAtByTask ? { doneAtByTask: { ...idea.doneAtByTask } } : {}),
     })),
@@ -314,6 +315,11 @@ function migrateIdeaProgress(
     if (!doneByTask[target]) doneByTask[target] = true;
   }
   for (const [key, at] of Object.entries(idea.doneAt ?? {})) {
+    // Mirror the done loop's completion guard: an ORPHANED legacy timestamp
+    // (doneAt entry without done:true — e.g. a hand-edited or partially
+    // corrupted doc) must never mint a doneAtByTask entry for a task that was
+    // never completed.
+    if (idea.done?.[key] !== true) continue;
     const mapped = LEGACY_KEY_REMAP[key];
     if (!mapped) continue;
     const target = resolveTaskId(mapped, remap);
@@ -538,6 +544,20 @@ export type Action =
  * fire the celebration and advance the runner to the next playable criterion.
  * Idempotent and out-of-range tolerant: returns the same state if the index is
  * invalid or the task was already done.
+ *
+ * LEGACY-WRITE SCOPE (intended): a task OUTSIDE the ten-entry legacy table
+ * (anything past 1.2) writes ONLY the stable-id maps — no legacy
+ * `${stepId}#${index}` key is ever minted for it. That is deliberate: no legacy
+ * reader ever existed for post-1.2 tasks (old builds could not complete them),
+ * so a legacy mirror would be an invented key with no consumer. Their
+ * loss-protection against a concurrent stale tab is the sync engine's
+ * rebase-union (unionCompletionMaps in src/lib/sync.ts), not the legacy map.
+ *
+ * DUAL-WRITE RETIREMENT: the legacy dual-write (and the legacy fallback in
+ * isTaskDone) retires when every cohort save has been re-persisted under the
+ * stable-id shape AND no pre-stable-key build can still run — practically: a
+ * deliberate cleanup unit after the cohort's saves are observed migrated (all
+ * rows carry doneByTask); not before, and never as a drive-by edit.
  */
 function markTaskDone(
   state: GameState,
@@ -555,11 +575,12 @@ function markTaskDone(
   // a missing/malformed stamp completes the task with no doneAt entry.
   const stampValid = typeof at === "number" && Number.isFinite(at) && at >= 0;
   const wasCriterionDone = isCriterionDone(state, ideaIndex, stepId);
-  // DUAL-WRITE (Unit 5 transition): the stable-id maps are the forward shape;
-  // the legacy `${stepId}#${index}` key is ALSO written when the task maps back
-  // through the explicit legacy table, so an old tab that hydrates this doc and
-  // strips the new fields still carries every completion in its legacy map and
-  // the next new-code load re-unions losslessly (stale-tab risk row).
+  // DUAL-WRITE (Unit 5 transition; retirement condition in the doc comment
+  // above): the stable-id maps are the forward shape; the legacy
+  // `${stepId}#${index}` key is ALSO written when the task maps back through
+  // the explicit legacy table, so an old tab that hydrates this doc and strips
+  // the new fields still carries every completion in its legacy map and the
+  // next new-code load re-unions losslessly (stale-tab risk row).
   const legacyKey = taskKey(stepId, index);
   const rawTaskId = taskIdAt(stepId, index);
   const stableId = rawTaskId ? resolveTaskId(rawTaskId) : undefined;
