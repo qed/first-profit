@@ -54,12 +54,26 @@ import {
   loadSave,
   loadLedger,
   createSyncEngine,
+  enqueueFeedback,
+  feedbackCountForDay,
+  bumpFeedbackCountForDay,
+  FEEDBACK_DAILY_CAP,
+  FEEDBACK_BODY_MAX,
+  type FeedbackBand,
+  type FeedbackSendOutcome,
   type SyncEngine,
   type SyncStatus,
 } from "../lib/sync";
 
 /** ~45 minutes of no interaction triggers an idle logout. */
 const IDLE_TIMEOUT_MS = 45 * 60 * 1000;
+
+/**
+ * The honest fate of a "Stuck? Tell us" submission, for the StuckBox UI:
+ * `sent`/`queued`/`dropped` from the sync engine, plus `capped` when the local
+ * mirror of the DB's 50-per-day cap refuses before anything is enqueued.
+ */
+export type FeedbackSubmitOutcome = FeedbackSendOutcome | "capped";
 
 export interface GameApi extends GameState {
   dispatch: React.Dispatch<Action>;
@@ -80,6 +94,14 @@ export interface GameApi extends GameState {
   // Auth / session actions.
   login: (identifier: string, password: string) => Promise<boolean>;
   logout: () => Promise<void>;
+
+  /**
+   * Submit a "Stuck? Tell us" report for a task. Empty body allowed (a tap is
+   * signal). `band` defaults to "unknown" — the Unit 3 grade plumbing passes a
+   * real band here once it exists; until then "unknown" keeps the owner's band
+   * analysis unbiased.
+   */
+  submitFeedback: (taskId: string, body: string, band?: FeedbackBand) => Promise<FeedbackSubmitOutcome>;
 }
 
 const GameContext = createContext<GameApi | null>(null);
@@ -353,6 +375,38 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
     await runLogout("explicit");
   }, [runLogout]);
 
+  // ── "Stuck? Tell us" feedback submission ─────────────────────────────────
+  // Date.now()/crypto.randomUUID stay at this caller boundary (gameCore and
+  // sync stay clock-free). The row is validated against the client-side CHECK
+  // mirrors before enqueue; the local daily counter mirrors the DB's 50/day cap
+  // so the trigger's terminal refusal is unreachable in normal use.
+  const submitFeedback = useCallback(
+    async (
+      taskId: string,
+      body: string,
+      band: FeedbackBand = "unknown",
+    ): Promise<FeedbackSubmitOutcome> => {
+      const userId = getLastUserId();
+      if (!userId) return "dropped";
+      // UTC day, matching the DB trigger's date_trunc('day', now()).
+      const day = new Date().toISOString().slice(0, 10);
+      if (feedbackCountForDay(userId, day) >= FEEDBACK_DAILY_CAP) return "capped";
+      const row = {
+        id: crypto.randomUUID(),
+        taskId,
+        band,
+        body: body.slice(0, FEEDBACK_BODY_MAX),
+      };
+      bumpFeedbackCountForDay(userId, day);
+      const engine = engineRef.current;
+      if (engine) return engine.notifyFeedback(row);
+      // No live engine (should not happen while the runner is open): enqueue
+      // durably; the next session's replay drains it. Honest copy: queued.
+      return enqueueFeedback(userId, row) ? "queued" : "dropped";
+    },
+    [],
+  );
+
   // ── Idle timeout: revoke after ~45 min of no interaction while logged in. ──
   useEffect(() => {
     if (!isLoggedInStage(state.stage)) return;
@@ -399,8 +453,9 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
       salesSumCents: () => salesSumCentsFn(state),
       login,
       logout,
+      submitFeedback,
     }),
-    [state, syncStatus, login, logout],
+    [state, syncStatus, login, logout, submitFeedback],
   );
 
   return <GameContext.Provider value={value}>{children}</GameContext.Provider>;

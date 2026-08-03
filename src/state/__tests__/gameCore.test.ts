@@ -1264,3 +1264,139 @@ describe("path.ts sanity (handoff copy rules)", () => {
     expect(STEPS.length).toBeGreaterThan(0);
   });
 });
+
+describe("doneAt completion timestamps (additive-optional, NO DOC_VERSION bump)", () => {
+  it("COMPLETE_TASK with a caller-stamped `at` records doneAt under the legacy taskKey", () => {
+    const s = reducer(withOneIdea(), {
+      type: "COMPLETE_TASK",
+      ideaIndex: 0,
+      stepId: "1.1",
+      index: 0,
+      at: 1_754_000_000_000,
+    });
+    expect(s.ideas[0].done[taskKey("1.1", 0)]).toBe(true);
+    expect(s.ideas[0].doneAt?.[taskKey("1.1", 0)]).toBe(1_754_000_000_000);
+  });
+
+  it("COMPLETE_TASK without `at` (legacy caller) completes with NO doneAt entry", () => {
+    const s = reducer(withOneIdea(), { type: "COMPLETE_TASK", ideaIndex: 0, stepId: "1.1", index: 0 });
+    expect(s.ideas[0].done[taskKey("1.1", 0)]).toBe(true);
+    expect(s.ideas[0].doneAt?.[taskKey("1.1", 0)]).toBeUndefined();
+  });
+
+  it("a malformed stamp (NaN / negative) is rejected, never persisted to poison the next load", () => {
+    let s = reducer(withOneIdea(), {
+      type: "COMPLETE_TASK",
+      ideaIndex: 0,
+      stepId: "1.1",
+      index: 0,
+      at: Number.NaN,
+    });
+    s = reducer(s, { type: "COMPLETE_TASK", ideaIndex: 0, stepId: "1.1", index: 1, at: -5 });
+    expect(s.ideas[0].done[taskKey("1.1", 0)]).toBe(true);
+    expect(s.ideas[0].doneAt?.[taskKey("1.1", 0)]).toBeUndefined();
+    expect(s.ideas[0].doneAt?.[taskKey("1.1", 1)]).toBeUndefined();
+  });
+
+  it("re-completing an already-done task keeps the ORIGINAL timestamp (idempotent)", () => {
+    const first = reducer(withOneIdea(), {
+      type: "COMPLETE_TASK",
+      ideaIndex: 0,
+      stepId: "1.1",
+      index: 0,
+      at: 1000,
+    });
+    const again = reducer(first, {
+      type: "COMPLETE_TASK",
+      ideaIndex: 0,
+      stepId: "1.1",
+      index: 0,
+      at: 9999,
+    });
+    expect(again).toBe(first); // referential no-op
+    expect(again.ideas[0].doneAt?.[taskKey("1.1", 0)]).toBe(1000);
+  });
+
+  it("the 1.2 real-sale auto-complete stamps doneAt from the row's createdAt", () => {
+    let s = withOneIdea();
+    for (let i = 0; i < getStep("1.1").tasks.length; i++) {
+      s = reducer(s, { type: "COMPLETE_TASK", ideaIndex: 0, stepId: "1.1", index: i });
+    }
+    s = reducer(s, {
+      type: "ADD_LEDGER",
+      id: "sale-1",
+      kind: "sale",
+      payer: "Mom",
+      amountCents: 500,
+      createdAt: "2026-08-03T12:00:00.000Z",
+    });
+    const key = taskKey("1.2", LAST_1_2_INDEX);
+    expect(s.ideas[0].done[key]).toBe(true);
+    expect(s.ideas[0].doneAt?.[key]).toBe(Date.parse("2026-08-03T12:00:00.000Z"));
+  });
+
+  it("toSaveDoc -> fromSaveDoc -> HYDRATE round-trips doneAt (HYDRATE must not wipe it)", () => {
+    const s = reducer(withOneIdea(), {
+      type: "COMPLETE_TASK",
+      ideaIndex: 0,
+      stepId: "1.1",
+      index: 2,
+      at: 1_754_000_123_456,
+    });
+    const doc = toSaveDoc(s);
+    const parsed = fromSaveDoc(JSON.parse(JSON.stringify(doc)));
+    if (!parsed.ok) throw new Error("round-trip refused");
+    expect(parsed.doc.ideas[0].doneAt).toEqual({ [taskKey("1.1", 2)]: 1_754_000_123_456 });
+    // Split-storage learning: HYDRATE re-sources every persisted slice.
+    const hydrated = reducer(initialState(), { type: "HYDRATE", doc: parsed.doc });
+    expect(hydrated.ideas[0].doneAt).toEqual({ [taskKey("1.1", 2)]: 1_754_000_123_456 });
+  });
+
+  it("an OLD doc without doneAt loads clean (absent stays absent; still DOC_VERSION 1)", () => {
+    expect(DOC_VERSION).toBe(1); // additive change only — a bump would discard outboxes
+    const legacyDoc = {
+      docVersion: 1,
+      ideas: [{ fields: { oneLiner: "x" }, done: { [taskKey("1.1", 0)]: true } }],
+      activeIdea: 0,
+      siteHeadline: "",
+      onboardingComplete: true,
+    };
+    const parsed = fromSaveDoc(legacyDoc);
+    if (!parsed.ok) throw new Error("legacy doc refused");
+    expect(parsed.doc.ideas[0].doneAt).toBeUndefined();
+    expect(parsed.doc.ideas[0].done[taskKey("1.1", 0)]).toBe(true);
+    // And an untimestamped doc stays byte-stable through a save round-trip.
+    const hydrated = reducer(initialState(), { type: "HYDRATE", doc: parsed.doc });
+    expect(toSaveDoc(hydrated).ideas[0]).not.toHaveProperty("doneAt");
+  });
+
+  it("fromSaveDoc drops malformed doneAt leaves (non-number / NaN-shaped) but keeps good ones", () => {
+    const parsed = fromSaveDoc({
+      docVersion: 1,
+      ideas: [
+        {
+          fields: {},
+          done: {},
+          doneAt: { good: 123, str: "yesterday", neg: -1, nul: null },
+        },
+      ],
+      activeIdea: 0,
+      siteHeadline: "",
+      onboardingComplete: false,
+    });
+    if (!parsed.ok) throw new Error("doc refused");
+    expect(parsed.doc.ideas[0].doneAt).toEqual({ good: 123 });
+  });
+
+  it("RESET_SESSION clears doneAt with the rest of the ideas (shared-device safety)", () => {
+    const s = reducer(withOneIdea(), {
+      type: "COMPLETE_TASK",
+      ideaIndex: 0,
+      stepId: "1.1",
+      index: 0,
+      at: 1000,
+    });
+    const reset = reducer(s, { type: "RESET_SESSION" });
+    expect(reset.ideas).toEqual([]);
+  });
+});

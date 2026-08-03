@@ -41,6 +41,7 @@ interface FakeEngine {
   start: ReturnType<typeof vi.fn>;
   stop: ReturnType<typeof vi.fn>;
   notifyLedger: ReturnType<typeof vi.fn>;
+  notifyFeedback: ReturnType<typeof vi.fn>;
   notifySnapshotChange: ReturnType<typeof vi.fn>;
   flushOnHide: ReturnType<typeof vi.fn>;
 }
@@ -55,11 +56,18 @@ vi.mock("../../lib/sync", () => ({
   resetProfileIdCache: vi.fn(),
   loadSave: (...a: unknown[]) => syncMock.loadSave(...a),
   loadLedger: (...a: unknown[]) => syncMock.loadLedger(...a),
+  // Feedback plumbing (Unit 2): real constants, inert queue/counter fns.
+  enqueueFeedback: vi.fn().mockReturnValue(true),
+  feedbackCountForDay: vi.fn().mockReturnValue(0),
+  bumpFeedbackCountForDay: vi.fn(),
+  FEEDBACK_DAILY_CAP: 50,
+  FEEDBACK_BODY_MAX: 1000,
   createSyncEngine: () => {
     const engine: FakeEngine = {
       start: vi.fn().mockResolvedValue(undefined),
       stop: vi.fn(),
       notifyLedger: vi.fn(),
+      notifyFeedback: vi.fn().mockResolvedValue("sent"),
       notifySnapshotChange: vi.fn(),
       flushOnHide: vi.fn(),
     };
