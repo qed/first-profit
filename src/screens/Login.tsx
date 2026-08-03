@@ -143,10 +143,6 @@ export function Login() {
             </a>
           </p>
         </div>
-
-        <p className="mt-4 text-center font-mono text-[11px] uppercase tracking-wider text-ink/50">
-          A grown-up sets up every account
-        </p>
       </div>
     </main>
   );
