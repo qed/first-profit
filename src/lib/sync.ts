@@ -37,12 +37,16 @@ import { getConfig } from "../config";
 import { getSupabase } from "./supabase";
 import {
   fromSaveDoc,
+  unionCompletionMaps,
   DOC_VERSION,
-  type Business,
-  type Idea,
   type SaveDoc,
   type LedgerEntry,
 } from "../state/gameCore";
+
+// Re-exported so existing consumers/tests keep importing the union from here;
+// it LIVES in gameCore now so the UNION_REMOTE reducer action can share it
+// without a sync→gameCore→sync import cycle.
+export { unionCompletionMaps };
 import { getDraft, setDraft } from "./draftCache";
 
 // ── Shared types ───────────────────────────────────────────────────────────
@@ -492,105 +496,11 @@ export async function saveSnapshot(
   }
 }
 
-// ── Rebase union (CAS-conflict merge of completion maps) ─────────────────────
-
-/**
- * Union one map: server-only entries are ADDED, both-present conflicts keep the
- * LOCAL value, nothing is ever removed. Absent-stays-absent: when neither side
- * carries the map, none is invented (byte-stable docs stay byte-stable).
- */
-function unionMap<T>(
-  local: Record<string, T> | undefined,
-  server: Record<string, T> | undefined,
-): Record<string, T> | undefined {
-  if (!server || Object.keys(server).length === 0) return local;
-  if (!local) return { ...server };
-  return { ...server, ...local }; // spread order: local wins on conflicts
-}
-
-/** Union one idea's four completion maps (server → local); everything else local. */
-function unionIdeaCompletions(local: Idea, server: Idea): Idea {
-  const merged: Idea = { ...local, done: { ...server.done, ...local.done } };
-  const doneAt = unionMap(local.doneAt, server.doneAt);
-  const doneByTask = unionMap(local.doneByTask, server.doneByTask);
-  const doneAtByTask = unionMap(local.doneAtByTask, server.doneAtByTask);
-  if (doneAt) merged.doneAt = doneAt;
-  if (doneByTask) merged.doneByTask = doneByTask;
-  if (doneAtByTask) merged.doneAtByTask = doneAtByTask;
-  return merged;
-}
-
-/**
- * Union the businesses lists (Unit 7). Businesses are MONOTONIC-ish:
- * - a business present only on the SERVER is KEPT (appended in server order —
- *   a concurrent session promoted it; dropping it would erase a promotion);
- * - matched BY BUSINESS ID, each business's completion maps union exactly like
- *   an idea's (server-only entries added, local wins on conflicts);
- * - `archived` (and the other scalar leaves) is LATEST-INTENT: the LOCAL value
- *   wins, like fields/chosenProvider — an archive/unarchive tap in the live
- *   tab is the intent to honor, and there is no well-defined union of a flag.
- * Absent-stays-absent: when neither side carries the list, none is invented.
- */
-function unionBusinesses(
-  local: Business[] | undefined,
-  server: Business[] | undefined,
-): Business[] | undefined {
-  if (!server || server.length === 0) return local;
-  if (!local || local.length === 0) return server.map((b) => ({ ...b }));
-  const merged = local.map((lb) => {
-    const sb = server.find((b) => b.id === lb.id);
-    if (!sb) return lb;
-    const out: Business = { ...lb }; // scalar leaves: local wins (latest intent)
-    const doneByTask = unionMap(lb.doneByTask, sb.doneByTask);
-    const doneAtByTask = unionMap(lb.doneAtByTask, sb.doneAtByTask);
-    if (doneByTask) out.doneByTask = doneByTask;
-    if (doneAtByTask) out.doneAtByTask = doneAtByTask;
-    return out;
-  });
-  for (const sb of server) {
-    if (!local.some((b) => b.id === sb.id)) merged.push({ ...sb }); // kept, never dropped
-  }
-  return merged;
-}
-
-/**
- * The CAS-rebase merge contract (fix for the concurrent-session clobber): when
- * this tab loses the CAS race, the doc it re-saves is its OWN doc with the
- * server doc's COMPLETION MAPS unioned in — never a raw replacement that would
- * erase what a concurrent session (another tab / another device) completed.
- *
- * - Completions (`done`, `doneAt`, `doneByTask`, `doneAtByTask`) are MONOTONIC:
- *   they only ever move toward "more complete", so union is always safe and
- *   lossless. Per idea (aligned by index): server-only entries are added, local
- *   wins on both-present conflicts, nothing is ever removed.
- * - Everything else (`fields` text, `activeIdea`, `siteHeadline`,
- *   `onboardingComplete`, `chosenProvider`) stays LOCAL-authoritative: those are
- *   latest-intent values, not monotonic sets — "merging" free text or a provider
- *   choice has no well-defined union, and the child's most recent edit in the
- *   live tab is the intent to honor. Last-writer-wins is correct there.
- * - EXTRA SERVER IDEAS (server has more ideas than local — a concurrent tab
- *   created an idea) are APPENDED to the local list: dropping them would be
- *   data loss, and idea creation is itself monotonic/append-only.
- * - BUSINESSES (Unit 7) union per `unionBusinesses`: server-only records are
- *   kept, per-business completion maps union like an idea's, and `archived`
- *   is latest-intent (local wins).
- *
- * Pure and exported for direct testing; `serverDoc` is null when the server row
- * was empty/unreadable (nothing to union — local is returned unchanged).
- */
-export function unionCompletionMaps(localDoc: SaveDoc, serverDoc: SaveDoc | null): SaveDoc {
-  if (!serverDoc) return localDoc;
-  const ideas = localDoc.ideas.map((idea, i) => {
-    const server = serverDoc.ideas[i];
-    return server ? unionIdeaCompletions(idea, server) : idea;
-  });
-  for (let i = localDoc.ideas.length; i < serverDoc.ideas.length; i++) {
-    ideas.push(serverDoc.ideas[i]); // appended, never dropped
-  }
-  // Businesses union (Unit 7) — see unionBusinesses for the exact rules.
-  const businesses = unionBusinesses(localDoc.businesses, serverDoc.businesses);
-  return { ...localDoc, ideas, ...(businesses ? { businesses } : {}) };
-}
+// ── Rebase union (CAS-conflict merge) ────────────────────────────────────────
+// The union itself (unionCompletionMaps + its business/idea helpers) lives in
+// ../state/gameCore so the reducer's UNION_REMOTE action shares the exact same
+// merge semantics; it is re-exported above. flushPending below is the only
+// caller here (the CAS rebase path).
 
 // ── Ledger insert ────────────────────────────────────────────────────────────
 
@@ -1223,6 +1133,16 @@ export interface SyncEngineDeps {
   onStatus: (status: SyncStatus) => void;
   /** An expired session was hit mid-play — the app should route to login. */
   onReauthNeeded: () => void;
+  /**
+   * A CAS-rebased (merged) doc COMMITTED to the server. Invoked only after the
+   * rebased save succeeds, and only while this session is still the live one
+   * (generation-guarded like every async writer). The caller must feed the doc
+   * back into live state (GameContext dispatches UNION_REMOTE) — otherwise the
+   * concurrent session's work exists on the server and in this tab's next
+   * rebase, but never on this tab's screen, and the two tabs split-brain until
+   * a reload. Optional so bare test engines stay valid.
+   */
+  onRebasedDoc?: (doc: SaveDoc) => void;
   storage?: Storage;
 }
 
@@ -1305,6 +1225,12 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine {
     }
     let result = await saveSnapshot(pid, saveRevision, saveDoc);
 
+    // True once saveDoc is a REBASED merge (local ∪ server) rather than the raw
+    // local snapshot — the commit of a rebased doc must be fed back to the
+    // reducer (onRebasedDoc) or this tab never sees the concurrent session's
+    // work it just persisted on the server (split-brain until reload).
+    let rebased = false;
+
     if (!result.ok && result.reason === "cas-rejected") {
       // P0: the session may have ended during the network round-trip. Never issue
       // the rebase write under a superseded session.
@@ -1322,6 +1248,7 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine {
       const current = deps.getSnapshot();
       saveRevision = fresh.revision;
       saveDoc = unionCompletionMaps(current.doc, fresh.doc);
+      rebased = true;
       if (!isCurrent(gen)) return;
       result = await saveSnapshot(pid, saveRevision, saveDoc);
     }
@@ -1333,6 +1260,11 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine {
     if (result.ok) {
       deps.setRevision(result.revision);
       clearPendingSnapshot(userId, storage);
+      // A rebased save COMMITTED: feed the merged doc back into live state
+      // (UNION_REMOTE) so this tab converges on the union it just persisted.
+      // Ordered before the status flip so 'saved' reflects converged state;
+      // guarded by the isCurrent(gen) check above like every shared mutation.
+      if (rebased) deps.onRebasedDoc?.(saveDoc);
       setStatus("saved");
       return;
     }

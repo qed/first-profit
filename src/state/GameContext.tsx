@@ -38,6 +38,7 @@ import {
   isStepUnlocked as isStepUnlockedFn,
   ideasEligibleFor as ideasEligibleForFn,
   activeBusiness as activeBusinessFn,
+  isPhaseComplete as isPhaseCompleteFn,
   type GameState,
   type Action,
 } from "./gameCore";
@@ -101,11 +102,19 @@ export interface GameApi extends GameState {
   // Date.now — gameCore stays clock- and randomness-free). Each is a no-op
   // when the reducer's refusal conditions hold; Unit 8's promotion screen only
   // offers eligible ideas, so the refusals are unreachable from the UI.
-  /** Promote the idea at `ideaIndex` to THE business (mints the business id). */
-  promoteIdea: (ideaIndex: number) => void;
-  /** Archive the currently active business (record + 4-5 progress preserved). */
+  /**
+   * Promote the idea at `ideaIndex` to THE business (mints the business id).
+   * Returns false when the promotion is REFUSED (unknown/id-less idea, Validate
+   * incomplete, or a business already active) so the UI can react — e.g. keep
+   * a promotion screen open — instead of assuming the dispatch landed; true
+   * means the PROMOTE_IDEA action was dispatched with the minted id/timestamp.
+   */
+  promoteIdea: (ideaIndex: number) => boolean;
+  /** Archive the currently active business (record + 4-5 progress preserved;
+   *  stamps archiveStateAt = Date.now() for the cross-tab archived union). */
   archiveBusiness: () => void;
-  /** Restore an archived business — refused while another business is active. */
+  /** Restore an archived business — refused while another business is active.
+   *  Stamps archiveStateAt = Date.now() like archiveBusiness. */
   unarchiveBusiness: (businessId: string) => void;
 
   // Auth / session actions.
@@ -226,6 +235,16 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
         onReauthNeeded: () => {
           // An expired session mid-play: surface the login stage (never crash).
           dispatch({ type: "SET_STAGE", stage: "login" });
+        },
+        onRebasedDoc: (mergedDoc) => {
+          // A CAS-rebased save COMMITTED: union the merged doc's monotonic
+          // state (completions/businesses/appended ideas) back into live state
+          // so this tab converges with the concurrent session instead of
+          // split-braining until reload. The engine only invokes this while
+          // its session generation is live (stopEngine supersedes it), and
+          // UNION_REMOTE marks state only — it never touches the runner,
+          // celebrations, or latest-intent fields.
+          dispatch({ type: "UNION_REMOTE", doc: mergedDoc });
         },
       });
       engineRef.current = engine;
@@ -571,27 +590,35 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
   // ── Business promotion (Unit 7) ───────────────────────────────────────────
   // The id/timestamp minting boundary (crypto.randomUUID / Date.now stay out
   // of gameCore). Reads go through stateRef so the callbacks stay stable.
-  const promoteIdea = useCallback((ideaIndex: number) => {
+  const promoteIdea = useCallback((ideaIndex: number): boolean => {
+    // Mirror the reducer's refusal conditions against live state so the caller
+    // gets an honest boolean (dispatch itself has no return channel). A false
+    // is a guaranteed no-op; a true dispatches with a freshly minted UUID —
+    // duplicate-businessId refusal is unreachable for a fresh random id.
+    const s = stateRef.current;
     // Legacy in-memory ideas without an id cannot be promoted this session;
     // the next load mints their deterministic id (see gameCore fromSaveDoc).
-    const ideaId = stateRef.current.ideas[ideaIndex]?.id;
-    if (!ideaId) return;
+    const ideaId = s.ideas[ideaIndex]?.id;
+    if (!ideaId) return false;
+    if (!isPhaseCompleteFn(s, ideaIndex, "validate")) return false;
+    if (activeBusinessFn(s)) return false;
     dispatch({
       type: "PROMOTE_IDEA",
       ideaId,
       businessId: crypto.randomUUID(),
       at: Date.now(),
     });
+    return true;
   }, []);
 
   const archiveBusiness = useCallback(() => {
     const active = activeBusinessFn(stateRef.current);
     if (!active) return;
-    dispatch({ type: "ARCHIVE_BUSINESS", businessId: active.id });
+    dispatch({ type: "ARCHIVE_BUSINESS", businessId: active.id, at: Date.now() });
   }, []);
 
   const unarchiveBusiness = useCallback((businessId: string) => {
-    dispatch({ type: "UNARCHIVE_BUSINESS", businessId });
+    dispatch({ type: "UNARCHIVE_BUSINESS", businessId, at: Date.now() });
   }, []);
 
   // ── Idle timeout: revoke after ~45 min of no interaction while logged in. ──

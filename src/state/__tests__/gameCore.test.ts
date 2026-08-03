@@ -21,8 +21,10 @@ import {
   isStepUnlocked,
   isTaskDone,
   nextUpFor,
+  normalizeBusinesses,
   phaseProgress,
   reducer,
+  unionCompletionMaps,
   salesSumCents,
   stepPips,
   taskKey,
@@ -1567,13 +1569,13 @@ describe("generic phase engine (Unit 6): full 25-criterion sequence", () => {
     expect(nextUpFor(s, 0)).toBeNull();
   });
 
-  it("phase 4 stays LOCKED without the business seam even with 3.5 complete", () => {
+  it("phase 4 stays LOCKED without a promoted business even with 3.5 complete", () => {
     let s = withOneIdea();
     s = completePhase(s, 0, "sell");
     s = completePhase(s, 0, "build");
     s = completePhase(s, 0, "validate");
     expect(isPhaseComplete(s, 0, "validate")).toBe(true);
-    // Nothing can set the seam yet (Unit 7 adds the business model).
+    // No PROMOTE_IDEA has run, so the business gate is closed.
     expect(activeBusinessExists(s)).toBe(false);
     expect(isPhaseUnlocked(s, 0, "grow")).toBe(false);
     expect(isPhaseUnlocked(s, 0, "scale")).toBe(false);
@@ -2107,5 +2109,235 @@ describe("PROMOTE_IDEA / ARCHIVE_BUSINESS / UNARCHIVE_BUSINESS (Unit 7)", () => 
     const businessDone = activeBusiness(s)?.doneByTask ?? {};
     expect(Object.keys(businessDone).every((k) => /^[45]\./.test(k))).toBe(true);
     expect(Object.keys(s.ideas[0].doneByTask ?? {}).some((k) => /^[45]\./.test(k))).toBe(false);
+  });
+});
+
+// ── Unit 7 review fixes: idea-scoped Grow/Scale, archiveStateAt, UNION_REMOTE ─
+
+/** Two caller-minted-id ideas both driven through Validate. */
+function withTwoValidatedIdeas(): GameState {
+  let s = apply(
+    initialState(),
+    { type: "CREATE_IDEA", ideaId: "idea-a" },
+    { type: "CLOSE_RUNNER" },
+    { type: "CREATE_IDEA", ideaId: "idea-b" },
+    { type: "CLOSE_RUNNER" },
+  );
+  for (const phase of ["sell", "build", "validate"] as const) {
+    s = completePhase(s, 0, phase);
+    s = completePhase(s, 1, phase);
+  }
+  return reducer(s, { type: "DISMISS_CELEBRATION" });
+}
+
+describe("Grow/Scale are scoped to the PROMOTED idea (FIX 4)", () => {
+  it("a second Validate-complete idea reports phase 4 LOCKED while another idea's business is active", () => {
+    let s = withTwoValidatedIdeas();
+    s = reducer(s, { type: "PROMOTE_IDEA", ideaId: "idea-a", businessId: "biz-1", at: 1 });
+    // The promoted idea proceeds…
+    expect(isPhaseUnlocked(s, 0, "grow")).toBe(true);
+    expect(isStepUnlocked(s, 0, "4.1")).toBe(true);
+    expect(nextUpFor(s, 0)).toBe("4.1");
+    // …the OTHER validated idea stays locked out of 4-5 entirely.
+    expect(isPhaseUnlocked(s, 1, "grow")).toBe(false);
+    expect(isPhaseUnlocked(s, 1, "scale")).toBe(false);
+    expect(isStepUnlocked(s, 1, "4.1")).toBe(false);
+    expect(isIdeaEligibleFor(s, 1, "4.1")).toBe(false);
+    expect(ideasEligibleFor(s, "4.1")).toEqual([0]);
+    expect(nextUpFor(s, 1)).toBeNull();
+  });
+
+  it("COMPLETE_TASK addressed through the NON-promoted idea is a no-op (never credits the business)", () => {
+    let s = withTwoValidatedIdeas();
+    s = reducer(s, { type: "PROMOTE_IDEA", ideaId: "idea-a", businessId: "biz-1", at: 1 });
+    const refused = reducer(s, { type: "COMPLETE_TASK", ideaIndex: 1, stepId: "4.1", index: 0, at: 5 });
+    expect(refused).toBe(s); // exact same state reference: a true no-op
+    expect(activeBusiness(refused)?.doneByTask).toBeUndefined();
+    // The promoted idea's dispatch writes the business as before.
+    const done = reducer(s, { type: "COMPLETE_TASK", ideaIndex: 0, stepId: "4.1", index: 0, at: 5 });
+    expect(activeBusiness(done)?.doneByTask).toEqual({ "4.1.1": true });
+    // And the business's progress is only READABLE through the promoted idea.
+    expect(isTaskDone(done, 0, "4.1", 0)).toBe(true);
+    expect(isTaskDone(done, 1, "4.1", 0)).toBe(false);
+  });
+});
+
+describe("archiveStateAt (FIX 2a: last-action-wins stamp)", () => {
+  it("ARCHIVE_BUSINESS and UNARCHIVE_BUSINESS stamp the caller-provided `at`", () => {
+    let s = withValidatedIdea();
+    s = reducer(s, { type: "PROMOTE_IDEA", ideaId: "idea-a", businessId: "biz-1", at: 1 });
+    expect(activeBusiness(s)?.archiveStateAt).toBeUndefined(); // promotion never stamps it
+    s = reducer(s, { type: "ARCHIVE_BUSINESS", businessId: "biz-1", at: 500 });
+    expect(s.businesses?.[0]).toMatchObject({ archived: true, archiveStateAt: 500 });
+    s = reducer(s, { type: "UNARCHIVE_BUSINESS", businessId: "biz-1", at: 600 });
+    expect(s.businesses?.[0]).toMatchObject({ archived: false, archiveStateAt: 600 });
+  });
+
+  it("a missing/malformed `at` still archives, just without a stamp (legacy dispatchers)", () => {
+    let s = withValidatedIdea();
+    s = reducer(s, { type: "PROMOTE_IDEA", ideaId: "idea-a", businessId: "biz-1", at: 1 });
+    const noStamp = reducer(s, { type: "ARCHIVE_BUSINESS", businessId: "biz-1" });
+    expect(noStamp.businesses?.[0].archived).toBe(true);
+    expect(noStamp.businesses?.[0]).not.toHaveProperty("archiveStateAt");
+    const badStamp = reducer(s, { type: "ARCHIVE_BUSINESS", businessId: "biz-1", at: Number.NaN });
+    expect(badStamp.businesses?.[0]).not.toHaveProperty("archiveStateAt");
+  });
+
+  it("archiveStateAt round-trips the save doc (coerced like every timestamp leaf)", () => {
+    let s = withValidatedIdea();
+    s = reducer(s, { type: "PROMOTE_IDEA", ideaId: "idea-a", businessId: "biz-1", at: 1 });
+    s = reducer(s, { type: "ARCHIVE_BUSINESS", businessId: "biz-1", at: 500 });
+    const parsed = fromSaveDoc(JSON.parse(JSON.stringify(toSaveDoc(s))));
+    if (!parsed.ok) throw new Error("round-trip refused");
+    expect(parsed.doc.businesses?.[0].archiveStateAt).toBe(500);
+    // A malformed persisted stamp is dropped, never poisons the record.
+    const bad = fromSaveDoc({
+      docVersion: DOC_VERSION,
+      ideas: [],
+      activeIdea: 0,
+      siteHeadline: "",
+      onboardingComplete: false,
+      businesses: [{ id: "biz-1", archived: true, archiveStateAt: -5 }],
+    });
+    if (!bad.ok) throw new Error("doc refused");
+    expect(bad.doc.businesses?.[0]).toEqual({ id: "biz-1", archived: true });
+  });
+});
+
+describe("normalizeBusinesses (FIX 2b: the one-active invariant, derived)", () => {
+  it("archives every active business except the EARLIEST promoted (id tiebreak), stamping nothing", () => {
+    const normalized = normalizeBusinesses([
+      { id: "biz-late", archived: false, promotedAt: 500 },
+      { id: "biz-early", archived: false, promotedAt: 300 },
+      { id: "biz-old", archived: true, archiveStateAt: 10 },
+    ]);
+    expect(normalized).toEqual([
+      { id: "biz-late", archived: true, promotedAt: 500 }, // derived: no archiveStateAt
+      { id: "biz-early", archived: false, promotedAt: 300 },
+      { id: "biz-old", archived: true, archiveStateAt: 10 },
+    ]);
+    // Deterministic tiebreaks: missing promotedAt sorts last; equal stamps use the id.
+    const tie = normalizeBusinesses([
+      { id: "biz-b", archived: false, promotedAt: 7 },
+      { id: "biz-a", archived: false, promotedAt: 7 },
+      { id: "biz-unstamped", archived: false },
+    ]);
+    expect(tie.filter((b) => !b.archived).map((b) => b.id)).toEqual(["biz-a"]);
+  });
+
+  it("returns the SAME list reference when the invariant already holds", () => {
+    const ok = [{ id: "biz-1", archived: false }, { id: "biz-2", archived: true }];
+    expect(normalizeBusinesses(ok)).toBe(ok);
+  });
+
+  it("fromSaveDoc normalizes a two-active doc so activeBusiness is deterministic", () => {
+    const parsed = fromSaveDoc({
+      docVersion: DOC_VERSION,
+      ideas: [],
+      activeIdea: 0,
+      siteHeadline: "",
+      onboardingComplete: false,
+      businesses: [
+        { id: "biz-late", archived: false, promotedAt: 500 },
+        { id: "biz-early", archived: false, promotedAt: 300 },
+      ],
+    });
+    if (!parsed.ok) throw new Error("doc refused");
+    const hydrated = reducer(initialState(), { type: "HYDRATE", doc: parsed.doc });
+    expect(activeBusiness(hydrated)?.id).toBe("biz-early");
+    expect(hydrated.businesses?.filter((b) => !b.archived)).toHaveLength(1);
+  });
+});
+
+describe("businessFor resolves the LATEST-promoted record regardless of list order", () => {
+  it("a union-reshuffled list (newest record NOT last) still answers the current record", () => {
+    const s: GameState = {
+      ...withOneIdea(),
+      businesses: [
+        { id: "biz-2", ideaId: "idea-a", archived: false, promotedAt: 2 },
+        { id: "biz-1", ideaId: "idea-a", archived: true, promotedAt: 1 },
+      ],
+    };
+    expect(businessFor(s, "idea-a")?.id).toBe("biz-2");
+  });
+});
+
+describe("UNION_REMOTE (FIX 1: the rebased doc feeds back into live state)", () => {
+  it("two divergent timelines CONVERGE: the union shows both businesses and both completions, one active", () => {
+    // Common base: two validated ideas. Tab A promotes idea-a and works Grow;
+    // tab B (concurrently, from the same base) promotes idea-b EARLIER.
+    const base = withTwoValidatedIdeas();
+    let tabA = reducer(base, { type: "PROMOTE_IDEA", ideaId: "idea-a", businessId: "biz-A", at: 100 });
+    tabA = reducer(tabA, { type: "COMPLETE_TASK", ideaIndex: 0, stepId: "4.1", index: 0, at: 111 });
+    let tabB = reducer(base, { type: "PROMOTE_IDEA", ideaId: "idea-b", businessId: "biz-B", at: 50 });
+    tabB = reducer(tabB, { type: "COMPLETE_TASK", ideaIndex: 1, stepId: "4.1", index: 0, at: 55 });
+
+    // Tab A receives tab B's rebased doc (what the sync engine committed).
+    const converged = reducer(tabA, { type: "UNION_REMOTE", doc: toSaveDoc(tabB) });
+    // BOTH business records exist; exactly ONE is active (earliest promotedAt).
+    expect(converged.businesses?.map((b) => b.id).sort()).toEqual(["biz-A", "biz-B"]);
+    expect(converged.businesses?.filter((b) => !b.archived).map((b) => b.id)).toEqual(["biz-B"]);
+    // Both timelines' Grow completions survive on their own records.
+    const bizA = converged.businesses?.find((b) => b.id === "biz-A");
+    const bizB = converged.businesses?.find((b) => b.id === "biz-B");
+    expect(bizA?.doneByTask).toEqual({ "4.1.1": true });
+    expect(bizB?.doneByTask).toEqual({ "4.1.1": true });
+    // The union is order-symmetric on the winner: tab B ∪ tab A agrees.
+    const convergedB = reducer(tabB, { type: "UNION_REMOTE", doc: toSaveDoc(tabA) });
+    expect(convergedB.businesses?.filter((b) => !b.archived).map((b) => b.id)).toEqual(["biz-B"]);
+  });
+
+  it("unions a concurrent tab's idea completions WITHOUT touching latest-intent fields", () => {
+    let local = apply(initialState(), { type: "CREATE_IDEA", ideaId: "idea-a" }, { type: "CLOSE_RUNNER" });
+    local = reducer(local, { type: "SET_FIELD", ideaIndex: 0, key: "oneLiner", value: "my text" });
+    local = reducer(local, { type: "SET_PROVIDER", providerId: "shopify", chosenAt: 1 });
+    // The remote doc completed 1.1 for the same idea and holds different intent.
+    let remote = apply(initialState(), { type: "CREATE_IDEA", ideaId: "idea-a" }, { type: "CLOSE_RUNNER" });
+    remote = completeCriterion(remote, 0, "1.1");
+    const remoteDoc = { ...toSaveDoc(remote), siteHeadline: "remote headline" };
+
+    const merged = reducer(local, { type: "UNION_REMOTE", doc: remoteDoc });
+    expect(isCriterionDone(merged, 0, "1.1")).toBe(true); // completion unioned in
+    expect(merged.ideas[0].fields.oneLiner).toBe("my text"); // local intent kept
+    expect(merged.profile.siteHeadline).toBe(local.profile.siteHeadline); // untouched
+    expect(merged.chosenProvider).toEqual({ providerId: "shopify", chosenAt: 1 });
+    expect(merged.activeIdea).toBe(local.activeIdea);
+  });
+
+  it("NEVER closes the runner or fires a celebration mid-session (marks state only)", () => {
+    // The child is mid-1.1 in the runner; the remote doc has 1.1 fully done.
+    const local = apply(initialState(), { type: "CREATE_IDEA", ideaId: "idea-a" });
+    expect(local.runnerOpen).toBe(true);
+    expect(local.runnerStep).toBe("1.1");
+    let remote = apply(initialState(), { type: "CREATE_IDEA", ideaId: "idea-a" }, { type: "CLOSE_RUNNER" });
+    remote = completeCriterion(remote, 0, "1.1");
+
+    const merged = reducer(local, { type: "UNION_REMOTE", doc: toSaveDoc(remote) });
+    // 1.1 is now done in live state, but nothing UI-visible fired: like the
+    // load migration, the union marks state without dispatching behavior.
+    expect(isCriterionDone(merged, 0, "1.1")).toBe(true);
+    expect(merged.celebrate).toBeNull();
+    expect(merged.runnerOpen).toBe(true);
+    expect(merged.runnerStep).toBe("1.1");
+    expect(merged.runnerIndex).toBe(local.runnerIndex);
+  });
+
+  it("appends a remote-only idea (divergent creation) without disturbing the local list", () => {
+    const local = apply(initialState(), { type: "CREATE_IDEA", ideaId: "idea-a" }, { type: "CLOSE_RUNNER" });
+    let remote = apply(initialState(), { type: "CREATE_IDEA", ideaId: "idea-z" }, { type: "CLOSE_RUNNER" });
+    remote = reducer(remote, { type: "SET_FIELD", ideaIndex: 0, key: "oneLiner", value: "their idea" });
+    const merged = reducer(local, { type: "UNION_REMOTE", doc: toSaveDoc(remote) });
+    expect(merged.ideas.map((i) => i.id)).toEqual(["idea-a", "idea-z"]);
+    expect(merged.ideas[1].fields.oneLiner).toBe("their idea");
+    expect(merged.activeIdea).toBe(0); // local intent untouched by the append
+  });
+
+  it("matches the exported unionCompletionMaps semantics exactly (shared contract)", () => {
+    const base = withTwoValidatedIdeas();
+    const tabA = reducer(base, { type: "PROMOTE_IDEA", ideaId: "idea-a", businessId: "biz-A", at: 100 });
+    const tabB = reducer(base, { type: "PROMOTE_IDEA", ideaId: "idea-b", businessId: "biz-B", at: 50 });
+    const viaReducer = reducer(tabA, { type: "UNION_REMOTE", doc: toSaveDoc(tabB) });
+    const viaUnion = unionCompletionMaps(toSaveDoc(tabA), toSaveDoc(tabB));
+    expect(toSaveDoc(viaReducer)).toEqual(viaUnion);
   });
 });

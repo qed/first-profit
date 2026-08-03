@@ -65,9 +65,25 @@ Every UI change MUST look good and work well on mobile before it is considered d
   separately by the `BUILT_CRITERIA` readiness allowlist in `src/data/path.ts`; the coach,
   room entry (`floorSelectors`), and floor cards all consume that one list so no surface
   can outrun another. Unit 8 expands it as each phase's surface generalizes.
-- Phases 4-5 gate on `activeBusinessExists` (the `businesses` seam on
-  GameState/SaveDoc, additive-optional). No reducer action writes it yet — Unit 7 adds
-  PROMOTE/ARCHIVE/UNARCHIVE — so Grow/Scale stay locked for every real save today.
+- **Business model (Unit 7).** One Validate-complete idea is explicitly PROMOTED into
+  THE business (`PROMOTE_IDEA`, caller-minted UUID + timestamp via GameContext's
+  `promoteIdea`, which returns a refusal boolean). ONE-ACTIVE INVARIANT: at most one
+  business is unarchived — the reducer refuses a promote/unarchive beside an active
+  business, and the pure `normalizeBusinesses` re-derives the invariant on every load
+  and every cross-tab union (earliest `promotedAt` wins, id tiebreak; derived only —
+  it never stamps `archiveStateAt`). Phase 4-5 progress BELONGS TO THE BUSINESS
+  record (stable-id maps on `Business`), scoped to the idea it was promoted from:
+  `isPhaseUnlocked`/`isTaskDone`/`COMPLETE_TASK` for grow/scale require the queried
+  idea to BE the promoted idea. `ARCHIVE_BUSINESS`/`UNARCHIVE_BUSINESS` keep the
+  record + progress and stamp `archiveStateAt` (Date.now at the GameContext
+  boundary); the cross-tab union resolves `archived` by the larger stamp
+  (last-action-wins), local winning on tie/absent.
+- **Cross-tab convergence.** The sync engine's CAS rebase saves `local ∪ server`
+  (`unionCompletionMaps`, lives in gameCore, re-exported by sync.ts) and then feeds
+  the committed merged doc back into live state via `onRebasedDoc` →
+  `UNION_REMOTE`, which unions only MONOTONIC state (completions, businesses,
+  id-matched/appended ideas) — never latest-intent fields or UI flags, and it can
+  never close the runner or fire a celebration.
 
 ## Documented Solutions
 

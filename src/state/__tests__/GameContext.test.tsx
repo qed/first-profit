@@ -46,6 +46,8 @@ interface FakeEngine {
   notifyFeedback: ReturnType<typeof vi.fn>;
   notifySnapshotChange: ReturnType<typeof vi.fn>;
   flushOnHide: ReturnType<typeof vi.fn>;
+  /** The deps GameContext handed createSyncEngine (to drive its callbacks). */
+  deps: Record<string, unknown>;
 }
 const engines: FakeEngine[] = [];
 const syncMock = {
@@ -68,7 +70,7 @@ vi.mock("../../lib/sync", () => ({
   utcDayToday: () => new Date().toISOString().slice(0, 10),
   FEEDBACK_DAILY_CAP: 50,
   FEEDBACK_BODY_MAX: 1000,
-  createSyncEngine: () => {
+  createSyncEngine: (deps: Record<string, unknown>) => {
     const engine: FakeEngine = {
       start: vi.fn().mockResolvedValue(undefined),
       stop: vi.fn(),
@@ -76,6 +78,7 @@ vi.mock("../../lib/sync", () => ({
       notifyFeedback: vi.fn().mockResolvedValue("sent"),
       notifySnapshotChange: vi.fn(),
       flushOnHide: vi.fn(),
+      deps,
     };
     engines.push(engine);
     return engine;
@@ -83,6 +86,9 @@ vi.mock("../../lib/sync", () => ({
 }));
 
 import { GameProvider, useGame, isLoggedInStage, type GameApi } from "../GameContext";
+import { CRITERION_SEQUENCE, criterionIdsForPhase, type SaveDoc } from "../gameCore";
+import { nextCoachTarget } from "../floorSelectors";
+import { stepById } from "../../data/path";
 
 // A probe that surfaces the live provider API to the test body.
 let api: GameApi | null = null;
@@ -377,5 +383,189 @@ describe("GameProvider login (draft wipe + session boundary)", () => {
     });
     expect(result).toBe(false);
     expect(engines).toHaveLength(0);
+  });
+});
+
+// ── Unit 7 review FIX 5: promotion boundary + rebased-doc feedback loop ───────
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+
+/** Boot a logged-in session at the app stage with an empty completed save. */
+async function bootToApp() {
+  authMock.getCurrentUserId.mockResolvedValue("user-A");
+  syncMock.loadSave.mockResolvedValue({
+    doc: {
+      docVersion: 1,
+      ideas: [],
+      activeIdea: 0,
+      siteHeadline: "",
+      onboardingComplete: true,
+    },
+    revision: 1,
+  });
+  renderProvider();
+  await waitFor(() => expect(api?.stage).toBe("app"));
+}
+
+/** Drive one idea through phases 1-3 with real reducer dispatches. */
+function completeThroughValidate(ideaIndex: number) {
+  act(() => {
+    for (const phase of ["sell", "build", "validate"] as const) {
+      for (const stepId of criterionIdsForPhase(phase)) {
+        const step = stepById(stepId);
+        if (!step) throw new Error(`no step ${stepId}`);
+        for (let index = 0; index < step.tasks.length; index++) {
+          getApi().dispatch({ type: "COMPLETE_TASK", ideaIndex, stepId, index });
+        }
+        getApi().dispatch({ type: "DISMISS_CELEBRATION" });
+      }
+    }
+  });
+}
+
+describe("promoteIdea / archiveBusiness / unarchiveBusiness (caller boundary)", () => {
+  it("promoteIdea mints a REAL UUID business id + timestamp and returns true", async () => {
+    await bootToApp();
+    act(() => {
+      getApi().dispatch({ type: "CREATE_IDEA", ideaId: "idea-a" });
+      getApi().dispatch({ type: "CLOSE_RUNNER" });
+    });
+    completeThroughValidate(0);
+
+    let outcome: boolean | undefined;
+    act(() => {
+      outcome = getApi().promoteIdea(0);
+    });
+    expect(outcome).toBe(true);
+    const business = getApi().businesses?.[0];
+    expect(business?.id).toMatch(UUID_RE); // crypto.randomUUID shape, minted here
+    expect(business?.ideaId).toBe("idea-a");
+    expect(business?.archived).toBe(false);
+    expect(typeof business?.promotedAt).toBe("number");
+  });
+
+  it("promoteIdea returns FALSE (guaranteed no-op) on every refusal: not validated, id-less idea, business active", async () => {
+    await bootToApp();
+    act(() => {
+      getApi().dispatch({ type: "CREATE_IDEA", ideaId: "idea-a" });
+      getApi().dispatch({ type: "CLOSE_RUNNER" });
+      getApi().dispatch({ type: "CREATE_IDEA" }); // legacy, id-less
+      getApi().dispatch({ type: "CLOSE_RUNNER" });
+    });
+    // Not through Validate yet -> refused.
+    expect(getApi().promoteIdea(0)).toBe(false);
+    expect(getApi().businesses).toBeUndefined();
+    // Unknown index -> refused.
+    expect(getApi().promoteIdea(9)).toBe(false);
+
+    completeThroughValidate(0);
+    completeThroughValidate(1);
+    // The ID-LESS legacy idea cannot be promoted this session even when validated.
+    expect(getApi().promoteIdea(1)).toBe(false);
+    expect(getApi().businesses).toBeUndefined();
+    // Promote the real one, then a second promotion is refused (one active).
+    act(() => {
+      expect(getApi().promoteIdea(0)).toBe(true);
+    });
+    expect(getApi().promoteIdea(0)).toBe(false);
+    expect(getApi().businesses).toHaveLength(1);
+  });
+
+  it("archiveBusiness / unarchiveBusiness stamp Date.now() as archiveStateAt", async () => {
+    await bootToApp();
+    act(() => {
+      getApi().dispatch({ type: "CREATE_IDEA", ideaId: "idea-a" });
+      getApi().dispatch({ type: "CLOSE_RUNNER" });
+    });
+    completeThroughValidate(0);
+    act(() => {
+      getApi().promoteIdea(0);
+    });
+    const businessId = getApi().businesses![0].id;
+
+    const before = Date.now();
+    act(() => {
+      getApi().archiveBusiness();
+    });
+    const archived = getApi().businesses![0];
+    expect(archived.archived).toBe(true);
+    expect(archived.archiveStateAt).toBeGreaterThanOrEqual(before);
+
+    act(() => {
+      getApi().unarchiveBusiness(businessId);
+    });
+    const restored = getApi().businesses![0];
+    expect(restored.archived).toBe(false);
+    expect(restored.archiveStateAt).toBeGreaterThanOrEqual(archived.archiveStateAt!);
+    // archiveBusiness with nothing active is a silent no-op (refusal-safe).
+    act(() => {
+      getApi().unarchiveBusiness("nope");
+    });
+    expect(getApi().businesses).toHaveLength(1);
+  });
+
+  it("PROMOTION SEAM, selector-driven: the coach's promote target becomes 4.1 after promoteIdea", async () => {
+    const ALL_BUILT: ReadonlySet<string> = new Set(CRITERION_SEQUENCE);
+    await bootToApp();
+    act(() => {
+      getApi().dispatch({ type: "CREATE_IDEA", ideaId: "idea-a" });
+      getApi().dispatch({ type: "CLOSE_RUNNER" });
+    });
+    completeThroughValidate(0);
+
+    // Validated but unpromoted: the coach surfaces the promotion target.
+    expect(nextCoachTarget(getApi(), ALL_BUILT)).toEqual({
+      kind: "promote",
+      ideaIndex: 0,
+      ideaId: "idea-a",
+    });
+
+    act(() => {
+      expect(getApi().promoteIdea(0)).toBe(true);
+    });
+
+    // Promotion opens the business gate: the coach now points at 4.1's room.
+    const step41 = stepById("4.1");
+    expect(nextCoachTarget(getApi(), ALL_BUILT)).toEqual({
+      kind: "criterion",
+      stepId: "4.1",
+      room: step41?.room,
+    });
+  });
+});
+
+describe("onRebasedDoc → UNION_REMOTE (FIX 1 wiring)", () => {
+  it("feeds a committed rebased doc back into live state without disturbing the open runner", async () => {
+    await bootToApp();
+    act(() => {
+      getApi().dispatch({ type: "CREATE_IDEA", ideaId: "idea-a" });
+    });
+    expect(getApi().runnerOpen).toBe(true);
+
+    // The engine reports a committed rebased doc carrying a concurrent
+    // session's completion + business.
+    const mergedDoc: SaveDoc = {
+      docVersion: 1,
+      ideas: [{ id: "idea-a", fields: {}, done: {}, doneByTask: { "1.1.1": true } }],
+      activeIdea: 0,
+      siteHeadline: "remote headline",
+      onboardingComplete: true,
+      businesses: [{ id: "biz-remote", ideaId: "idea-b", archived: true, archiveStateAt: 5 }],
+    };
+    const onRebasedDoc = engines[0].deps.onRebasedDoc as (doc: SaveDoc) => void;
+    expect(typeof onRebasedDoc).toBe("function");
+    act(() => {
+      onRebasedDoc(mergedDoc);
+    });
+
+    // Monotonic state unioned in…
+    expect(getApi().isTaskDone(0, "1.1", 0)).toBe(true);
+    expect(getApi().businesses).toEqual([
+      { id: "biz-remote", ideaId: "idea-b", archived: true, archiveStateAt: 5 },
+    ]);
+    // …while UI + latest-intent stay untouched (runner still open, no celebration).
+    expect(getApi().runnerOpen).toBe(true);
+    expect(getApi().celebrate).toBeNull();
+    expect(getApi().profile.siteHeadline).not.toBe("remote headline");
   });
 });
