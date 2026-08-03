@@ -83,6 +83,31 @@ describe("floorSelectors — idea summaries", () => {
     const s = apply(withIdeas(1), { type: "SET_FIELD", ideaIndex: 0, key: "oneLiner", value: "Bracelets" });
     expect(ideaSummaryName(s, 0)).toBe("Bracelets");
   });
+
+  it("shows the PRODUCT NAME first and foremost once authored (1.1 productName field)", () => {
+    const s = apply(
+      withIdeas(1),
+      { type: "SET_FIELD", ideaIndex: 0, key: "oneLiner", value: "Custom bracelets for recess trades" },
+      { type: "SET_FIELD", ideaIndex: 0, key: "productName", value: "Recess Bracelets" },
+    );
+    expect(ideaSummaryName(s, 0)).toBe("Recess Bracelets");
+  });
+
+  it("falls back to the one-liner when the product name is blank/whitespace", () => {
+    const s = apply(
+      withIdeas(1),
+      { type: "SET_FIELD", ideaIndex: 0, key: "oneLiner", value: "Bracelets" },
+      { type: "SET_FIELD", ideaIndex: 0, key: "productName", value: "   " },
+    );
+    expect(ideaSummaryName(s, 0)).toBe("Bracelets");
+  });
+
+  it("truncates a long product name at 42 chars like the one-liner", () => {
+    const s = apply(withIdeas(1), { type: "SET_FIELD", ideaIndex: 0, key: "productName", value: "b".repeat(60) });
+    const name = ideaSummaryName(s, 0);
+    expect(name.endsWith("…")).toBe(true);
+    expect(name.length).toBe(43);
+  });
 });
 
 describe("floorSelectors — progress + next task id", () => {
@@ -161,6 +186,27 @@ describe("floorSelectors — room-entry routing (core multi-idea mechanic)", () 
     expect(roomEntryFor(s, "1.1")).toEqual({ action: "enter", ideaIndex: 1, index: 0 });
     // For 1.2: only idea 0 is eligible (unlocked, not done).
     expect(roomEntryFor(s, "1.2")).toEqual({ action: "enter", ideaIndex: 0, index: 0 });
+  });
+
+  it("re-enters a COMPLETED criterion in review mode (task 1) when no idea is in progress", () => {
+    // Completing 1.1 must never orphan the authored productName/oneLiner fields.
+    const s = completeStep(withIdeas(1), 0, "1.1");
+    expect(roomEntryFor(s, "1.1")).toEqual({ action: "enter", ideaIndex: 0, index: 0 });
+  });
+
+  it("keeps in-progress priority: a done idea never displaces one mid-criterion", () => {
+    let s = withIdeas(2);
+    s = completeStep(s, 0, "1.1");
+    s = apply(s, { type: "COMPLETE_TASK", ideaIndex: 1, stepId: "1.1", index: 0 });
+    // Idea 1 is mid-1.1 → direct enter of idea 1 at its frontier, exactly as before.
+    expect(roomEntryFor(s, "1.1")).toEqual({ action: "enter", ideaIndex: 1, index: 1 });
+  });
+
+  it("offers the picker when several DONE ideas could review a criterion", () => {
+    let s = withIdeas(2);
+    s = completeStep(s, 0, "1.1");
+    s = completeStep(s, 1, "1.1");
+    expect(roomEntryFor(s, "1.1")).toEqual({ action: "pick", eligible: [0, 1] });
   });
 });
 
