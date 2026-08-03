@@ -9,6 +9,7 @@
  * re-asserted with `sm:` variants (centered, slightly wider card).
  */
 import React, { useState } from "react";
+import { Eye, EyeOff } from "lucide-react";
 import { useGame } from "../state/GameContext";
 
 const GENERIC_ERROR =
@@ -24,6 +25,7 @@ export function Login() {
   const { login, dispatch } = useGame();
   const [identifier, setIdentifier] = useState("");
   const [password, setPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState(false);
   const [loading, setLoading] = useState(false);
 
@@ -86,17 +88,28 @@ export function Login() {
               <label htmlFor="fp-password" className="block font-mono text-[11px] uppercase tracking-wider text-ink/60">
                 Password
               </label>
-              <input
-                id="fp-password"
-                name="password"
-                type="password"
-                autoComplete="current-password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                aria-invalid={error}
-                aria-describedby={error ? "fp-login-error" : undefined}
-                className="mt-1.5 min-h-[48px] w-full rounded-xl border border-[hsl(40_10%_80%)] bg-[hsl(40_30%_99%)] px-4 font-display text-lg font-bold text-ink outline-none focus:border-sell focus:ring-2 focus:ring-sell/30"
-              />
+              <div className="relative mt-1.5">
+                <input
+                  id="fp-password"
+                  name="password"
+                  type={showPassword ? "text" : "password"}
+                  autoComplete="current-password"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  aria-invalid={error}
+                  aria-describedby={error ? "fp-login-error" : undefined}
+                  className="min-h-[48px] w-full rounded-xl border border-[hsl(40_10%_80%)] bg-[hsl(40_30%_99%)] pl-4 pr-14 font-display text-lg font-bold text-ink outline-none focus:border-sell focus:ring-2 focus:ring-sell/30"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword((v) => !v)}
+                  aria-label={showPassword ? "Hide password" : "Show password"}
+                  aria-pressed={showPassword}
+                  className="absolute inset-y-0 right-0 flex min-h-[44px] min-w-[48px] items-center justify-center rounded-r-xl text-ink/50 hover:text-ink focus:outline-none focus-visible:ring-2 focus-visible:ring-sell/30"
+                >
+                  {showPassword ? <EyeOff size={22} aria-hidden /> : <Eye size={22} aria-hidden />}
+                </button>
+              </div>
             </div>
 
             {error ? (

@@ -8,7 +8,7 @@
  * has no em dash, and the existing username/password login form is unaffected.
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 
 const login = vi.fn();
 const dispatch = vi.fn();
@@ -53,7 +53,32 @@ describe("Login Create Account link-out", () => {
     render(<Login />);
     // getByLabelText / getByRole throw when absent, so resolving them asserts presence.
     expect(screen.getByLabelText(/username/i)).toBeTruthy();
-    expect(screen.getByLabelText(/password/i)).toBeTruthy();
+    expect(screen.getByLabelText(/^password$/i)).toBeTruthy();
     expect(screen.getByRole("button", { name: /log in/i })).toBeTruthy();
+  });
+});
+
+describe("password visibility toggle", () => {
+  it("starts hidden and reveals the password on toggle, then hides again", () => {
+    render(<Login />);
+    const input = screen.getByLabelText(/^password$/i) as HTMLInputElement;
+    expect(input.type).toBe("password");
+
+    const toggle = screen.getByRole("button", { name: /show password/i });
+    fireEvent.click(toggle);
+    expect(input.type).toBe("text");
+    // The same control now offers to hide, and reports its pressed state.
+    const hide = screen.getByRole("button", { name: /hide password/i });
+    expect(hide.getAttribute("aria-pressed")).toBe("true");
+    fireEvent.click(hide);
+    expect(input.type).toBe("password");
+  });
+
+  it("is a non-submitting button with a >=44px tap target", () => {
+    render(<Login />);
+    const toggle = screen.getByRole("button", { name: /show password/i });
+    // type=button so toggling never submits the form on Enter/click.
+    expect(toggle.getAttribute("type")).toBe("button");
+    expect(toggle.className).toMatch(/min-h-\[44px\]/);
   });
 });
