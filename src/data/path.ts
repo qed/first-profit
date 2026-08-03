@@ -507,6 +507,23 @@ export const STEPS: Step[] = assembleSteps(PATH_CONTENT, {
 export const stepById = (id: string): Step | undefined =>
 STEPS.find((s) => s.id === id);
 
+// ── Content readiness (BUILT UI surfaces) ────────────────────────────────
+
+/**
+ * The content-readiness allowlist: the ONE source of truth for which criteria
+ * have a SHIPPED UI surface today. Unit 8 Tier C1 expands this as each phase's
+ * surface generalizes; the coach, room entry, and floor cards all consume THIS
+ * list so no surface can outrun another.
+ *
+ * Deliberate split: the ENGINE (gameCore's isStepUnlocked / nextUpFor / the
+ * unlock and progress machinery) is allowlist-FREE — it models the full
+ * 25-criterion CURRICULUM. This set models the shipped UI only. Presentation
+ * selectors (floorSelectors) and floor components gate on it; the engine never
+ * does, so save data and progress semantics stay independent of what the UI
+ * has built.
+ */
+export const BUILT_CRITERIA: ReadonlySet<string> = new Set(["1.1", "1.2"]);
+
 export const parseTask = (
 raw: string)
 : {label: string;auto?: ArtifactKey;} => {

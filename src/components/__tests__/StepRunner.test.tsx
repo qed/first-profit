@@ -148,6 +148,41 @@ describe("StepRunner", () => {
     );
   });
 
+  it("renders PHASE-AWARE header chrome on a Build criterion (2.1)", () => {
+    const s = initialState();
+    const seed: GameState = {
+      ...s,
+      stage: "app",
+      ideas: [{ fields: {}, done: {} }],
+      activeIdea: 0,
+      runnerOpen: true,
+      runnerStep: "2.1",
+      runnerIndex: 0,
+    };
+    render(<Harness seed={seed} />);
+    expect(screen.getByText("Phase 2 · Build · Criterion 1 of 5 · Idea #1")).toBeTruthy();
+    expect(screen.getByText("Ship the smallest thing that works")).toBeTruthy();
+  });
+
+  it("the task rail shows SIX segments on 2.3 (variable task counts honored)", () => {
+    const s = initialState();
+    const seed: GameState = {
+      ...s,
+      stage: "app",
+      ideas: [{ fields: {}, done: {} }],
+      activeIdea: 0,
+      runnerOpen: true,
+      runnerStep: "2.3",
+      runnerIndex: 0,
+    };
+    const { container } = render(<Harness seed={seed} />);
+    // Criterion position derives from the phase's ordered ids, not the raw id digit.
+    expect(screen.getByText("Phase 2 · Build · Criterion 3 of 5 · Idea #1")).toBeTruthy();
+    expect(screen.getByText("Task 1 of 6")).toBeTruthy();
+    // One rail segment bar per REAL task: 2.3 carries six.
+    expect(container.querySelectorAll(".h-1\\.5").length).toBe(6);
+  });
+
   it("completing the last task swaps the runner for the celebration listing 1.2", () => {
     render(<Harness seed={seedAtLastTaskOf11()} />);
     fireEvent.click(screen.getByText("✓ I did it"));
@@ -183,5 +218,37 @@ describe("Celebration after 1.2", () => {
     expect(screen.getByText("Make a real sale")).toBeTruthy();
     expect(screen.getByText("+120 XP")).toBeTruthy();
     expect(screen.getByText("1.3 · The Learning Room")).toBeTruthy();
+  });
+});
+
+describe("Celebration beyond the Sell room map (FIX-4 coverage)", () => {
+  function seedCelebrating(celebrate: string): GameState {
+    return {
+      ...initialState(),
+      stage: "app",
+      ideas: [{ fields: {}, done: {} }],
+      activeIdea: 0,
+      celebrate,
+    };
+  }
+
+  it("at 1.5 (phase boundary: next is 2.1) the 'New on The Path' block hides, no crash", () => {
+    render(<Harness seed={seedCelebrating("1.5")} />);
+    expect(screen.getByText("Criterion passed")).toBeTruthy();
+    expect(screen.getByText("25 supervised outreach attempts")).toBeTruthy();
+    expect(screen.getByText("+100 XP")).toBeTruthy();
+    // 2.1 has no SELL_ROOMS entry -> the unlock block simply hides.
+    expect(screen.queryByText("New on The Path")).toBeNull();
+  });
+
+  it("at 5.5 (terminal criterion: no next id at all) it renders cleanly", () => {
+    render(<Harness seed={seedCelebrating("5.5")} />);
+    expect(screen.getByText("Criterion passed")).toBeTruthy();
+    expect(screen.getByText("Pitch next year, on stage")).toBeTruthy();
+    expect(screen.getByText("+200 XP")).toBeTruthy();
+    expect(screen.queryByText("New on The Path")).toBeNull();
+    // Dismiss works from the terminal state too.
+    fireEvent.click(screen.getByText("Keep going →"));
+    expect(screen.queryByText("Criterion passed")).toBeNull();
   });
 });

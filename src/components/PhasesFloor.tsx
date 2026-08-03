@@ -23,8 +23,11 @@ export function PhasesFloor({ onWalk }: { onWalk: (intent: WalkIntent) => void }
   const { profile, ideas, activeIdea, isCriterionDone } = game;
   const handle = profile.handle || "you";
 
-  // Phase-1 progress over the full five Sell criteria (Unit 6 engine). The
-  // phase 2-5 cards stay visually locked until Unit 8 generalizes this floor.
+  // Phase-1 progress over the full five Sell criteria (Unit 6 engine).
+  // KNOWN LIMITATION (Unit 8 Tier C1): the phase 2-5 cards below are hardcoded
+  // locked and only the Sell floor exists — Unit 8 generalizes this floor per
+  // phase, driven by isPhaseUnlocked + the BUILT_CRITERIA readiness allowlist
+  // (path.ts), the same list the coach and room entry consume.
   const sellIds = criterionIdsForPhase("sell");
   const phaseDone = sellIds.filter((id) => isCriterionDone(activeIdea, id)).length;
   const phasePips = sellIds.map((_, k) => k < phaseDone);

@@ -7,6 +7,7 @@
  * pure function of GameState so it is trivially testable (see the sibling test).
  */
 import {
+  PHASE_ORDER,
   activeBusinessExists,
   criterionIdsForPhase,
   isCriterionDone,
@@ -18,7 +19,7 @@ import {
   phaseProgress,
   type GameState,
 } from "./gameCore";
-import { phaseById, stepById, type PhaseId, type RoomId } from "../data/path";
+import { BUILT_CRITERIA, phaseById, stepById, type PhaseId, type RoomId } from "../data/path";
 
 /** One-liner truncation for idea summary cards (handoff: 42 chars, else placeholder). */
 export const IDEA_NAME_MAX = 42;
@@ -124,9 +125,8 @@ export function ideaProgressLabel(state: GameState, ideaIndex: number): string {
 
 /** The phase that follows `phase` in play order, or null after 'scale'. */
 function phaseAfter(phase: PhaseId): PhaseId | null {
-  const order: readonly PhaseId[] = ["sell", "build", "validate", "grow", "scale"];
-  const pos = order.indexOf(phase);
-  return pos >= 0 && pos < order.length - 1 ? order[pos + 1] : null;
+  const pos = PHASE_ORDER.indexOf(phase);
+  return pos >= 0 && pos < PHASE_ORDER.length - 1 ? PHASE_ORDER[pos + 1] : null;
 }
 
 /** Where the bottom-docked Next Step coach should send the player, or null to hide. */
@@ -142,13 +142,24 @@ export type CoachTarget =
 
 /**
  * The Next Step coach's destination: with no ideas yet, creating the first idea
- * (the Idea Room); otherwise walk the FULL sequence — the next incomplete
- * criterion of the idea's current phase, for the ACTIVE idea when it still has
- * work, else the first idea that does. An idea whose phases 1-3 are complete
- * while Grow is gated on the business seam yields the `promote` target. Null
- * only when no idea has a workable step or a promotion pending.
+ * (the Idea Room); otherwise walk the sequence — the next incomplete criterion
+ * of the idea's current phase, for the ACTIVE idea when it still has work, else
+ * the first idea that does. An idea whose phases 1-3 are complete while Grow is
+ * gated on the business seam yields the `promote` target. Null only when no
+ * idea has a workable step or a promotion pending.
+ *
+ * CONTENT-READINESS GATE: a frontier criterion outside the `built` allowlist
+ * (path.ts BUILT_CRITERIA — the shipped-UI list, injectable so tests can walk
+ * the full sequence, and so Unit 8 can exercise later phases before flipping
+ * the default) yields no coach target for that idea: the coach STOPS at the
+ * built frontier rather than pointing at a surface that does not exist yet.
+ * The ENGINE's nextUpFor keeps walking regardless — the curriculum and the
+ * shipped UI are deliberately separate models.
  */
-export function nextCoachTarget(state: GameState): CoachTarget | null {
+export function nextCoachTarget(
+  state: GameState,
+  built: ReadonlySet<string> = BUILT_CRITERIA,
+): CoachTarget | null {
   if (state.ideas.length === 0) return { kind: "create" };
   const order = [state.activeIdea, ...state.ideas.map((_, i) => i)];
   const seen = new Set<number>();
@@ -157,6 +168,9 @@ export function nextCoachTarget(state: GameState): CoachTarget | null {
     seen.add(ideaIndex);
     const stepId = nextUpFor(state, ideaIndex);
     if (stepId) {
+      // Unbuilt frontier: behave exactly as pre-Unit-6 (no target for this
+      // idea) — never send the coach past the built content.
+      if (!built.has(stepId)) continue;
       const room = stepById(stepId)?.room;
       if (room) return { kind: "criterion", stepId, room };
       continue;
@@ -180,8 +194,18 @@ export type RoomEntry =
  * phase-aware, so a criterion of a locked phase no-ops for everyone — and not
  * yet done). 0 eligible → no-op; 1 → enter the runner for that idea; many →
  * idea picker. Pure so it is unit-tested directly (the game's core mechanic).
+ *
+ * CONTENT-READINESS GATE: a criterion outside the `built` allowlist (path.ts
+ * BUILT_CRITERIA; injectable — see nextCoachTarget) is a no-op entry for
+ * everyone, so no floor tap can open a surface the UI has not shipped. The
+ * engine-level eligibility below stays allowlist-free.
  */
-export function roomEntryFor(state: GameState, stepId: string): RoomEntry {
+export function roomEntryFor(
+  state: GameState,
+  stepId: string,
+  built: ReadonlySet<string> = BUILT_CRITERIA,
+): RoomEntry {
+  if (!built.has(stepId)) return { action: "noop" };
   const eligible: number[] = [];
   for (let i = 0; i < state.ideas.length; i++) {
     if (isStepUnlocked(state, i, stepId) && !isCriterionDone(state, i, stepId)) {

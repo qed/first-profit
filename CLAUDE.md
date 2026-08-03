@@ -54,6 +54,21 @@ Every UI change MUST look good and work well on mobile before it is considered d
   refuses a remap table that is stale against the content
   (see docs/plans/2026-08-03-001-feat-full-path-cohort-readiness-plan.md).
 
+## Phase engine (unlock/progress model)
+
+- `src/state/gameCore.ts` owns the curriculum model: `CRITERION_SEQUENCE` (all 25
+  criterion ids, derived from the generated content) and `PHASE_ORDER` are the source of
+  truth for ordering; unlock/progress/next-up logic walks them phase-aware, per idea.
+  Task counts per criterion are variable — always read `step.tasks.length`, never ×5.
+  ("step" is the historical name for "criterion"; the rename is deferred to Unit 9.)
+- The engine is deliberately allowlist-FREE. What the UI has actually SHIPPED is modeled
+  separately by the `BUILT_CRITERIA` readiness allowlist in `src/data/path.ts`; the coach,
+  room entry (`floorSelectors`), and floor cards all consume that one list so no surface
+  can outrun another. Unit 8 expands it as each phase's surface generalizes.
+- Phases 4-5 gate on `activeBusinessExists` (the `businesses` seam on
+  GameState/SaveDoc, additive-optional). No reducer action writes it yet — Unit 7 adds
+  PROMOTE/ARCHIVE/UNARCHIVE — so Grow/Scale stay locked for every real save today.
+
 ## Documented Solutions
 
 `docs/solutions/` — documented solutions to past problems (bugs, patterns), organized

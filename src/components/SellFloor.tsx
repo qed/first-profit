@@ -10,7 +10,7 @@
  */
 import { useGame } from "../state/GameContext";
 import { MAX_IDEAS } from "../state/gameCore";
-import { stepById } from "../data/path";
+import { BUILT_CRITERIA, stepById } from "../data/path";
 import { ideaProgressLabel, ideaSummaryName } from "../state/floorSelectors";
 import { IdeaSlot, SectionTitle, SellRoomCard } from "./PodCardContent";
 import type { WalkIntent } from "./FactoryFloor";
@@ -20,15 +20,19 @@ interface Criterion {
   room: string;
   sign: string;
   title: string;
-  built: boolean;
 }
 
+// Room chrome only (name/sign/title). Whether a card is BUILT comes from the
+// shared content-readiness allowlist (path.ts BUILT_CRITERIA) — the same list
+// the coach and roomEntryFor consume, so this floor can never disagree with
+// them. Unit 8 Tier C1: as each Sell room's surface ships, extending
+// BUILT_CRITERIA lights the card here with no edit to this file.
 const SELL_CRITERIA: Criterion[] = [
-  { id: "1.1", room: "The Idea Room", sign: "💡", title: "Pitch a product in 60 seconds, no notes", built: true },
-  { id: "1.2", room: "The Sales Room", sign: "🛒", title: "Make a real sale", built: true },
-  { id: "1.3", room: "The Learning Room", sign: "🎓", title: 'Hear "no" 3 times and learn from the conversations', built: false },
-  { id: "1.4", room: "The Pricing Room", sign: "🏷️", title: "Explain cost, price and profit on one page", built: false },
-  { id: "1.5", room: "The Outreach Room", sign: "📣", title: "25 supervised outreach attempts", built: false },
+  { id: "1.1", room: "The Idea Room", sign: "💡", title: "Pitch a product in 60 seconds, no notes" },
+  { id: "1.2", room: "The Sales Room", sign: "🛒", title: "Make a real sale" },
+  { id: "1.3", room: "The Learning Room", sign: "🎓", title: 'Hear "no" 3 times and learn from the conversations' },
+  { id: "1.4", room: "The Pricing Room", sign: "🏷️", title: "Explain cost, price and profit on one page" },
+  { id: "1.5", room: "The Outreach Room", sign: "📣", title: "25 supervised outreach attempts" },
 ];
 
 const GRID = "mt-4 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5";
@@ -54,14 +58,17 @@ export function SellFloor({ onWalk, onBack }: { onWalk: (intent: WalkIntent) => 
 
       <div className={GRID}>
         {SELL_CRITERIA.map((c) => {
+          const built = BUILT_CRITERIA.has(c.id);
           const step = stepById(c.id);
           const total = step?.tasks.length ?? 0;
-          const unlocked = c.built && ideas.some((_, i) => isStepUnlocked(i, c.id));
+          const unlocked = built && ideas.some((_, i) => isStepUnlocked(i, c.id));
           const pips = step ? step.tasks.map((_, i) => isTaskDone(activeIdea, c.id, i)) : [];
           const doneTasks = pips.filter(Boolean).length;
-          const complete = c.built && isCriterionDone(activeIdea, c.id);
-          const isNext = nextStep === c.id;
-          const hint = c.built ? `Complete ${SELL_CRITERIA[SELL_CRITERIA.indexOf(c) - 1]?.id ?? ""} first` : "Coming in the next build";
+          const complete = built && isCriterionDone(activeIdea, c.id);
+          // "You are here" never lands on an unbuilt card — the marker stops at
+          // the built frontier just like the coach.
+          const isNext = built && nextStep === c.id;
+          const hint = built ? `Complete ${SELL_CRITERIA[SELL_CRITERIA.indexOf(c) - 1]?.id ?? ""} first` : "Coming in the next build";
           return (
             <SellRoomCard
               key={c.id}

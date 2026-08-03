@@ -1,6 +1,14 @@
 import { describe, expect, it } from "vitest";
-import { criterionIdsForPhase, initialState, reducer, type Action, type GameState } from "../gameCore";
-import { stepById, type PhaseId } from "../../data/path";
+import {
+  CRITERION_SEQUENCE,
+  criterionIdsForPhase,
+  initialState,
+  nextUpFor,
+  reducer,
+  type Action,
+  type GameState,
+} from "../gameCore";
+import { BUILT_CRITERIA, stepById, type PhaseId } from "../../data/path";
 import {
   currentPhaseFor,
   ideaProgressLabel,
@@ -15,6 +23,13 @@ import {
 function apply(state: GameState, ...actions: Action[]): GameState {
   return actions.reduce(reducer, state);
 }
+
+/**
+ * An OPEN content-readiness allowlist (every criterion "built"), injected into
+ * nextCoachTarget/roomEntryFor where a test exercises the ENGINE's full-sequence
+ * behavior rather than today's shipped UI. This is the Unit 8 testing seam.
+ */
+const ALL_BUILT: ReadonlySet<string> = new Set(CRITERION_SEQUENCE);
 
 /** Base state with N onboarding-seeded ideas (runner closed for clarity). */
 function withIdeas(n: number): GameState {
@@ -161,15 +176,34 @@ describe("floorSelectors — Next Step coach target", () => {
     expect(nextCoachTarget(s)).toEqual({ kind: "criterion", stepId: "1.1", room: "idea" });
   });
 
-  it("keeps walking the ACTIVE idea's sequence past 1.2 (Unit 6)", () => {
+  it("STOPS at the built frontier past 1.2 while the ENGINE keeps walking (readiness allowlist)", () => {
     let s = withIdeas(2);
     s = completeStep(completeStep(s, 1, "1.1"), 1, "1.2"); // active idea 1 through 1.2
-    expect(nextCoachTarget(s)).toEqual({ kind: "criterion", stepId: "1.3", room: "market" });
+    // The ENGINE's frontier for the active idea is 1.3 (the curriculum walks on)...
+    expect(nextUpFor(s, 1)).toBe("1.3");
+    // ...but 1.3 is not in BUILT_CRITERIA, so the coach does NOT point there: it
+    // falls back to the other idea's BUILT work (pre-Unit-6 behavior restored).
+    expect(nextCoachTarget(s)).toEqual({ kind: "criterion", stepId: "1.1", room: "idea" });
+    // The full-sequence behavior stays testable via the injectable allowlist (Unit 8).
+    expect(nextCoachTarget(s, ALL_BUILT)).toEqual({ kind: "criterion", stepId: "1.3", room: "market" });
   });
 
-  it("crosses the phase boundary: Sell complete -> 2.1 in the Build Room", () => {
+  it("hides entirely at an unbuilt frontier with no other built work (single idea past 1.2)", () => {
+    const s = completeStep(completeStep(withIdeas(1), 0, "1.1"), 0, "1.2");
+    expect(nextUpFor(s, 0)).toBe("1.3"); // engine walks
+    expect(nextCoachTarget(s)).toBeNull(); // coach stops at the built frontier
+  });
+
+  it("crosses the phase boundary UNDER AN OPEN ALLOWLIST: Sell complete -> 2.1 in the Build Room", () => {
     const s = completePhase(withIdeas(1), 0, "sell");
-    expect(nextCoachTarget(s)).toEqual({ kind: "criterion", stepId: "2.1", room: "build" });
+    // Engine: 2.1 is next. Coach: hidden by default (2.1 unbuilt), targets it when open.
+    expect(nextUpFor(s, 0)).toBe("2.1");
+    expect(nextCoachTarget(s)).toBeNull();
+    expect(nextCoachTarget(s, ALL_BUILT)).toEqual({ kind: "criterion", stepId: "2.1", room: "build" });
+  });
+
+  it("the default allowlist is BUILT_CRITERIA (exactly 1.1 and 1.2 today)", () => {
+    expect([...BUILT_CRITERIA].sort()).toEqual(["1.1", "1.2"]);
   });
 
   it("targets the PROMOTION seam once the active idea completes phase 3 (business gate)", () => {
@@ -194,21 +228,61 @@ describe("floorSelectors — Next Step coach target", () => {
 });
 
 describe("floorSelectors — locked-phase entry is a no-op (Unit 6)", () => {
+  // These pin the ENGINE's phase gating, so they inject the OPEN allowlist —
+  // otherwise the readiness gate would mask what is being tested.
   it("roomEntryFor no-ops on a phase-4 criterion while the business gate is closed", () => {
     let s = withIdeas(1);
     s = completePhase(s, 0, "sell");
     s = completePhase(s, 0, "build");
     s = completePhase(s, 0, "validate");
-    expect(roomEntryFor(s, "4.1")).toEqual({ action: "noop" });
-    expect(roomEntryFor(s, "5.1")).toEqual({ action: "noop" });
+    expect(roomEntryFor(s, "4.1", ALL_BUILT)).toEqual({ action: "noop" });
+    expect(roomEntryFor(s, "5.1", ALL_BUILT)).toEqual({ action: "noop" });
   });
 
   it("roomEntryFor no-ops on a phase-2 criterion before phase 1 is complete", () => {
-    expect(roomEntryFor(withIdeas(1), "2.1")).toEqual({ action: "noop" });
+    expect(roomEntryFor(withIdeas(1), "2.1", ALL_BUILT)).toEqual({ action: "noop" });
   });
 
-  it("roomEntryFor enters a phase-2 criterion once phase 1 is complete", () => {
+  it("roomEntryFor enters a phase-2 criterion once phase 1 is complete (open allowlist)", () => {
     const s = completePhase(withIdeas(1), 0, "sell");
-    expect(roomEntryFor(s, "2.1")).toEqual({ action: "enter", ideaIndex: 0, index: 0 });
+    expect(roomEntryFor(s, "2.1", ALL_BUILT)).toEqual({ action: "enter", ideaIndex: 0, index: 0 });
+  });
+});
+
+describe("floorSelectors — content-readiness gate on room entry (BUILT_CRITERIA)", () => {
+  it("an ELIGIBLE but unbuilt criterion no-ops under the default allowlist", () => {
+    let s = withIdeas(1);
+    s = completeStep(s, 0, "1.1");
+    s = completeStep(s, 0, "1.2");
+    // The engine says 1.3 is workable; the shipped UI does not have it yet.
+    expect(nextUpFor(s, 0)).toBe("1.3");
+    expect(roomEntryFor(s, "1.3")).toEqual({ action: "noop" });
+    // Same state, open allowlist: entry works — proof the gate (not the engine)
+    // produced the noop above.
+    expect(roomEntryFor(s, "1.3", ALL_BUILT)).toEqual({ action: "enter", ideaIndex: 0, index: 0 });
+  });
+
+  it("a SCRIPTED walk drives every room entry 1.1 -> 3.5 through roomEntryFor under an open allowlist", () => {
+    // FIX-4 coverage: the exact selector the floor uses to open the runner is
+    // exercised across the deep sequence (samples span 1.3-3.5 with variable
+    // task counts: 2.3 has six tasks, 3.4 has four), not just the built pair.
+    let s = withIdeas(1);
+    let guard = 0;
+    const entered: string[] = [];
+    for (;;) {
+      const stepId = nextUpFor(s, 0);
+      if (!stepId) break;
+      if (++guard > 25) throw new Error("walk did not terminate");
+      const entry = roomEntryFor(s, stepId, ALL_BUILT);
+      expect(entry).toEqual({ action: "enter", ideaIndex: 0, index: 0 });
+      entered.push(stepId);
+      s = completeStep(s, 0, stepId);
+      s = apply(s, { type: "DISMISS_CELEBRATION" });
+    }
+    // The walk covered all of phases 1-3 and stopped at the business gate.
+    expect(entered).toEqual(CRITERION_SEQUENCE.slice(0, 15));
+    for (const sample of ["1.3", "1.5", "2.3", "3.4", "3.5"]) {
+      expect(entered).toContain(sample);
+    }
   });
 });

@@ -8,6 +8,10 @@
  * This is intentionally NOT yet wired into GameContext.tsx / App.tsx — that
  * rewiring is Unit 5's job. The existing app keeps compiling; this module only
  * adds new code.
+ *
+ * VOCABULARY: "step" (historical, from the v1 path) === "criterion" (the
+ * curriculum brief's term) throughout this module — `stepId` IS a criterion id.
+ * The rename is deferred to the Unit 9 cleanup; do not mix a partial rename in.
  */
 import { STEPS, stepById, type PhaseId, type RoomId } from "../data/path";
 import { SALE_AUTO_COMPLETE_TASK_ID } from "../data/pathHooks";
@@ -138,6 +142,19 @@ export interface Idea {
   doneAtByTask?: Record<string, number>;
 }
 
+/**
+ * A promoted business (the Unit 7 model, pre-wired here as a SEAM). One idea is
+ * PROMOTED into a business to open phases 4-5; a business can be archived (and
+ * later unarchived) rather than deleted. `ideaId` ties it back to the idea it
+ * grew from. NO reducer action writes this list yet — Unit 7 adds
+ * PROMOTE/ARCHIVE/UNARCHIVE; until then only tests construct states with it.
+ */
+export interface Business {
+  id: string;
+  ideaId?: string;
+  archived?: boolean;
+}
+
 export interface Profile {
   firstName: string;
   handle: string;
@@ -175,6 +192,13 @@ export interface GameState {
   room: RoomId | null;
   /** The chosen payment provider (durable, in the save doc), or null. */
   chosenProvider: ChosenProvider | null;
+  /**
+   * Promoted businesses (Unit 7 seam). ADDITIVE OPTIONAL per the house
+   * discipline (the chosenProvider/doneAt precedent): absent on every existing
+   * state/doc and STAYS absent until Unit 7's PROMOTE writes it — no
+   * DOC_VERSION bump. activeBusinessExists reads it defensively today.
+   */
+  businesses?: Business[];
   /** True once onboarding screens 2..5 are complete (persisted in the save doc). */
   onboardingComplete: boolean;
   docVersion: number;
@@ -214,6 +238,12 @@ export interface SaveDoc {
    * DOC_VERSION stays 1 (a bump would discard in-flight outbox entries).
    */
   chosenProvider?: ChosenProvider | null;
+  /**
+   * Promoted businesses (Unit 7 seam). ADDITIVE OPTIONAL: absent on existing
+   * docs and stays absent through the round-trip until one exists (the doneAt
+   * absent-stays-absent discipline); coerced defensively on load.
+   */
+  businesses?: Business[];
 }
 
 /**
@@ -238,6 +268,9 @@ export function toSaveDoc(state: GameState): SaveDoc {
     siteHeadline: state.profile.siteHeadline,
     onboardingComplete: state.onboardingComplete,
     chosenProvider: state.chosenProvider,
+    // Absent-stays-absent (Unit 7 seam): a state that never promoted a
+    // business emits a byte-identical doc to before the field existed.
+    ...(state.businesses ? { businesses: state.businesses.map((b) => ({ ...b })) } : {}),
   };
 }
 
@@ -394,6 +427,24 @@ function coerceChosenProvider(value: unknown): ChosenProvider | null {
   return null;
 }
 
+// Coerce the persisted businesses list (Unit 7 seam). ADDITIVE OPTIONAL:
+// absent (or not an array) stays ABSENT — never invented as []. Each entry
+// needs a string id to survive; the optional leaves are kept only when
+// well-typed (the coerceIdea leaf-filtering discipline), so a malformed entry
+// can neither fail the load nor half-poison the seam.
+function coerceBusinesses(value: unknown): Business[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const businesses: Business[] = [];
+  for (const entry of value) {
+    if (!isRecord(entry) || typeof entry.id !== "string") continue;
+    const business: Business = { id: entry.id };
+    if (typeof entry.ideaId === "string") business.ideaId = entry.ideaId;
+    if (typeof entry.archived === "boolean") business.archived = entry.archived;
+    businesses.push(business);
+  }
+  return businesses;
+}
+
 /**
  * Parse a loaded save doc into a validated `SaveDoc`, or signal that the caller
  * should DISCARD it. An unknown/absent docVersion is signaled for discard so a
@@ -417,6 +468,8 @@ export function fromSaveDoc(
   const onboardingComplete = raw.onboardingComplete === true;
   // Additive-optional field: absent in existing v1 docs -> null, NOT a discard.
   const chosenProvider = coerceChosenProvider(raw.chosenProvider);
+  // Additive-optional businesses (Unit 7 seam): absent stays absent.
+  const businesses = coerceBusinesses(raw.businesses);
   return {
     ok: true,
     doc: {
@@ -426,6 +479,7 @@ export function fromSaveDoc(
       siteHeadline,
       onboardingComplete,
       chosenProvider,
+      ...(businesses ? { businesses } : {}),
     },
   };
 }
@@ -476,15 +530,15 @@ export function stepPips(state: GameState, ideaIndex: number, stepId: string): b
 }
 
 /**
- * The Grow/Scale business seam (Unit 7 wires the real check): phases 4-5
- * belong to the promoted BUSINESS, not an idea, so they gate on an active
- * business existing. NOTHING can make this true yet — the business model
- * arrives in Unit 7 — so phases 4-5 stay locked in practice and the app is
- * shippable after this unit alone. Unit 7 replaces the body with a read of
- * the state's business list (single active, archivable).
+ * The Grow/Scale business seam: phases 4-5 belong to the promoted BUSINESS,
+ * not an idea, so they gate on an active (non-archived) business existing in
+ * `state.businesses`. NO reducer action writes that list yet — Unit 7 adds
+ * PROMOTE/ARCHIVE/UNARCHIVE — so phases 4-5 stay locked in practice for every
+ * real save, and the app is shippable after this unit alone. The read is
+ * defensive: an absent list is simply "no business".
  */
-export function activeBusinessExists(_state: GameState): boolean {
-  return false;
+export function activeBusinessExists(state: GameState): boolean {
+  return state.businesses?.some((b) => !b.archived) ?? false;
 }
 
 /** Whether every criterion of a phase is complete for an idea. */
@@ -549,15 +603,6 @@ export function phaseProgress(
     done += step.tasks.filter((_, i) => isTaskDone(state, ideaIndex, stepId, i)).length;
   }
   return { done, total };
-}
-
-/**
- * Sell-phase progress — kept as a thin phase-1 alias so existing consumers
- * (GameContext's bound selector) keep their shape. New code should call
- * phaseProgress directly.
- */
-export function sellProgress(state: GameState, ideaIndex: number): { done: number; total: number } {
-  return phaseProgress(state, ideaIndex, "sell");
 }
 
 /**
@@ -646,6 +691,13 @@ export type Action =
    * `at` is the caller-stamped completion time (epoch ms) — this module stays
    * Date.now()-free (the chosenAt precedent). Optional so stale/legacy callers
    * remain valid; without it the task completes with no doneAt entry.
+   *
+   * LOCK ENFORCEMENT IS SELECTOR-LAYER BY DESIGN: this action does NOT check
+   * isStepUnlocked — a direct dispatch can complete a task in a locked phase.
+   * Dispatch is app-internal (every UI path routes through the selectors,
+   * which gate on unlock/eligibility), and both the load migration and the
+   * test suite depend on free writes to construct arbitrary progress. Do not
+   * add an unlock guard here.
    */
   | { type: "COMPLETE_TASK"; ideaIndex: number; stepId: string; index: number; at?: number }
   | { type: "OPEN_RUNNER"; stepId?: string; index?: number }
@@ -987,6 +1039,10 @@ export function reducer(state: GameState, action: Action): GameState {
         profile: { ...state.profile, siteHeadline: doc.siteHeadline },
         // Additive-optional: an existing v1 doc may omit it -> null.
         chosenProvider: doc.chosenProvider ?? null,
+        // Businesses (Unit 7 seam), sourced per the split-storage learning:
+        // HYDRATE must reset every persisted slice — a doc without the field
+        // clears any resident list (undefined), absent-stays-absent.
+        businesses: doc.businesses?.map((b) => ({ ...b })),
         onboardingComplete: doc.onboardingComplete,
         docVersion: DOC_VERSION,
         stage: doc.onboardingComplete ? "app" : "onboard",

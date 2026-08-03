@@ -35,7 +35,6 @@ import {
   nextUpFor as nextUpForFn,
   isTaskDone as isTaskDoneFn,
   isCriterionDone as isCriterionDoneFn,
-  sellProgress as sellProgressFn,
   isStepUnlocked as isStepUnlockedFn,
   ideasEligibleFor as ideasEligibleForFn,
   type GameState,
@@ -91,7 +90,6 @@ export interface GameApi extends GameState {
   nextUpFor: (ideaIndex: number) => string | null;
   isTaskDone: (ideaIndex: number, stepId: string, index: number) => boolean;
   isCriterionDone: (ideaIndex: number, stepId: string) => boolean;
-  sellProgress: (ideaIndex: number) => { done: number; total: number };
   isStepUnlocked: (ideaIndex: number, stepId: string) => boolean;
   ideasEligibleFor: (stepId: string) => number[];
   grossSalesSumCents: () => number;
@@ -596,7 +594,6 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
       nextUpFor: (ideaIndex) => nextUpForFn(state, ideaIndex),
       isTaskDone: (ideaIndex, stepId, index) => isTaskDoneFn(state, ideaIndex, stepId, index),
       isCriterionDone: (ideaIndex, stepId) => isCriterionDoneFn(state, ideaIndex, stepId),
-      sellProgress: (ideaIndex) => sellProgressFn(state, ideaIndex),
       isStepUnlocked: (ideaIndex, stepId) => isStepUnlockedFn(state, ideaIndex, stepId),
       ideasEligibleFor: (stepId) => ideasEligibleForFn(state, stepId),
       grossSalesSumCents: () => grossSalesSumCentsFn(state),

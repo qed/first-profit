@@ -22,7 +22,6 @@ import {
   phaseProgress,
   reducer,
   salesSumCents,
-  sellProgress,
   stepPips,
   taskKey,
   toSaveDoc,
@@ -867,17 +866,15 @@ describe("selectors: pips and progress", () => {
     expect(pips[1]).toBe(false);
   });
 
-  it("sellProgress counts across the WHOLE Sell phase using real content task counts", () => {
+  it("phaseProgress('sell') counts across the WHOLE Sell phase using real content task counts", () => {
     const total = criterionIdsForPhase("sell").reduce(
       (sum, id) => sum + getStep(id).tasks.length,
       0,
     );
     let s = withOneIdea();
-    expect(sellProgress(s, 0)).toEqual({ done: 0, total });
+    expect(phaseProgress(s, 0, "sell")).toEqual({ done: 0, total });
     s = completeCriterion(s, 0, "1.1");
-    expect(sellProgress(s, 0)).toEqual({ done: getStep("1.1").tasks.length, total });
-    // The alias and the generic selector agree.
-    expect(phaseProgress(s, 0, "sell")).toEqual(sellProgress(s, 0));
+    expect(phaseProgress(s, 0, "sell")).toEqual({ done: getStep("1.1").tasks.length, total });
   });
 });
 
@@ -1512,6 +1509,26 @@ describe("generic phase engine (Unit 6): full 25-criterion sequence", () => {
     expect(isCriterionDone(s, 0, "2.3")).toBe(true);
   });
 
+  it("per-idea isolation, REVERSE direction: advancing idea B leaves idea A untouched", () => {
+    let s = apply(
+      initialState(),
+      { type: "CREATE_IDEA" },
+      { type: "CLOSE_RUNNER" },
+      { type: "CREATE_IDEA" },
+      { type: "CLOSE_RUNNER" },
+    );
+    const ideaABefore = s.ideas[0];
+    s = completePhase(s, 1, "sell"); // advance idea B (index 1) only
+    expect(isPhaseComplete(s, 1, "sell")).toBe(true);
+    expect(isStepUnlocked(s, 1, "2.1")).toBe(true);
+    // Idea A: referentially untouched, still at its own 1.1 frontier.
+    expect(s.ideas[0]).toBe(ideaABefore);
+    expect(s.ideas[0].done).toEqual({});
+    expect(nextUpFor(s, 0)).toBe("1.1");
+    expect(isPhaseComplete(s, 0, "sell")).toBe(false);
+    expect(isStepUnlocked(s, 0, "2.1")).toBe(false);
+  });
+
   it("completing 1.5 (finishing phase 1) for idea A unlocks 2.1 for A ONLY", () => {
     let s = apply(
       initialState(),
@@ -1638,6 +1655,49 @@ describe("generic phase engine (Unit 6): full 25-criterion sequence", () => {
     expect(phaseProgress(s, 0, "build")).toEqual({ done: 0, total: 26 });
   });
 
+  it("an ACTIVE business unlocks 4.1 through the seam (Unit 7 red/green target)", () => {
+    let s = withOneIdea();
+    s = completePhase(s, 0, "sell");
+    s = completePhase(s, 0, "build");
+    s = completePhase(s, 0, "validate");
+    // No reducer action can write businesses yet (Unit 7 adds PROMOTE/ARCHIVE/
+    // UNARCHIVE), so the state is constructed directly — this is the exact
+    // green state Unit 7's PROMOTE must produce.
+    const promoted: GameState = { ...s, businesses: [{ id: "biz-1", ideaId: "idea-0" }] };
+    expect(activeBusinessExists(promoted)).toBe(true);
+    expect(isPhaseUnlocked(promoted, 0, "grow")).toBe(true);
+    expect(isStepUnlocked(promoted, 0, "4.1")).toBe(true);
+    expect(nextUpFor(promoted, 0)).toBe("4.1");
+  });
+
+  it("an ARCHIVED-only business list keeps phases 4-5 locked", () => {
+    let s = withOneIdea();
+    s = completePhase(s, 0, "sell");
+    s = completePhase(s, 0, "build");
+    s = completePhase(s, 0, "validate");
+    const archived: GameState = { ...s, businesses: [{ id: "biz-1", archived: true }] };
+    expect(activeBusinessExists(archived)).toBe(false);
+    expect(isPhaseUnlocked(archived, 0, "grow")).toBe(false);
+    expect(isStepUnlocked(archived, 0, "4.1")).toBe(false);
+    expect(nextUpFor(archived, 0)).toBeNull();
+    // Unarchiving (Unit 7's UNARCHIVE) re-opens the gate.
+    const unarchived: GameState = { ...s, businesses: [{ id: "biz-1", archived: false }] };
+    expect(activeBusinessExists(unarchived)).toBe(true);
+    expect(isStepUnlocked(unarchived, 0, "4.1")).toBe(true);
+  });
+
+  it("an ABSENT businesses field stays locked (existing saves unchanged)", () => {
+    let s = withOneIdea();
+    s = completePhase(s, 0, "sell");
+    s = completePhase(s, 0, "build");
+    s = completePhase(s, 0, "validate");
+    expect(s.businesses).toBeUndefined();
+    expect(activeBusinessExists(s)).toBe(false);
+    expect(isStepUnlocked(s, 0, "4.1")).toBe(false);
+    // An empty list is also "no business".
+    expect(activeBusinessExists({ ...s, businesses: [] })).toBe(false);
+  });
+
   it("a SCRIPTED fresh save can be driven 1.1 -> 3.5 with no dead end (verification gate)", () => {
     // Drive the reducer exactly as the UI would: open the runner via next-up,
     // complete every task, dismiss every celebration, repeat to 3.5.
@@ -1658,5 +1718,88 @@ describe("generic phase engine (Unit 6): full 25-criterion sequence", () => {
     expect(isPhaseComplete(s, 0, "build")).toBe(true);
     expect(isPhaseComplete(s, 0, "validate")).toBe(true);
     expect(guard).toBe(15);
+  });
+});
+
+describe("businesses seam persistence (additive-optional, NO DOC_VERSION bump)", () => {
+  it("toSaveDoc/fromSaveDoc/HYDRATE round-trips a businesses list", () => {
+    const s: GameState = {
+      ...withOneIdea(),
+      businesses: [
+        { id: "biz-1", ideaId: "idea-0" },
+        { id: "biz-2", archived: true },
+      ],
+    };
+    const doc = toSaveDoc(s);
+    expect(doc.docVersion).toBe(DOC_VERSION); // still 1: additive-optional field
+    expect(doc.businesses).toEqual([
+      { id: "biz-1", ideaId: "idea-0" },
+      { id: "biz-2", archived: true },
+    ]);
+    const parsed = fromSaveDoc(JSON.parse(JSON.stringify(doc)));
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    const hydrated = reducer(initialState(), { type: "HYDRATE", doc: parsed.doc });
+    expect(hydrated.businesses).toEqual(s.businesses);
+    expect(activeBusinessExists(hydrated)).toBe(true);
+  });
+
+  it("ABSENT stays absent through the whole round-trip (existing docs byte-stable)", () => {
+    const s = withOneIdea();
+    expect(s.businesses).toBeUndefined();
+    const doc = toSaveDoc(s);
+    expect(doc).not.toHaveProperty("businesses");
+    const parsed = fromSaveDoc(JSON.parse(JSON.stringify(doc)));
+    if (!parsed.ok) throw new Error("round-trip refused");
+    expect(parsed.doc).not.toHaveProperty("businesses");
+    const hydrated = reducer(initialState(), { type: "HYDRATE", doc: parsed.doc });
+    expect(hydrated.businesses).toBeUndefined();
+    expect(toSaveDoc(hydrated)).not.toHaveProperty("businesses");
+  });
+
+  it("coerces defensively: malformed entries/leaves are dropped, never fail the load", () => {
+    const parsed = fromSaveDoc({
+      docVersion: DOC_VERSION,
+      ideas: [],
+      activeIdea: 0,
+      siteHeadline: "",
+      onboardingComplete: false,
+      businesses: [
+        { id: "keep", ideaId: 42, archived: "yes" }, // bad leaves dropped, id kept
+        { id: 7 }, // no string id -> dropped
+        "junk",
+        null,
+        { id: "ok", archived: true },
+      ],
+    });
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    expect(parsed.doc.businesses).toEqual([{ id: "keep" }, { id: "ok", archived: true }]);
+    // A non-array field stays ABSENT rather than inventing [].
+    const bad = fromSaveDoc({
+      docVersion: DOC_VERSION,
+      ideas: [],
+      activeIdea: 0,
+      siteHeadline: "",
+      onboardingComplete: false,
+      businesses: "corrupt",
+    });
+    if (!bad.ok) throw new Error("doc refused");
+    expect(bad.doc).not.toHaveProperty("businesses");
+  });
+
+  it("RESET_SESSION clears any resident businesses (shared-device safety)", () => {
+    const s: GameState = { ...withOneIdea(), businesses: [{ id: "biz-1" }] };
+    const reset = reducer(s, { type: "RESET_SESSION" });
+    expect(reset.businesses).toBeUndefined();
+    expect(activeBusinessExists(reset)).toBe(false);
+  });
+
+  it("HYDRATE from a doc WITHOUT businesses clears a resident list", () => {
+    const s: GameState = { ...withOneIdea(), businesses: [{ id: "stale" }] };
+    const doc = toSaveDoc(withOneIdea());
+    const hydrated = reducer(s, { type: "HYDRATE", doc });
+    expect(hydrated.businesses).toBeUndefined();
+    expect(activeBusinessExists(hydrated)).toBe(false);
   });
 });

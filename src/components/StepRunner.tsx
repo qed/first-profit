@@ -1,7 +1,9 @@
 /**
  * The Step Runner (task dialog) — handoff §Step Runner, screenshot 10.
  *
- * Drives entirely off the REAL path.ts criterion (STEPS 1.1/1.2) and the active
+ * Drives entirely off the REAL path.ts criterion (any of the 25 assembled
+ * STEPS — the header derives phase name/number and criterion position from the
+ * phase engine, so the runner renders correctly for every phase) and the active
  * idea's `done`/`fields` maps in the gameCore reducer. Open-state
  * (runnerOpen/runnerStep/runnerIndex/activeIdea) lives in the reducer, ABOVE the
  * FactoryFloor breakpoint conditional, so a lg/sm crossing never drops it.
@@ -24,7 +26,8 @@
  */
 import { useEffect, useRef } from "react";
 import { useGame } from "../state/GameContext";
-import { parseTask, stepById } from "../data/path";
+import { parseTask, phaseById, stepById } from "../data/path";
+import { criterionIdsForPhase, phaseOfCriterion } from "../state/gameCore";
 import { getDraft, setDraft, getLastUserId } from "../lib/draftCache";
 import { useFocusTrap } from "../lib/useFocusTrap";
 import { StuckBox, taskIdFor } from "./StuckBox";
@@ -95,7 +98,15 @@ export function StepRunner() {
     dispatch({ type: "OPEN_ROOM", room: step.room });
   };
 
-  const critNum = Number(runnerStep.split(".")[1]) || 1;
+  // Phase-aware header chrome: phase name/number from the phase engine + PHASES
+  // data, "Criterion N of M" from the criterion's position within ITS phase (M
+  // varies only if the content does — never assume 5). Colors/tints below stay
+  // the Sell palette for every phase until Unit 8 themes the runner per phase.
+  const phaseId = phaseOfCriterion(runnerStep);
+  const phase = phaseId ? phaseById(phaseId) : undefined;
+  const phaseCriteria = phaseId ? criterionIdsForPhase(phaseId) : [];
+  const critNum = phaseCriteria.indexOf(runnerStep) + 1 || 1;
+  const critTotal = phaseCriteria.length || 1;
   const taskLabel = parseTask(step.tasks[idx]).label;
   const alreadyDone = isTaskDone(activeIdea, runnerStep, idx);
   const isLast = idx + 1 >= total;
@@ -136,11 +147,11 @@ export function StepRunner() {
         className="fp-rise flex h-full w-full flex-col overflow-y-auto bg-[hsl(40_55%_97%)] outline-none sm:h-auto sm:max-h-[calc(100dvh-2rem)] sm:w-full sm:max-w-[640px] sm:rounded-3xl sm:border-2 sm:border-[hsl(25_34%_20%/0.15)] sm:shadow-[0_8px_0_rgba(120,80,40,.1)]"
         style={{ animation: "fp-rise .3s cubic-bezier(.22,1,.36,1) both" }}
       >
-        {/* Header — Sell tint */}
+        {/* Header — Sell tint for ALL phases until Unit 8 themes per phase */}
         <header className="flex items-start justify-between gap-4 border-b-2 border-[hsl(25_34%_20%/0.1)] bg-[hsl(14_78%_54%/0.09)] px-5 py-4 sm:px-6">
           <div className="min-w-0">
             <p className="font-mono text-[10px] uppercase tracking-[0.2em] text-[hsl(14_78%_44%)]">
-              Phase 1 · Sell · Criterion {critNum} of 5 · Idea #{activeIdea + 1}
+              Phase {phase?.index ?? 1} · {phase?.name ?? "Sell"} · Criterion {critNum} of {critTotal} · Idea #{activeIdea + 1}
             </p>
             <h2
               id="fp-runner-title"
@@ -159,7 +170,8 @@ export function StepRunner() {
           </button>
         </header>
 
-        {/* Task rail — one segment per REAL task (1.1 and 1.2 have 5 each) */}
+        {/* Task rail — one segment per REAL task (counts vary per criterion:
+            2.3 has six, 3.4 has four — always step.tasks.length) */}
         <div className="flex gap-1.5 border-b-2 border-[hsl(25_34%_20%/0.1)] px-5 py-3 sm:px-6">
           {step.tasks.map((raw, i) => {
             const done = isTaskDone(activeIdea, runnerStep, i);
