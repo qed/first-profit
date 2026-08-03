@@ -1,5 +1,10 @@
 import { beforeEach, describe, expect, it } from "vitest";
-import { getConfig, isSignupEnabled, resetConfigForTesting } from "../../config";
+import {
+  getConfig,
+  isPublicSiteEnabled,
+  isSignupEnabled,
+  resetConfigForTesting,
+} from "../../config";
 
 const FULL_ENV = {
   VITE_SUPABASE_URL: "https://example.supabase.co",
@@ -85,5 +90,27 @@ describe("isSignupEnabled (Start Building cutover flag, Rev 11)", () => {
     expect(isSignupEnabled({ VITE_ENABLE_SIGNUP: "false" })).toBe(false);
     expect(isSignupEnabled({ VITE_ENABLE_SIGNUP: "yes" })).toBe(false);
     expect(isSignupEnabled({ VITE_ENABLE_SIGNUP: "" })).toBe(false);
+  });
+});
+
+describe("isPublicSiteEnabled (public-site cutover flag, real-public-site Unit 4)", () => {
+  it("defaults OFF when the flag is unset — deploying dark opens nothing", () => {
+    // Mirrors isSignupEnabled exactly: orthogonal to the required-var check,
+    // so an env missing the flag (or everything) is "off", never a throw.
+    expect(isPublicSiteEnabled({})).toBe(false);
+    expect(isPublicSiteEnabled(FULL_ENV)).toBe(false);
+  });
+
+  it('is ON only for the explicit opt-in strings "true"/"1"', () => {
+    expect(isPublicSiteEnabled({ VITE_ENABLE_PUBLIC_SITE: "true" })).toBe(true);
+    expect(isPublicSiteEnabled({ VITE_ENABLE_PUBLIC_SITE: "1" })).toBe(true);
+  });
+
+  it("treats any other value as off (and never reads the signup flag)", () => {
+    expect(isPublicSiteEnabled({ VITE_ENABLE_PUBLIC_SITE: "false" })).toBe(false);
+    expect(isPublicSiteEnabled({ VITE_ENABLE_PUBLIC_SITE: "yes" })).toBe(false);
+    expect(isPublicSiteEnabled({ VITE_ENABLE_PUBLIC_SITE: "" })).toBe(false);
+    // The two flags are independent gates.
+    expect(isPublicSiteEnabled({ VITE_ENABLE_SIGNUP: "true" })).toBe(false);
   });
 });

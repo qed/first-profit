@@ -242,7 +242,7 @@ Publish lifecycle: `unclaimed → claimed (not published) → published ⇄ unpu
 
 **Verification:** preview deployment passes the integration checklist above at ~390px and desktop; production dashboard catchall deleted only after `vercel.json` verified live.
 
-- [ ] **Unit 4: FP client foundation — API client, site state slice, flushNow**
+- [x] **Unit 4: FP client foundation — API client, site state slice, flushNow** — shipped (contract pins byte-verified vs the120 c9226bb; flush reentrancy/terminal-drop/ordering races fixed under review; compounded: fire-and-forget→outcome lesson). Carry-forwards: Unit 5 CTA guard + sticky-parked publish gate; Unit 6 room-open refresh
 
 **Goal:** the FP client can check availability, claim, publish, and know its own site state across sessions; committed public-string edits flush immediately.
 

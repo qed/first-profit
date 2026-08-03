@@ -2341,3 +2341,66 @@ describe("UNION_REMOTE (FIX 1: the rebased doc feeds back into live state)", () 
     expect(toSaveDoc(viaReducer)).toEqual(viaUnion);
   });
 });
+
+// ── Site slice (real-public-site plan, Unit 4) ───────────────────────────────
+describe("site slice (SET_SITE / RESET_SESSION / save-doc exclusion)", () => {
+  it("initial state is the honest unknown: no handle, status 'unknown'", () => {
+    expect(initialState().site).toEqual({ handle: null, status: "unknown" });
+  });
+
+  it("SET_SITE adopts the read-back (every server status value round-trips)", () => {
+    let s = initialState();
+    for (const status of ["none", "claimed", "published", "offline", "unknown"] as const) {
+      const handle = status === "none" || status === "unknown" ? null : "cedric";
+      s = reducer(s, { type: "SET_SITE", handle, status });
+      expect(s.site).toEqual({ handle, status });
+    }
+  });
+
+  it("RESET_SESSION round-trip: written in session 1, ABSENT after logout, repopulated by session 2's read-back", () => {
+    // Session 1: hydrate's read-back populates the slice.
+    let s = reducer(initialState(), {
+      type: "SET_SITE",
+      handle: "cedric",
+      status: "published",
+    });
+    expect(s.site).toEqual({ handle: "cedric", status: "published" });
+
+    // Logout (shared-device learning): the slice must not survive the boundary
+    // — the next child must never see the previous child's handle or a false
+    // "published".
+    s = reducer(s, { type: "RESET_SESSION" });
+    expect(s.site).toEqual({ handle: null, status: "unknown" });
+
+    // Session 2: the next hydrate's read-back repopulates it fresh.
+    s = reducer(s, { type: "SET_SITE", handle: "sibling", status: "claimed" });
+    expect(s.site).toEqual({ handle: "sibling", status: "claimed" });
+  });
+
+  it("the site slice is NOT in the save doc (no docVersion change, no new field)", () => {
+    const s = reducer(initialState(), {
+      type: "SET_SITE",
+      handle: "cedric",
+      status: "published",
+    });
+    const doc = toSaveDoc(s);
+    expect("site" in doc).toBe(false);
+    expect(doc.docVersion).toBe(DOC_VERSION); // no version bump for the slice
+    // And a doc that (maliciously/accidentally) carries a `site` key is not
+    // adopted into the slice by the load path: fromSaveDoc strips it.
+    const loaded = fromSaveDoc({ ...doc, site: { handle: "evil", status: "published" } });
+    expect(loaded.ok).toBe(true);
+    if (loaded.ok) expect("site" in loaded.doc).toBe(false);
+  });
+
+  it("HYDRATE neither invents nor clears the slice — the registry read-back owns it", () => {
+    // Login order is RESET_SESSION → hydrate; the read-back may land before OR
+    // after HYDRATE. A read-back that landed first must survive the hydrate.
+    let s = reducer(initialState(), { type: "SET_SITE", handle: "cedric", status: "claimed" });
+    s = reducer(s, { type: "HYDRATE", doc: toSaveDoc(withOneIdea()) });
+    expect(s.site).toEqual({ handle: "cedric", status: "claimed" });
+    // And a fresh state hydrating stays at the honest unknown (never a fake).
+    const fresh = reducer(initialState(), { type: "HYDRATE", doc: toSaveDoc(withOneIdea()) });
+    expect(fresh.site).toEqual({ handle: null, status: "unknown" });
+  });
+});

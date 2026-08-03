@@ -17,7 +17,7 @@
  * keys. The CALLER decides draft handling (explicit wipes, idle preserves);
  * `logout` just reports which scope ran so the provider can route it.
  */
-import { getConfig } from "../config";
+import { getConfig, isPublicSiteEnabled } from "../config";
 import { getSupabase } from "./supabase";
 
 export interface ChildProfile {
@@ -475,6 +475,303 @@ export async function fetchConsentPolicy(): Promise<FetchedConsentPolicy | null>
     return { namespace, version, hash, method, text };
   } catch {
     return null;
+  }
+}
+
+/* ─────────────────── Public site (real-public-site plan, Unit 4) ─────────────
+ *
+ * Client for The120's /api/fp/site* registry surface: the self-read (the
+ * split-storage READ-BACK hydrate and the Your Site room consume), availability,
+ * the atomic claim, and the explicit go-live publish. The exact serialized
+ * response vocabulary is PINNED in src/lib/__tests__/siteApi.test.ts against
+ * the contract blocks in the the120 route headers:
+ *   app/api/fp/site/route.ts, availability/route.ts, claim/route.ts,
+ *   publish/route.ts (+ site-rules.ts for the one generic 401 refusal).
+ *
+ * Discipline (same as loginChild/submitBirthYear):
+ *  - NEVER throws; every transport fault / malformed body / non-200 collapses
+ *    to the function's flat failure. The server's designed branches (taken /
+ *    yours / invalid / already-claimed / locked / outage) ride HTTP 200 with a
+ *    structured body and are surfaced as typed `{ok:false, reason}` results;
+ *    the one generic 401 (auth/gate/rate — deliberately indistinguishable) is
+ *    never told apart from an outage.
+ *  - Requests carry the CURRENT session's access token as `Authorization:
+ *    Bearer` (the submitBirthYear/createSignupChild pattern) — no cookie
+ *    fallback, CSRF-resistant by construction.
+ *  - FEATURE FLAG: while `VITE_ENABLE_PUBLIC_SITE` is off (isPublicSiteEnabled
+ *    false) all four functions short-circuit to their flat failure WITHOUT a
+ *    network call or a session read — the client half of the Unit 7 gate.
+ *  - claim/publish keep their `reason` vocabulary pinned to the server
+ *    contract: the flag-off short-circuit and every transport/auth failure
+ *    surface as reason "outage" (the UI's outage treatment — "try again in a
+ *    bit" — is right for all of them). The optional CLIENT-LOCAL `cause`
+ *    field (SiteFailureCause) records which collapse happened for Unit 5/6
+ *    telemetry/UX; it is never part of the wire contract.
+ */
+
+/** The self-read/claim status ladder the server may answer (site-rules.ts
+ *  deriveSiteStatus). `offline` covers parent-unpublished AND operator-locked
+ *  without distinguishing them to the child. */
+const SITE_API_STATUSES = ["none", "claimed", "published", "offline"] as const;
+export type SiteApiStatus = (typeof SITE_API_STATUSES)[number];
+
+function asSiteApiStatus(value: unknown): SiteApiStatus | null {
+  return typeof value === "string" &&
+    (SITE_API_STATUSES as readonly string[]).includes(value)
+    ? (value as SiteApiStatus)
+    : null;
+}
+
+const HANDLE_VERDICTS = ["available", "taken", "yours", "invalid"] as const;
+export type HandleVerdict = (typeof HANDLE_VERDICTS)[number];
+
+/** Keep only string entries — a malformed suggestion must never reach the UI. */
+function asStringArray(value: unknown): string[] {
+  return Array.isArray(value) ? value.filter((v): v is string => typeof v === "string") : [];
+}
+
+/** The current session's access token, or null (never throws). */
+async function currentAccessToken(): Promise<string | null> {
+  try {
+    const { data } = await getSupabase().auth.getSession();
+    return data.session?.access_token ?? null;
+  } catch {
+    return null;
+  }
+}
+
+export type FetchSiteStatusResult =
+  | { ok: true; handle: string | null; status: SiteApiStatus }
+  | { ok: false };
+
+/**
+ * The account's OWN registry-row status (GET /api/fp/site) — the read-back the
+ * hydrate path and the Your Site room consume. The endpoint is deliberately
+ * ungated server-side (it reveals only the caller's own row and answers `none`
+ * while the feature is dark), but this client still short-circuits when the
+ * flag is off so a dark build makes zero site traffic. A flat `{ok:false}`
+ * (outage / refusal / network / flag off) means "unknown" to the caller —
+ * NEVER a fake handle or status: a non-`none` status without a string handle
+ * is refused rather than half-adopted.
+ */
+export async function fetchSiteStatus(): Promise<FetchSiteStatusResult> {
+  try {
+    if (!isPublicSiteEnabled()) return { ok: false };
+    const { t120ApiUrl } = getConfig();
+    const accessToken = await currentAccessToken();
+    if (!accessToken) return { ok: false };
+
+    const res = await fetch(`${t120ApiUrl.replace(/\/$/, "")}/api/fp/site`, {
+      method: "GET",
+      headers: { Accept: "application/json", Authorization: `Bearer ${accessToken}` },
+    });
+    if (!res.ok) return { ok: false };
+
+    const parsed = (await res.json()) as { ok?: unknown; handle?: unknown; status?: unknown };
+    if (parsed.ok !== true) return { ok: false };
+    const status = asSiteApiStatus(parsed.status);
+    if (!status) return { ok: false };
+    const handle = typeof parsed.handle === "string" && parsed.handle ? parsed.handle : null;
+    // A claimed/published/offline row ALWAYS has a handle; a body that claims
+    // otherwise is malformed — refuse it rather than surface a handle-less
+    // "published" (the never-a-fake-handle rule).
+    if (status !== "none" && handle === null) return { ok: false };
+    return { ok: true, handle, status };
+  } catch {
+    return { ok: false };
+  }
+}
+
+export type CheckHandleAvailabilityResult =
+  | { ok: true; verdict: HandleVerdict; suggestions: string[] }
+  | { ok: false };
+
+/**
+ * Availability of a candidate handle (POST /api/fp/site/availability). The
+ * server runs the FULL pipeline (normalize → format → reserved → blocklist →
+ * taken) and is the only authority (the echo-the-server learning — this client
+ * never re-validates); `yours` means the account's own handle. Suggestions
+ * ride only the `taken` verdict. Flat `{ok:false}` for outage/refusal/network.
+ */
+export async function checkHandleAvailability(
+  handle: string,
+): Promise<CheckHandleAvailabilityResult> {
+  try {
+    if (!isPublicSiteEnabled()) return { ok: false };
+    const { t120ApiUrl } = getConfig();
+    const accessToken = await currentAccessToken();
+    if (!accessToken) return { ok: false };
+
+    const res = await fetch(`${t120ApiUrl.replace(/\/$/, "")}/api/fp/site/availability`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${accessToken}`,
+      },
+      body: JSON.stringify({ handle }),
+    });
+    if (!res.ok) return { ok: false };
+
+    const parsed = (await res.json()) as {
+      ok?: unknown;
+      verdict?: unknown;
+      suggestions?: unknown;
+    };
+    if (parsed.ok !== true) return { ok: false };
+    const verdict =
+      typeof parsed.verdict === "string" &&
+      (HANDLE_VERDICTS as readonly string[]).includes(parsed.verdict)
+        ? (parsed.verdict as HandleVerdict)
+        : null;
+    if (!verdict) return { ok: false };
+    return { ok: true, verdict, suggestions: asStringArray(parsed.suggestions) };
+  } catch {
+    return { ok: false };
+  }
+}
+
+/**
+ * CLIENT-LOCAL diagnostic for an `outage`-shaped failure (Unit 4 review, P2).
+ * NOT part of the wire contract: never sent to the120, never pinned against
+ * its routes — the wire `reason` vocabulary stays exactly the server's. Purely
+ * for Unit 5/6 telemetry/UX decisions (e.g. "flag-off" should hide the
+ * affordance, "transport" may retry, "server" waits):
+ *  - "flag-off":   VITE_ENABLE_PUBLIC_SITE is off (client short-circuit).
+ *  - "no-session": no resolvable access token (nothing was sent).
+ *  - "transport":  we could not talk or parse — fetch threw / body unreadable.
+ *  - "server":     the server answered and it was not success — a non-200
+ *                  refusal (incl. the generic 401), a structured outage, an
+ *                  unknown reason, or a malformed 200 payload.
+ */
+export type SiteFailureCause = "flag-off" | "no-session" | "transport" | "server";
+
+export type ClaimHandleResult =
+  | { ok: true; handle: string; status: SiteApiStatus }
+  | { ok: false; reason: "invalid" }
+  | { ok: false; reason: "taken"; suggestions: string[] }
+  | { ok: false; reason: "already-claimed"; handle: string }
+  | { ok: false; reason: "outage"; cause?: SiteFailureCause };
+
+function claimOutage(cause: SiteFailureCause): ClaimHandleResult {
+  return { ok: false, reason: "outage", cause };
+}
+
+/**
+ * Claim a handle for this account (POST /api/fp/site/claim). The arbiter is
+ * the server's DB unique constraint; a lost race is the DESIGNED `taken`
+ * branch with fresh suggestions, re-claiming your own handle is idempotent
+ * success, and a second different handle answers `already-claimed` with the
+ * held handle (no renames in v1). On success the response carries the
+ * CANONICAL (normalized) handle + the row's status. Everything transport-
+ * shaped — flag off, no session, the generic 401, network faults, malformed
+ * bodies, unknown reasons — collapses to reason "outage".
+ */
+export async function claimHandle(handle: string): Promise<ClaimHandleResult> {
+  try {
+    if (!isPublicSiteEnabled()) return claimOutage("flag-off");
+    const { t120ApiUrl } = getConfig();
+    const accessToken = await currentAccessToken();
+    if (!accessToken) return claimOutage("no-session");
+
+    const res = await fetch(`${t120ApiUrl.replace(/\/$/, "")}/api/fp/site/claim`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${accessToken}`,
+      },
+      body: JSON.stringify({ handle }),
+    });
+    if (!res.ok) return claimOutage("server");
+
+    const parsed = (await res.json()) as {
+      ok?: unknown;
+      handle?: unknown;
+      status?: unknown;
+      reason?: unknown;
+      suggestions?: unknown;
+    };
+    if (parsed.ok === true) {
+      const status = asSiteApiStatus(parsed.status);
+      if (typeof parsed.handle === "string" && parsed.handle && status) {
+        return { ok: true, handle: parsed.handle, status };
+      }
+      // ok:true with a malformed payload must never mint a fake success.
+      return claimOutage("server");
+    }
+    switch (parsed.reason) {
+      case "invalid":
+        return { ok: false, reason: "invalid" };
+      case "taken":
+        return { ok: false, reason: "taken", suggestions: asStringArray(parsed.suggestions) };
+      case "already-claimed":
+        return typeof parsed.handle === "string" && parsed.handle
+          ? { ok: false, reason: "already-claimed", handle: parsed.handle }
+          : claimOutage("server");
+      default:
+        return claimOutage("server");
+    }
+  } catch {
+    return claimOutage("transport");
+  }
+}
+
+export type PublishSiteResult =
+  | { ok: true; status: "published"; firstPublish: boolean; parentNotified: boolean }
+  | { ok: false; reason: "no-site" | "locked" }
+  // `cause` is the client-local diagnostic (see SiteFailureCause): optional,
+  // never on the wire, set by this module on every outage-shaped collapse.
+  | { ok: false; reason: "outage"; cause?: SiteFailureCause };
+
+function publishOutage(cause: SiteFailureCause): PublishSiteResult {
+  return { ok: false, reason: "outage", cause };
+}
+
+/**
+ * The explicit go-live call (POST /api/fp/site/publish, no body) — never
+ * inferred from save-doc writes (Key Technical Decision). Idempotent server-
+ * side via first_published_at; the response says whether THIS call was the
+ * first publish and whether the parent notification went out. `locked` means
+ * operator-locked: nothing became visible, no email — the caller renders the
+ * offline state. SEQUENCING is the caller's job: publish only after a LANDED
+ * `flushNow()` (GameContext), so the content the server re-syncs is current.
+ */
+export async function publishSite(): Promise<PublishSiteResult> {
+  try {
+    if (!isPublicSiteEnabled()) return publishOutage("flag-off");
+    const { t120ApiUrl } = getConfig();
+    const accessToken = await currentAccessToken();
+    if (!accessToken) return publishOutage("no-session");
+
+    const res = await fetch(`${t120ApiUrl.replace(/\/$/, "")}/api/fp/site/publish`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${accessToken}` },
+    });
+    if (!res.ok) return publishOutage("server");
+
+    const parsed = (await res.json()) as {
+      ok?: unknown;
+      status?: unknown;
+      reason?: unknown;
+      firstPublish?: unknown;
+      parentNotified?: unknown;
+    };
+    if (parsed.ok === true && parsed.status === "published") {
+      return {
+        ok: true,
+        status: "published",
+        firstPublish: parsed.firstPublish === true,
+        parentNotified: parsed.parentNotified === true,
+      };
+    }
+    if (parsed.ok === false && parsed.reason === "no-site") {
+      return { ok: false, reason: "no-site" };
+    }
+    if (parsed.ok === false && parsed.reason === "locked") {
+      return { ok: false, reason: "locked" };
+    }
+    return publishOutage("server");
+  } catch {
+    return publishOutage("transport");
   }
 }
 

@@ -39,6 +39,31 @@ export function isSignupEnabled(env?: EnvLike): boolean {
   return raw === "true" || raw === "1";
 }
 
+/**
+ * The public-site cutover flag (real-public-site plan, Unit 4), mirroring
+ * `VITE_ENABLE_SIGNUP` exactly. DEFAULTS OFF: with the flag unset the site API
+ * client short-circuits to flat failures without a network call and the claim/
+ * publish UI affordances stay hidden, so merging or deploying this branch does
+ * NOT open the public-site surface on its own. The120's claim/availability/
+ * publish endpoints are ALSO gated server-side (fail-closed allowlist); flipping
+ * `VITE_ENABLE_PUBLIC_SITE=true` here is the client half of the deliberate,
+ * reversible go-live step in the Unit 7 launch order.
+ */
+export const PUBLIC_SITE_FLAG_VAR = "VITE_ENABLE_PUBLIC_SITE";
+
+/**
+ * Whether the public-site claim/publish surface is enabled client-side. Reads
+ * `VITE_ENABLE_PUBLIC_SITE` (defaults `env` to `import.meta.env`); true only for
+ * the explicit opt-in strings "true"/"1". Like isSignupEnabled, it deliberately
+ * does NOT run the required-var validation: a missing flag is simply "off",
+ * never a boot error.
+ */
+export function isPublicSiteEnabled(env?: EnvLike): boolean {
+  const source: EnvLike = env ?? (import.meta.env as unknown as EnvLike);
+  const raw = source[PUBLIC_SITE_FLAG_VAR];
+  return raw === "true" || raw === "1";
+}
+
 type EnvLike = Record<string, string | undefined>;
 
 const REQUIRED_VARS = [

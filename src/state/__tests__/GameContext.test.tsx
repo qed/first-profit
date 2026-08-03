@@ -18,12 +18,20 @@ const authMock = {
   logout: vi.fn(),
   getCurrentUserId: vi.fn(),
   submitBirthYear: vi.fn(),
+  fetchSiteStatus: vi.fn(),
+  claimHandle: vi.fn(),
+  publishSite: vi.fn(),
 };
 vi.mock("../../lib/auth", () => ({
   loginChild: (...a: unknown[]) => authMock.loginChild(...a),
   logout: (...a: unknown[]) => authMock.logout(...a),
   getCurrentUserId: (...a: unknown[]) => authMock.getCurrentUserId(...a),
   submitBirthYear: (...a: unknown[]) => authMock.submitBirthYear(...a),
+  // Public-site client (Unit 4): hydrate fires fetchSiteStatus fire-and-forget,
+  // so it must exist here; the flat failure keeps the slice at 'unknown'.
+  fetchSiteStatus: (...a: unknown[]) => authMock.fetchSiteStatus(...a),
+  claimHandle: (...a: unknown[]) => authMock.claimHandle(...a),
+  publishSite: (...a: unknown[]) => authMock.publishSite(...a),
 }));
 
 const draftMock = {
@@ -112,6 +120,9 @@ beforeEach(() => {
   authMock.loginChild.mockReset();
   authMock.logout.mockReset().mockResolvedValue("explicit");
   authMock.getCurrentUserId.mockReset().mockResolvedValue(null);
+  authMock.fetchSiteStatus.mockReset().mockResolvedValue({ ok: false });
+  authMock.claimHandle.mockReset().mockResolvedValue({ ok: false, reason: "outage" });
+  authMock.publishSite.mockReset().mockResolvedValue({ ok: false, reason: "outage" });
   draftMock.wipeAllForUser.mockReset();
   draftMock.wipeAllFpKeys.mockReset();
   draftMock.getLastUserId.mockReset().mockReturnValue(null);

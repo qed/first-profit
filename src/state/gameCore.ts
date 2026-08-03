@@ -204,6 +204,33 @@ export interface Business {
   doneAtByTask?: Record<string, number>;
 }
 
+/**
+ * Publish-state of the account's public site (real-public-site plan, Unit 4).
+ * The server ladder (none|claimed|published|offline — `offline` covers
+ * parent-unpublished AND operator-locked without distinguishing them to the
+ * child) plus the client-only `unknown`: the read-back has not answered (or
+ * failed). The UI renders `unknown` as neutral — never a fake handle, never
+ * a false "live".
+ */
+export type SiteStatus = "none" | "claimed" | "published" | "offline" | "unknown";
+
+/**
+ * The account's public-site registry state — the split-storage READ-BACK of
+ * The120's `site` self-read endpoint (the registry is a separate store, so it
+ * gets an explicit read-back per the split-storage learning). DELIBERATELY NOT
+ * part of the SaveDoc (no docVersion change, toSaveDoc/fromSaveDoc never touch
+ * it): the registry row is the source of truth and every session re-reads it,
+ * so a persisted snapshot could only go stale. Written ONLY by SET_SITE
+ * (GameContext's generation-guarded hydrate/room-open fetch and claim/publish
+ * handlers); cleared by RESET_SESSION (per-account child data — the
+ * in-memory-reducer-state-survives-logout learning).
+ */
+export interface SiteState {
+  /** The claimed handle, or null while none/unknown. */
+  handle: string | null;
+  status: SiteStatus;
+}
+
 export interface Profile {
   firstName: string;
   handle: string;
@@ -248,6 +275,11 @@ export interface GameState {
    * bump. activeBusinessExists reads it defensively.
    */
   businesses?: Business[];
+  /**
+   * Public-site registry state (Unit 4). NOT in the save doc — populated from
+   * the authenticated self-read (SET_SITE); see the SiteState doc.
+   */
+  site: SiteState;
   /** True once onboarding screens 2..5 are complete (persisted in the save doc). */
   onboardingComplete: boolean;
   docVersion: number;
@@ -268,6 +300,7 @@ export function initialState(): GameState {
     celebrate: null,
     room: null,
     chosenProvider: null,
+    site: { handle: null, status: "unknown" },
     onboardingComplete: false,
     docVersion: DOC_VERSION,
   };
@@ -1055,6 +1088,14 @@ export type Action =
    *  `at` stamps `archiveStateAt` exactly like ARCHIVE_BUSINESS. */
   | { type: "UNARCHIVE_BUSINESS"; businessId: string; at?: number }
   | { type: "SET_PROVIDER"; providerId: ProviderId; chosenAt: number }
+  /**
+   * Adopt the public-site registry read-back (Unit 4) into the site slice.
+   * The ONLY writer of `state.site`. Dispatched exclusively from GameContext's
+   * generation-guarded async handlers (hydrate/room-open fetch, claim,
+   * publish) — a stale-generation response is discarded there and never
+   * reaches this action. Not persisted (see SiteState).
+   */
+  | { type: "SET_SITE"; handle: string | null; status: SiteStatus }
   | { type: "RESET_SESSION" }
   /**
    * Feed a committed CAS-rebased (merged) save doc back into live state so
@@ -1459,9 +1500,16 @@ export function reducer(state: GameState, action: Action): GameState {
         chosenProvider: { providerId: action.providerId, chosenAt: action.chosenAt },
       };
 
+    case "SET_SITE":
+      return { ...state, site: { handle: action.handle, status: action.status } };
+
     case "RESET_SESSION": {
       // Clear all per-account business/financial + UI state so no previous
       // child's ideas/ledger can leak into the next session on a shared device.
+      // The `site` slice (Unit 4) rides `initialState()` here too — a previous
+      // child's handle/publish state must never survive a session boundary
+      // (in-memory-reducer-state-survives-logout learning); the next session's
+      // hydrate re-reads it from the registry.
       // `stage` and `profile` are deliberately left for the caller to set —
       // EXCEPT `grade`, which is per-account child data adopted from the
       // roster at login and must never survive a session boundary (the next
@@ -1500,6 +1548,11 @@ export function reducer(state: GameState, action: Action): GameState {
 
     case "HYDRATE": {
       const { doc } = action;
+      // NOTE: `site` (Unit 4) is DELIBERATELY untouched here — it is not part
+      // of the save doc; its source of truth is the registry self-read, which
+      // GameContext fetches alongside hydrate and adopts via SET_SITE. Every
+      // hydrate follows a RESET_SESSION (login) or fresh boot state, so no
+      // stale slice can ride through this spread.
       return {
         ...state,
         ideas: doc.ideas.map((idea) => ({
