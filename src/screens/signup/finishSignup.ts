@@ -23,14 +23,32 @@
  *
  * Every step is a flat result that never throws; any failure collapses to a flat
  * `{ ok: false }` for the UI.
+ *
+ * ── Stale-consent retry (dormant-flow fix) ──
+ * The consent-record route (see `../signup-rules.ts` on The120 backend)
+ * deliberately flattens EVERY refusal reason — missing, stale, version_mismatch,
+ * not_verified, parent_mismatch, outage — into the SAME generic 401 body (no
+ * oracle, so a client cannot tell "wrong password" from "the policy moved on").
+ * That means staleness cannot be read off the wire; the ONLY way to tell "the
+ * parent attested to text that is no longer current" from any other refusal is
+ * to RE-FETCH the policy right after a consent failure and compare it to what
+ * THIS request echoed. If the two differ, this collapses to
+ * `staleConsent: true`, carrying the freshly fetched policy, so the caller can
+ * show a distinct message and let the parent re-attest with the CURRENT
+ * version/hash instead of retrying the same stale echo forever.
+ * `fetchConsentPolicy` is an OPTIONAL dep, un-called unless the caller wires it,
+ * so every existing generic-failure test (and any call site that doesn't care)
+ * is unaffected.
  */
 
 import type { CompleteVerificationRequest, CompleteVerificationResult } from "../Signup";
 import type {
   createSignupChild,
+  fetchConsentPolicy,
   recordSignupConsent,
   verifySignup,
 } from "../../lib/auth";
+import { renderedFromFetched } from "./consentPolicy";
 
 export interface FinishSignupDeps {
   verifySignup: typeof verifySignup;
@@ -38,6 +56,12 @@ export interface FinishSignupDeps {
   createSignupChild: typeof createSignupChild;
   /** The game's login — adopts the CHILD session (path a) and routes into play. */
   loginChildIntoGame: (identifier: string, password: string) => Promise<boolean>;
+  /**
+   * Optional: re-fetch the current consent policy after a consent-record
+   * failure, so a stale echo can be distinguished from any other refusal (see
+   * the module doc). Omit to keep the old flat `{ ok: false }` behavior.
+   */
+  fetchConsentPolicy?: typeof fetchConsentPolicy;
 }
 
 export async function finishSignup(
@@ -64,7 +88,24 @@ export async function finishSignup(
     childDob: req.child.dob,
     jurisdiction: req.jurisdiction,
   });
-  if (!consent.ok) return { ok: false };
+  if (!consent.ok) {
+    // The wire gives no oracle (see the module doc): re-fetch the current
+    // policy, if the caller wired that in, and compare it to what we just
+    // echoed. A mismatch means the policy moved on between the consent screen
+    // and this submit — surface it distinctly so the UI can re-attest instead
+    // of retrying the identical stale echo forever.
+    if (deps.fetchConsentPolicy) {
+      const fetched = await deps.fetchConsentPolicy();
+      if (
+        fetched &&
+        (fetched.version !== req.consent.echoedVersion || fetched.hash !== req.consent.echoedHash)
+      ) {
+        const policy = renderedFromFetched(fetched);
+        if (policy) return { ok: false, staleConsent: true, policy };
+      }
+    }
+    return { ok: false };
+  }
 
   // 3. Mint the child under the parent Bearer. Single path (U15): the re-prompted
   //    child password is always sent. The mint returns the generated fp_username.

@@ -115,6 +115,135 @@ describe("finishSignup — verify → consent → child ordering (FIX 1/4a)", ()
     expect(deps.createSignupChild).not.toHaveBeenCalled();
   });
 
+  it("a stale-consent refusal re-fetches the policy and surfaces it distinctly (when fetchConsentPolicy is wired)", async () => {
+    const FRESH_POLICY = {
+      namespace: "fp_parental_consent",
+      version: "2026-08-03.1",
+      hash: "a".repeat(64),
+      method: "email_plus_attestation",
+      text: "Updated policy text.",
+    };
+    const fetchConsentPolicy = vi.fn(async () => FRESH_POLICY);
+    const { deps, order } = makeDeps({
+      recordSignupConsent: vi.fn(async () => {
+        order.push("consent");
+        return { ok: false };
+      }),
+      fetchConsentPolicy,
+    });
+    const res = await finishSignup(deps, REQ);
+
+    expect(fetchConsentPolicy).toHaveBeenCalledTimes(1);
+    expect(res).toEqual({
+      ok: false,
+      staleConsent: true,
+      policy: {
+        namespace: "fp_parental_consent",
+        version: "2026-08-03.1",
+        hash: "a".repeat(64),
+        method: "email_plus_attestation",
+        title: "Parental consent to create your child's account",
+        text: "Updated policy text.",
+      },
+    });
+    // Still aborts before the child mint (fail-closed).
+    expect(order).toEqual(["verify", "consent"]);
+    expect(deps.createSignupChild).not.toHaveBeenCalled();
+  });
+
+  it("a consent failure where the re-fetched policy MATCHES the echo is a plain generic failure (not stale)", async () => {
+    const SAME_POLICY = {
+      namespace: "fp_parental_consent",
+      version: REQ.consent.echoedVersion,
+      hash: REQ.consent.echoedHash,
+      method: REQ.consent.method,
+      text: "Same text as echoed.",
+    };
+    const fetchConsentPolicy = vi.fn(async () => SAME_POLICY);
+    const { deps } = makeDeps({
+      recordSignupConsent: vi.fn(async () => ({ ok: false })),
+      fetchConsentPolicy,
+    });
+    const res = await finishSignup(deps, REQ);
+    expect(fetchConsentPolicy).toHaveBeenCalledTimes(1);
+    expect(res).toEqual({ ok: false });
+  });
+
+  it("a consent failure where the re-fetch itself fails (fetchConsentPolicy resolves null) is a plain generic failure", async () => {
+    // fetchConsentPolicy swallows network errors into null in its own catch (see
+    // src/lib/auth.ts); finishSignup must fall through to the plain failure, not
+    // throw or surface staleConsent.
+    const fetchConsentPolicy = vi.fn(async () => null);
+    const { deps, order } = makeDeps({
+      recordSignupConsent: vi.fn(async () => {
+        order.push("consent");
+        return { ok: false };
+      }),
+      fetchConsentPolicy,
+    });
+    const res = await finishSignup(deps, REQ);
+    expect(fetchConsentPolicy).toHaveBeenCalledTimes(1);
+    expect(res).toEqual({ ok: false });
+    expect(order).toEqual(["verify", "consent"]);
+    expect(deps.createSignupChild).not.toHaveBeenCalled();
+  });
+
+  it("a consent failure where the re-fetched policy body is PARTIAL (renderedFromFetched can't build a policy) is a plain generic failure", async () => {
+    // A body missing a binding field (here: hash) fails renderedFromFetched's
+    // completeness check, so even though the version differs from the echo,
+    // finishSignup must fall through to the plain failure rather than surface a
+    // half-formed staleConsent policy.
+    const PARTIAL_POLICY = {
+      namespace: "fp_parental_consent",
+      version: "2026-08-03.1",
+      hash: "",
+      method: "email_plus_attestation",
+      text: "Updated policy text.",
+    };
+    const fetchConsentPolicy = vi.fn(async () => PARTIAL_POLICY);
+    const { deps, order } = makeDeps({
+      recordSignupConsent: vi.fn(async () => {
+        order.push("consent");
+        return { ok: false };
+      }),
+      fetchConsentPolicy,
+    });
+    const res = await finishSignup(deps, REQ);
+    expect(fetchConsentPolicy).toHaveBeenCalledTimes(1);
+    expect(res).toEqual({ ok: false });
+    expect(order).toEqual(["verify", "consent"]);
+    expect(deps.createSignupChild).not.toHaveBeenCalled();
+  });
+
+  it("the stale-consent re-fetch NEVER fires off a step-1 (verifySignup) failure (anti-enumeration boundary)", async () => {
+    const fetchConsentPolicy = vi.fn(async () => null);
+    const { deps, order } = makeDeps({
+      verifySignup: vi.fn(async () => {
+        order.push("verify");
+        return { ok: false } as const;
+      }),
+      fetchConsentPolicy,
+    });
+    const res = await finishSignup(deps, REQ);
+    expect(res).toEqual({ ok: false });
+    expect(order).toEqual(["verify"]);
+    expect(fetchConsentPolicy).not.toHaveBeenCalled();
+    expect(deps.recordSignupConsent).not.toHaveBeenCalled();
+    expect(deps.createSignupChild).not.toHaveBeenCalled();
+  });
+
+  it("a consent failure with NO fetchConsentPolicy dep wired stays the old flat failure (back-compat)", async () => {
+    const { deps, order } = makeDeps({
+      recordSignupConsent: vi.fn(async () => {
+        order.push("consent");
+        return { ok: false };
+      }),
+    });
+    const res = await finishSignup(deps, REQ);
+    expect(res).toEqual({ ok: false });
+    expect(order).toEqual(["verify", "consent"]);
+  });
+
   it("a mint failure surfaces { ok:false } and never logs the child in", async () => {
     const { deps } = makeDeps({
       createSignupChild: vi.fn(async () => ({ ok: false }) as const),

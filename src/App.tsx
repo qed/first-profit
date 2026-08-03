@@ -119,7 +119,13 @@ function StageRouter() {
   const handleCompleteVerification = useCallback(
     (req: CompleteVerificationRequest): Promise<CompleteVerificationResult> =>
       finishSignup(
-        { verifySignup, recordSignupConsent, createSignupChild, loginChildIntoGame: login },
+        {
+          verifySignup,
+          recordSignupConsent,
+          createSignupChild,
+          loginChildIntoGame: login,
+          fetchConsentPolicy,
+        },
         req,
       ),
     [login],

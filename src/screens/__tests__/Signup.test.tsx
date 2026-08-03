@@ -7,7 +7,7 @@
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { Signup, type CompleteVerificationRequest } from "../Signup";
+import { Signup, type CompleteVerificationRequest, type CompleteVerificationResult } from "../Signup";
 import type { SignupSubmission } from "../signup/validation";
 import {
   loadPendingSignup,
@@ -336,6 +336,64 @@ describe("Signup verify-return", () => {
     expect(screen.getByText("Confirm your password.")).toBeTruthy();
     // ... but a failed finish leaves NOTHING persisted.
     expect(loadPendingSignup()).toBeNull();
+  });
+
+  it("a stale-consent refusal shows a distinct message, then re-attesting resubmits with the NEW version and succeeds", async () => {
+    savePendingSignup(PENDING_A);
+    const NEW_POLICY = {
+      namespace: "fp_parental_consent",
+      version: "2026-09-01.1",
+      hash: "b".repeat(64),
+      method: "email_plus_attestation",
+      title: "Parental consent to create your child's account",
+      text: "The updated permission text the parent must review again.",
+    };
+    const onCompleteVerification = vi
+      .fn<(_r: CompleteVerificationRequest) => Promise<CompleteVerificationResult>>()
+      .mockResolvedValueOnce({ ok: false, staleConsent: true, policy: NEW_POLICY })
+      .mockResolvedValueOnce({ ok: true, outcome: "playing", username: "alex" });
+    render(<Signup verifyToken="tok-stale" onCompleteVerification={onCompleteVerification} onExit={vi.fn()} />);
+
+    fireEvent.change(screen.getByLabelText("Your password"), { target: { value: "parentpass" } });
+    fireEvent.change(screen.getByLabelText("Alex's password"), { target: { value: "kidpassword" } });
+    fireEvent.click(screen.getByRole("button", { name: /Finish setup/ }));
+
+    // The distinct stale-consent message renders (not the generic error).
+    await waitFor(() =>
+      expect(screen.getByText(/permission text was updated while this page was open/i)).toBeTruthy(),
+    );
+    expect(screen.getByText(NEW_POLICY.text)).toBeTruthy();
+    expect(screen.queryByRole("alert")).toBeNull();
+    expect(screen.queryByText(/Something went wrong/i)).toBeNull();
+
+    // The retry CTA stays disabled until the parent ticks the fresh attestation.
+    const retryCta = screen.getByRole("button", { name: /Confirm and continue/ });
+    expect((retryCta as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.click(screen.getByRole("checkbox"));
+    fireEvent.click(retryCta);
+
+    await waitFor(() => expect(onCompleteVerification).toHaveBeenCalledTimes(2));
+    // The resubmit echoes the FRESHLY fetched version + hash, not the stale one.
+    expect(onCompleteVerification.mock.calls[1][0]).toMatchObject({
+      consent: { echoedVersion: "2026-09-01.1", echoedHash: "b".repeat(64), method: "email_plus_attestation" },
+    });
+    // The retry loop converges: it succeeds and clears the pending blob.
+    await waitFor(() => expect(loadPendingSignup()).toBeNull());
+  });
+
+  it("a plain (non-stale) error on the reprompt still offers a 'Start again' escape", async () => {
+    savePendingSignup(PENDING_A);
+    const onCompleteVerification = vi.fn(async (_r: CompleteVerificationRequest) => ({ ok: false }));
+    const onExit = vi.fn();
+    render(<Signup verifyToken="tok-esc" onCompleteVerification={onCompleteVerification} onExit={onExit} />);
+    fireEvent.change(screen.getByLabelText("Your password"), { target: { value: "parentpass" } });
+    fireEvent.change(screen.getByLabelText("Alex's password"), { target: { value: "kidpassword" } });
+    fireEvent.click(screen.getByRole("button", { name: /Finish setup/ }));
+    await waitFor(() => expect(screen.getByRole("alert")).toBeTruthy());
+
+    const startAgain = screen.getByRole("button", { name: "Start again" });
+    fireEvent.click(startAgain);
+    expect(onExit).toHaveBeenCalledTimes(1);
   });
 
   it("different device / no pending -> shows the finish-on-your-device message, never mints", () => {
