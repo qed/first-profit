@@ -17,23 +17,26 @@
  */
 import { useEffect, useRef, useState } from "react";
 import { useGame } from "../state/GameContext";
-import type { RoomId } from "../data/path";
+import type { PhaseId, RoomId } from "../data/path";
 import { AvatarSprite } from "./Avatar";
 import { MobilePath } from "./MobilePath";
 import { PhasesFloor } from "./PhasesFloor";
-import { SellFloor } from "./SellFloor";
+import { CriterionFloor } from "./CriterionFloor";
 
 const DESKTOP_QUERY = "(min-width: 1024px)";
 
 /** What a card tap wants to happen once the avatar has walked over. */
 export type WalkIntent =
-  | { kind: "openSellFloor" }
+  | { kind: "openPhaseFloor"; phase: PhaseId }
   | { kind: "openRoom"; room: RoomId }
   | { kind: "enterCriterion"; stepId: string }
   | { kind: "openIdea"; ideaIndex: number }
-  | { kind: "createIdea" };
+  | { kind: "createIdea" }
+  /** Open the PromoteBusiness screen (Unit 8 Tier C2) — coach CTA + Grow card. */
+  | { kind: "openPromote" };
 
-export type FloorView = "phases" | "sell";
+/** Which sub-floor is showing: the Path overview or one phase's criterion floor. */
+export type FloorView = "phases" | PhaseId;
 
 export interface FloorProps {
   walkTo: WalkIntent | null;
@@ -42,8 +45,15 @@ export interface FloorProps {
    * desktop/mobile variant swapping at the lg breakpoint. */
   onWalk: (intent: WalkIntent) => void;
   floorView: FloorView;
-  /** Immediate (no-walk) return to the phases view; a parent-level setter. */
+  /** Immediate (no-walk) return to the phases view; a parent-level setter
+   *  (which ALSO cancels any in-flight walk — unit review FIX 1b). */
   onBack: () => void;
+  /** Open the idea-switcher dialog (state lives in Factory, above the mount). */
+  onOpenSwitcher: () => void;
+  /** True while ANY overlay is open (Factory's lifted anyOverlayOpen, unit
+   *  review FIX 5): the floors hide their floating chip on it. The container
+   *  is also `inert` then, so nothing here can catch focus. */
+  overlayOpen?: boolean;
 }
 
 function useIsDesktop() {
@@ -63,12 +73,15 @@ export function FactoryFloor(props: FloorProps) {
 
 const HINT = "Click the floor to walk · click a room to enter it";
 
-function DesktopFloor({ walkTo, onArrived, onWalk, floorView, onBack }: FloorProps) {
+function DesktopFloor({ walkTo, onArrived, onWalk, floorView, onBack, onOpenSwitcher, overlayOpen }: FloorProps) {
   const { profile } = useGame();
   const [pos, setPos] = useState({ x: 50, y: 94 });
   const timer = useRef<number | null>(null);
 
   // Drive the walk from the parent's intent (survives the breakpoint swap).
+  // walkTo → null is CANCELLATION (unit review FIX 1b): the dep change makes
+  // the cleanup below clear the pending arrival timer, so the intent never
+  // fires; the early return then arms nothing new.
   useEffect(() => {
     if (!walkTo) return;
     // Cosmetic: glide toward the middle of the floor, then fire the intent.
@@ -99,7 +112,11 @@ function DesktopFloor({ walkTo, onArrived, onWalk, floorView, onBack }: FloorPro
       {/* Content scrolls within the floor panel. Clicks on empty area bubble to
           onFloorClick (cosmetic avatar walk); card buttons handle their own tap. */}
       <div className="absolute inset-0 overflow-y-auto p-7 pb-14">
-        {floorView === "phases" ? <PhasesFloor onWalk={onWalk} /> : <SellFloor onWalk={onWalk} onBack={onBack} />}
+        {floorView === "phases" ? (
+          <PhasesFloor onWalk={onWalk} onOpenSwitcher={onOpenSwitcher} overlayOpen={overlayOpen} />
+        ) : (
+          <CriterionFloor phase={floorView} onWalk={onWalk} onBack={onBack} onOpenSwitcher={onOpenSwitcher} overlayOpen={overlayOpen} />
+        )}
       </div>
 
       <div

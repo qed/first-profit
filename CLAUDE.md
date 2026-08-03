@@ -28,13 +28,65 @@ Every UI change MUST look good and work well on mobile before it is considered d
   all mounted at `src/screens/Factory.tsx` above the floor) are full-screen takeovers on
   mobile and floating dialogs from `sm` up. Their open-state lives in the `gameCore`
   reducer, which is above the breakpoint mount, so they survive the swap too.
-- The fpv2 floor uses click-to-walk plus a bottom hint pill and the HUD for guidance; there
-  is no separate "Next Step coach" component (a v1 concept the fpv2 design superseded).
-  `MobilePath` still reserves bottom padding (`pb-80`) so a bottom-docked HUD/overlay never
+- The fpv2 floor uses click-to-walk plus a bottom hint pill and the HUD for guidance, and a
+  `NextStepCoach` component (added 2026-08-03, defined in `src/screens/Factory.tsx`): one
+  green button docked at the bottom of the floor (absolute, bottom-7 / lg:bottom-11) that
+  targets whatever comes next via `nextCoachTarget` — create-idea, the next criterion's
+  room, or the promotion screen — routing through the same `onWalk` intent channel as card
+  taps. `MobilePath` reserves bottom padding (`pb-80`) so the bottom-docked coach never
   covers the last card. Preserve that padding if you change either component.
 - Styling is Tailwind mobile-first: base classes are the mobile styles; desktop is layered
   on with `sm:`/`lg:` variants. When fixing mobile, don't silently change desktop —
   re-assert desktop values at the appropriate breakpoint.
+
+## Content pipeline (path/task content)
+
+- `src/docs/first-profit-home-study-curriculum-brief.md` is the **source of truth** for
+  all step/task content. It compiles to the committed `src/data/pathContent.generated.ts`
+  via `npm run build:path-content` (parse-or-throw parser in `src/data/parseCurriculum.ts`);
+  a drift test and the `npm run build` preflight (`scripts/check-path-content.ts`, run
+  before vite, so Vercel can never deploy a stale or broken regeneration) both fail if the
+  brief and the generated module fall out of sync. Never hand-edit the generated module.
+- Behavior lives in `src/data/pathHooks.ts` (artifact auto-complete, the real-sale target,
+  authored input fields), keyed by stable task id — regenerating content can never
+  silently drop behavior, and `src/data/path.ts` asserts every hook resolves.
+- Editorial rule: a **copy tweak** to the brief keeps the task id; a **meaning change or
+  structural edit** mints a new id and needs BOTH a `src/data/pathHooks.ts` retarget of any
+  hooks on the old id AND a `src/data/taskRemap.ts` `TASK_REMAP` entry (old id → new id, or
+  old id → null to retire) so saved child progress moves with the edit — the build preflight
+  refuses a remap table that is stale against the content
+  (see docs/plans/2026-08-03-001-feat-full-path-cohort-readiness-plan.md).
+
+## Phase engine (unlock/progress model)
+
+- `src/state/gameCore.ts` owns the curriculum model: `CRITERION_SEQUENCE` (all 25
+  criterion ids, derived from the generated content) and `PHASE_ORDER` are the source of
+  truth for ordering; unlock/progress/next-up logic walks them phase-aware, per idea.
+  Task counts per criterion are variable — always read `step.tasks.length`, never ×5.
+  ("step" is the historical name for "criterion"; the rename is deferred to Unit 9.)
+- The engine is deliberately allowlist-FREE. What the UI has actually SHIPPED is modeled
+  separately by the `BUILT_CRITERIA` readiness allowlist in `src/data/path.ts`; the coach,
+  room entry (`floorSelectors`), and floor cards all consume that one list so no surface
+  can outrun another. Unit 8 expands it as each phase's surface generalizes.
+- **Business model (Unit 7).** One Validate-complete idea is explicitly PROMOTED into
+  THE business (`PROMOTE_IDEA`, caller-minted UUID + timestamp via GameContext's
+  `promoteIdea`, which returns a refusal boolean). ONE-ACTIVE INVARIANT: at most one
+  business is unarchived — the reducer refuses a promote/unarchive beside an active
+  business, and the pure `normalizeBusinesses` re-derives the invariant on every load
+  and every cross-tab union (earliest `promotedAt` wins, id tiebreak; derived only —
+  it never stamps `archiveStateAt`). Phase 4-5 progress BELONGS TO THE BUSINESS
+  record (stable-id maps on `Business`), scoped to the idea it was promoted from:
+  `isPhaseUnlocked`/`isTaskDone`/`COMPLETE_TASK` for grow/scale require the queried
+  idea to BE the promoted idea. `ARCHIVE_BUSINESS`/`UNARCHIVE_BUSINESS` keep the
+  record + progress and stamp `archiveStateAt` (Date.now at the GameContext
+  boundary); the cross-tab union resolves `archived` by the larger stamp
+  (last-action-wins), local winning on tie/absent.
+- **Cross-tab convergence.** The sync engine's CAS rebase saves `local ∪ server`
+  (`unionCompletionMaps`, lives in gameCore, re-exported by sync.ts) and then feeds
+  the committed merged doc back into live state via `onRebasedDoc` →
+  `UNION_REMOTE`, which unions only MONOTONIC state (completions, businesses,
+  id-matched/appended ideas) — never latest-intent fields or UI flags, and it can
+  never close the runner or fire a celebration.
 
 ## Documented Solutions
 

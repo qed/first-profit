@@ -13,17 +13,8 @@
  * counts) so every pip is reachable and a criterion reads done at full, not 4/5.
  */
 import React from "react";
+import { PHASES } from "../data/path";
 
-/** The five phase accent colors (handoff Design Tokens), by phase index 1..5. */
-export const PHASE_UI = [
-  { name: "Sell", promise: "Learn to confidently sell anything.", color: "hsl(14 78% 54%)", faded: "hsl(14 78% 54% / .3)" },
-  { name: "Build", promise: "Ship a real thing people can buy.", color: "hsl(217 74% 56%)", faded: "hsl(217 74% 56% / .3)" },
-  { name: "Validate", promise: "Prove it works before you scale it.", color: "hsl(265 52% 58%)", faded: "hsl(265 52% 58% / .3)" },
-  { name: "Grow", promise: "Get to your first $1,000 in sales.", color: "hsl(150 52% 42%)", faded: "hsl(150 52% 42% / .3)" },
-  { name: "Scale", promise: "Build the plan to $10,000 in profit.", color: "hsl(41 88% 52%)", faded: "hsl(41 88% 52% / .3)" },
-] as const;
-
-const SELL = PHASE_UI[0].color;
 const INK = "hsl(25 34% 20%)";
 const INK_SOFT = "hsl(25 20% 38%)";
 const CARD_SHADOW = "0 6px 0 rgba(120,80,40,.1)";
@@ -53,28 +44,38 @@ export function PhaseCard({
   unlocked,
   done,
   pips,
+  hint,
+  promotable,
   onClick,
 }: {
   index: number;
   unlocked: boolean;
   done: number;
   pips: boolean[];
+  /** Locked-card line ("Complete Sell first" / "Promote an idea first"). */
+  hint?: string;
+  /**
+   * The Grow card's promotion affordance (Unit 8 Tier C2): the phase is still
+   * LOCKED (dashed treatment preserved), but an idea is Validate-complete and
+   * unpromoted, so the card is tappable and opens the promotion screen.
+   */
+  promotable?: boolean;
   onClick?: () => void;
 }) {
-  const ph = PHASE_UI[index - 1];
+  const ph = PHASES[index - 1];
   if (unlocked) {
     return (
       <button
         type="button"
         onClick={onClick}
         className={`${cardBase} min-h-[44px]`}
-        style={{ borderColor: ph.color, boxShadow: CARD_SHADOW }}
+        style={{ borderColor: ph.accent, boxShadow: CARD_SHADOW }}
       >
         <span className="flex items-center justify-between">
           <span className="flex items-center gap-2">
             <span
               className="flex h-6 w-6 items-center justify-center rounded-[7px] font-mono text-[11.5px] font-bold text-white"
-              style={{ background: ph.color }}
+              style={{ background: ph.accent }}
             >
               {index}
             </span>
@@ -82,24 +83,21 @@ export function PhaseCard({
               {ph.name}
             </span>
           </span>
-          <span className="text-xs font-semibold" style={{ color: ph.color }}>
+          <span className="text-xs font-semibold" style={{ color: ph.accent }}>
             →
           </span>
         </span>
         <span className="block">
-          <Pips pips={pips} color={ph.color} />
+          <Pips pips={pips} color={ph.accent} />
           <span className="mt-1.5 block font-mono text-[9.5px]" style={{ color: INK_SOFT }}>
-            {done}/5 criteria
+            {done}/{pips.length || 5} criteria
           </span>
         </span>
       </button>
     );
   }
-  return (
-    <div
-      className="flex flex-col gap-2.5 rounded-[14px] border-2 border-dashed bg-[hsl(25_34%_20%/0.02)] p-3.5"
-      style={{ borderColor: ph.faded }}
-    >
+  const lockedBody = (
+    <>
       <span className="flex items-center gap-2">
         <span
           className="flex h-6 w-6 items-center justify-center rounded-[7px] font-mono text-[11.5px] font-bold text-white"
@@ -113,12 +111,37 @@ export function PhaseCard({
       </span>
       <span className="flex items-center gap-1.5">
         <span aria-hidden className="text-[10px] opacity-45">
-          🔒
+          {promotable ? "🏢" : "🔒"}
         </span>
-        <span className="font-mono text-[9px] uppercase tracking-[0.06em]" style={{ color: "hsl(25 20% 38% / .75)" }}>
-          Complete {PHASE_UI[index - 2]?.name ?? PHASE_UI[0].name} first
+        <span
+          className="text-left font-mono text-[9px] uppercase tracking-[0.06em]"
+          style={{ color: promotable ? ph.text : "hsl(25 20% 38% / .75)" }}
+        >
+          {hint ?? `Complete ${PHASES[index - 2]?.name ?? PHASES[0].name} first`}
         </span>
       </span>
+    </>
+  );
+  if (promotable) {
+    // Locked-but-promotable: keeps the EXISTING dashed locked treatment (no new
+    // locked visual language) while making the card a real tap target.
+    return (
+      <button
+        type="button"
+        onClick={onClick}
+        className="flex min-h-[44px] flex-col gap-2.5 rounded-[14px] border-2 border-dashed bg-[hsl(25_34%_20%/0.02)] p-3.5 text-left transition-transform hover:-translate-y-[3px] active:translate-y-0"
+        style={{ borderColor: ph.faded }}
+      >
+        {lockedBody}
+      </button>
+    );
+  }
+  return (
+    <div
+      className="flex flex-col gap-2.5 rounded-[14px] border-2 border-dashed bg-[hsl(25_34%_20%/0.02)] p-3.5"
+      style={{ borderColor: ph.faded }}
+    >
+      {lockedBody}
     </div>
   );
 }
@@ -214,9 +237,9 @@ export function ProductEmpty({ num }: { num: number }) {
   );
 }
 
-// ── Sell floor · room cards ─────────────────────────────────────────────────
+// ── Criterion floor · room cards (phase-colored, Unit 8) ────────────────────
 
-export function SellRoomCard({
+export function CriterionRoomCard({
   sign,
   room,
   id,
@@ -227,6 +250,9 @@ export function SellRoomCard({
   pips,
   meta,
   hint,
+  accent,
+  text,
+  lockedTappable,
   onClick,
 }: {
   sign: string;
@@ -239,11 +265,23 @@ export function SellRoomCard({
   pips: boolean[];
   meta: string;
   hint: string;
+  /** The phase accent color (PHASES data) — pips, id, and complete border. */
+  accent: string;
+  /** The phase's darker text color (PHASES data) — the criterion id label. */
+  text: string;
+  /**
+   * Locked-but-tappable (unit review FIX 2, the PhaseCard `promotable`
+   * pattern): the ACTIVE idea is locked out but ANOTHER idea can play this
+   * criterion — the card keeps the dashed locked treatment with an honest
+   * hint, and the tap routes through the normal room-entry channel (which
+   * enters/picks for the eligible idea — an EXPLICIT redirect).
+   */
+  lockedTappable?: boolean;
   onClick?: () => void;
 }) {
   if (!unlocked) {
-    return (
-      <div className="flex flex-col gap-2.5 rounded-[14px] border-2 border-dashed border-[hsl(25_34%_20%/0.15)] bg-[hsl(25_34%_20%/0.02)] p-3.5">
+    const lockedBody = (
+      <>
         <span className="text-lg opacity-35" aria-hidden>
           {sign}
         </span>
@@ -257,16 +295,37 @@ export function SellRoomCard({
         </span>
         <span className="flex items-center gap-1.5">
           <span aria-hidden className="text-[10px] opacity-45">
-            🔒
+            {lockedTappable ? "💡" : "🔒"}
           </span>
-          <span className="font-mono text-[9px] uppercase tracking-[0.06em]" style={{ color: "hsl(25 20% 38% / .75)" }}>
+          <span
+            className="text-left font-mono text-[9px] uppercase tracking-[0.06em]"
+            style={{ color: lockedTappable ? text : "hsl(25 20% 38% / .75)" }}
+          >
             {hint}
           </span>
         </span>
+      </>
+    );
+    if (lockedTappable && onClick) {
+      return (
+        <button
+          type="button"
+          onClick={onClick}
+          className="flex min-h-[44px] flex-col gap-2.5 rounded-[14px] border-2 border-dashed border-[hsl(25_34%_20%/0.15)] bg-[hsl(25_34%_20%/0.02)] p-3.5 text-left transition-transform hover:-translate-y-[3px] active:translate-y-0"
+        >
+          {lockedBody}
+        </button>
+      );
+    }
+    return (
+      <div className="flex flex-col gap-2.5 rounded-[14px] border-2 border-dashed border-[hsl(25_34%_20%/0.15)] bg-[hsl(25_34%_20%/0.02)] p-3.5">
+        {lockedBody}
       </div>
     );
   }
-  const border = isNext ? "hsl(150 52% 40%)" : complete ? "hsl(14 78% 54% / .5)" : "hsl(25 34% 20% / .15)";
+  // Half-alpha accent for a completed card's border (the wax-stamp rest state).
+  const halfAccent = accent.replace(/\)$/, " / .5)");
+  const border = isNext ? "hsl(150 52% 40%)" : complete ? halfAccent : "hsl(25 34% 20% / .15)";
   return (
     <button
       type="button"
@@ -300,14 +359,14 @@ export function SellRoomCard({
           {room}
         </span>
         <span className="mt-1 block text-[10.5px] leading-[1.4]" style={{ color: INK_SOFT }}>
-          <b className="font-mono" style={{ color: "hsl(14 78% 44%)" }}>
+          <b className="font-mono" style={{ color: text }}>
             {id}
           </b>{" "}
           · {title}
         </span>
       </span>
       <span className="block">
-        <Pips pips={pips} color={SELL} />
+        <Pips pips={pips} color={accent} />
         <span className="mt-1.5 block font-mono text-[9px]" style={{ color: INK_SOFT }}>
           {meta}
         </span>

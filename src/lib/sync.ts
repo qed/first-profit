@@ -35,7 +35,18 @@
  */
 import { getConfig } from "../config";
 import { getSupabase } from "./supabase";
-import { fromSaveDoc, DOC_VERSION, type SaveDoc, type LedgerEntry } from "../state/gameCore";
+import {
+  fromSaveDoc,
+  unionCompletionMaps,
+  DOC_VERSION,
+  type SaveDoc,
+  type LedgerEntry,
+} from "../state/gameCore";
+
+// Re-exported so existing consumers/tests keep importing the union from here;
+// it LIVES in gameCore now so the UNION_REMOTE reducer action can share it
+// without a sync→gameCore→sync import cycle.
+export { unionCompletionMaps };
 import { getDraft, setDraft } from "./draftCache";
 
 // ── Shared types ───────────────────────────────────────────────────────────
@@ -186,6 +197,16 @@ const MISSING_TABLE_CODES = new Set(["PGRST205", "42P01"]);
 /** Unique-violation — for the ledger PK this means "already landed": success. */
 const DUPLICATE_CODE = "23505";
 
+/**
+ * Query-canceled (`57014`) — the server killed the statement mid-flight (a
+ * statement_timeout or a pooler cancel), which says nothing structural about
+ * the write: the identical replay normally succeeds once the load spike or
+ * timeout window passes. It MUST be RETRYABLE (park in the outbox and replay)
+ * — the unknown-code terminal default below would silently discard the
+ * pending snapshot on a transient timeout.
+ */
+const QUERY_CANCELED_CODE = "57014";
+
 function pgCode(error: unknown): string {
   if (isRecord(error) && typeof error.code === "string") return error.code;
   return "";
@@ -213,6 +234,10 @@ export function classifyWriteError(error: unknown): WriteFailure {
   // they are, so PARK + replay — do NOT drop the sale. Checked BEFORE the unknown
   // -code terminal default below.
   if (MISSING_COLUMN_CODES.has(code)) return { ok: false, reason: "retryable", needsReauth: false, error };
+  // A statement-timeout cancellation is transient-by-load, not structural —
+  // park + replay, never drop. Checked BEFORE the unknown-code terminal
+  // default below.
+  if (code === QUERY_CANCELED_CODE) return { ok: false, reason: "retryable", needsReauth: false, error };
   if (TERMINAL_CODES.has(code)) return { ok: false, reason: "terminal", error };
   // No code at all → a thrown network/offline error (fetch reject, timeout):
   // genuinely transient, so retryable.
@@ -484,6 +509,12 @@ export async function saveSnapshot(
     return classifyWriteError(error);
   }
 }
+
+// ── Rebase union (CAS-conflict merge) ────────────────────────────────────────
+// The union itself (unionCompletionMaps + its business/idea helpers) lives in
+// ../state/gameCore so the reducer's UNION_REMOTE action shares the exact same
+// merge semantics; it is re-exported above. flushPending below is the only
+// caller here (the CAS rebase path).
 
 // ── Ledger insert ────────────────────────────────────────────────────────────
 
@@ -1116,6 +1147,16 @@ export interface SyncEngineDeps {
   onStatus: (status: SyncStatus) => void;
   /** An expired session was hit mid-play — the app should route to login. */
   onReauthNeeded: () => void;
+  /**
+   * A CAS-rebased (merged) doc COMMITTED to the server. Invoked only after the
+   * rebased save succeeds, and only while this session is still the live one
+   * (generation-guarded like every async writer). The caller must feed the doc
+   * back into live state (GameContext dispatches UNION_REMOTE) — otherwise the
+   * concurrent session's work exists on the server and in this tab's next
+   * rebase, but never on this tab's screen, and the two tabs split-brain until
+   * a reload. Optional so bare test engines stay valid.
+   */
+  onRebasedDoc?: (doc: SaveDoc) => void;
   storage?: Storage;
 }
 
@@ -1198,17 +1239,30 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine {
     }
     let result = await saveSnapshot(pid, saveRevision, saveDoc);
 
+    // True once saveDoc is a REBASED merge (local ∪ server) rather than the raw
+    // local snapshot — the commit of a rebased doc must be fed back to the
+    // reducer (onRebasedDoc) or this tab never sees the concurrent session's
+    // work it just persisted on the server (split-brain until reload).
+    let rebased = false;
+
     if (!result.ok && result.reason === "cas-rejected") {
       // P0: the session may have ended during the network round-trip. Never issue
       // the rebase write under a superseded session.
       if (!isCurrent(gen)) return;
-      // Refetch + rebase: re-save the CURRENT local doc against the fresh
-      // revision. The server doc is discarded (this tab is authoritative for its
-      // own snapshot); the CAS guard's job was only to reject the STALE write.
+      // Refetch + rebase: re-save against the fresh revision, but MERGE first —
+      // the CAS loss means a concurrent session (another tab/device) committed
+      // work we have not seen. Completions are monotonic, so the server doc's
+      // completion maps are UNIONED into the current local doc (and any extra
+      // server ideas appended) before the rebased write; latest-intent fields
+      // (text fields, activeIdea, chosenProvider, …) stay local-authoritative.
+      // See unionCompletionMaps for the precise contract. This is the ONLY
+      // rebase path: flushOnHide/replayOutbox never rebase (the keepalive parks
+      // and a CAS-rejected parked snapshot is dropped in favor of live state).
       const fresh = await loadSave(pid);
       const current = deps.getSnapshot();
       saveRevision = fresh.revision;
-      saveDoc = current.doc;
+      saveDoc = unionCompletionMaps(current.doc, fresh.doc);
+      rebased = true;
       if (!isCurrent(gen)) return;
       result = await saveSnapshot(pid, saveRevision, saveDoc);
     }
@@ -1220,6 +1274,11 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine {
     if (result.ok) {
       deps.setRevision(result.revision);
       clearPendingSnapshot(userId, storage);
+      // A rebased save COMMITTED: feed the merged doc back into live state
+      // (UNION_REMOTE) so this tab converges on the union it just persisted.
+      // Ordered before the status flip so 'saved' reflects converged state;
+      // guarded by the isCurrent(gen) check above like every shared mutation.
+      if (rebased) deps.onRebasedDoc?.(saveDoc);
       setStatus("saved");
       return;
     }

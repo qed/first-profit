@@ -26,10 +26,12 @@ import { useGame } from "../state/GameContext";
 import { FEEDBACK_BODY_MAX } from "../lib/sync";
 
 /**
- * Phase A task id synthesis: the brief's task number is `${stepId}.${index+1}`.
- * Valid ONLY because play is limited to 1.1/1.2, whose 5-task lists align 1:1
- * with the brief (a pinned test asserts task index 4 of "1.2" stamps "1.2.5").
- * Unit 5 replaces this with real generated task ids.
+ * Task id synthesis: the generated stable task id is `${stepId}.${index+1}` —
+ * ids are 1-based positional within their criterion, for ALL 25 criteria of
+ * the generated content (task counts vary per criterion; the synthesis never
+ * assumes 5). A pinned test (StuckBox.test.tsx) walks every criterion × task
+ * index of PATH_CONTENT and asserts this synthesis matches the generated id
+ * exactly, so a future id-scheme change fails the suite here.
  */
 export function taskIdFor(stepId: string, index: number): string {
   return `${stepId}.${index + 1}`;

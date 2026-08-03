@@ -95,6 +95,16 @@ describe("GradeAsk visibility", () => {
     renderCard({ room: "idea" });
     expect(screen.queryByText(GRADE_ASK_COPY.title)).toBeNull();
   });
+
+  it("hidden on Factory's lifted anyOverlayOpen (promote/switcher, unit review FIX 5)", () => {
+    const value = ctxValue();
+    render(
+      <Ctx.Provider value={value}>
+        <GradeAsk overlayOpen />
+      </Ctx.Provider>,
+    );
+    expect(screen.queryByText(GRADE_ASK_COPY.title)).toBeNull();
+  });
 });
 
 describe("GradeAsk answer flow", () => {

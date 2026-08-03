@@ -89,7 +89,9 @@ export function Onboarding() {
                 // Seed Idea #1 (sets it active + opens the runner at 1.1.1), mark
                 // onboarding complete (persisted so the next login skips
                 // onboarding), enter the floor.
-                dispatch({ type: "CREATE_IDEA" });
+                // The idea's stable id is minted at this caller boundary
+                // (Unit 7; gameCore stays randomness-free).
+                dispatch({ type: "CREATE_IDEA", ideaId: crypto.randomUUID() });
                 dispatch({ type: "SET_ONBOARDING_COMPLETE" });
                 dispatch({ type: "SET_STAGE", stage: "app" });
               }}

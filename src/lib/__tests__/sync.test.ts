@@ -95,10 +95,11 @@ import {
   FEEDBACK_TASK_ID_RE,
   FEEDBACK_TASK_ID_MAX,
   FEEDBACK_BANDS,
+  unionCompletionMaps,
   type LedgerInsertRow,
   type FeedbackInsertRow,
 } from "../sync";
-import { DOC_VERSION, type SaveDoc } from "../../state/gameCore";
+import { DOC_VERSION, type Idea, type SaveDoc } from "../../state/gameCore";
 
 // ── Fake Storage (Map-backed, node-safe) ─────────────────────────────────────
 function fakeStorage(): Storage {
@@ -421,6 +422,308 @@ describe("saveSnapshot", () => {
   });
 });
 
+// ── unionCompletionMaps (CAS rebase merge contract) ──────────────────────────
+describe("unionCompletionMaps", () => {
+  function idea(over: Partial<Idea> = {}): Idea {
+    return { fields: {}, done: {}, ...over };
+  }
+
+  it("returns the local doc unchanged when the server doc is null (empty/unreadable row)", () => {
+    const local = docWith({ ideas: [idea({ doneByTask: { "1.1.1": true } })] });
+    expect(unionCompletionMaps(local, null)).toBe(local);
+  });
+
+  it("ADDS a server-only doneByTask completion; local-only completions are never removed", () => {
+    const local = docWith({ ideas: [idea({ doneByTask: { "1.3.1": true } })] });
+    const server = docWith({ ideas: [idea({ doneByTask: { "1.2.1": true } })] });
+    const merged = unionCompletionMaps(local, server);
+    expect(merged.ideas[0].doneByTask).toEqual({ "1.3.1": true, "1.2.1": true });
+  });
+
+  it("ADDS a server-only LEGACY completion (done + doneAt) into the local doc", () => {
+    const local = docWith({ ideas: [idea()] });
+    const server = docWith({
+      ideas: [idea({ done: { "1.1#0": true }, doneAt: { "1.1#0": 777 } })],
+    });
+    const merged = unionCompletionMaps(local, server);
+    expect(merged.ideas[0].done).toEqual({ "1.1#0": true });
+    expect(merged.ideas[0].doneAt).toEqual({ "1.1#0": 777 });
+  });
+
+  it("LOCAL wins on both-present conflicts (done flags and timestamps)", () => {
+    const local = docWith({
+      ideas: [idea({ doneByTask: { "1.1.1": true }, doneAtByTask: { "1.1.1": 111 } })],
+    });
+    const server = docWith({
+      ideas: [idea({ doneByTask: { "1.1.1": true }, doneAtByTask: { "1.1.1": 999 } })],
+    });
+    const merged = unionCompletionMaps(local, server);
+    expect(merged.ideas[0].doneAtByTask).toEqual({ "1.1.1": 111 });
+  });
+
+  it("latest-intent values stay LOCAL-authoritative: fields, activeIdea, headline, provider", () => {
+    const local = docWith({
+      ideas: [idea({ fields: { oneLiner: "local" } })],
+      activeIdea: 0,
+      siteHeadline: "local headline",
+      chosenProvider: { providerId: "shopify", chosenAt: 1 },
+    });
+    const server = docWith({
+      ideas: [idea({ fields: { oneLiner: "server" }, doneByTask: { "1.1.1": true } })],
+      activeIdea: 1,
+      siteHeadline: "server headline",
+      chosenProvider: { providerId: "replit", chosenAt: 2 },
+    });
+    const merged = unionCompletionMaps(local, server);
+    expect(merged.ideas[0].fields).toEqual({ oneLiner: "local" });
+    expect(merged.activeIdea).toBe(0);
+    expect(merged.siteHeadline).toBe("local headline");
+    expect(merged.chosenProvider).toEqual({ providerId: "shopify", chosenAt: 1 });
+    // …while the server's completion still unions in.
+    expect(merged.ideas[0].doneByTask).toEqual({ "1.1.1": true });
+  });
+
+  it("idea-count mismatch: EXTRA server ideas are APPENDED (a concurrent tab created one)", () => {
+    const local = docWith({ ideas: [idea({ fields: { oneLiner: "first" } })] });
+    const server = docWith({
+      ideas: [idea(), idea({ fields: { oneLiner: "new idea" }, doneByTask: { "1.1.1": true } })],
+    });
+    const merged = unionCompletionMaps(local, server);
+    expect(merged.ideas).toHaveLength(2);
+    expect(merged.ideas[0].fields).toEqual({ oneLiner: "first" });
+    expect(merged.ideas[1].fields).toEqual({ oneLiner: "new idea" });
+    expect(merged.ideas[1].doneByTask).toEqual({ "1.1.1": true });
+  });
+
+  it("does not invent absent maps (absent-stays-absent on both sides)", () => {
+    const merged = unionCompletionMaps(docWith({ ideas: [idea()] }), docWith({ ideas: [idea()] }));
+    expect(merged.ideas[0]).not.toHaveProperty("doneByTask");
+    expect(merged.ideas[0]).not.toHaveProperty("doneAtByTask");
+    expect(merged.ideas[0]).not.toHaveProperty("doneAt");
+  });
+
+  // ── Businesses (Unit 7): monotonic-ish union, matched by business id ───────
+  it("KEEPS a business present only on the server (a concurrent session promoted it)", () => {
+    const local = docWith({ ideas: [idea()] });
+    const server = docWith({
+      ideas: [idea()],
+      businesses: [{ id: "biz-1", ideaId: "idea-a", archived: false, promotedAt: 1 }],
+    });
+    const merged = unionCompletionMaps(local, server);
+    expect(merged.businesses).toEqual([
+      { id: "biz-1", ideaId: "idea-a", archived: false, promotedAt: 1 },
+    ]);
+  });
+
+  it("unions per-business completion maps BY BUSINESS ID (server-only added, local wins on conflicts)", () => {
+    const local = docWith({
+      ideas: [idea()],
+      businesses: [
+        { id: "biz-1", doneByTask: { "4.1.2": true }, doneAtByTask: { "4.1.2": 100 } },
+      ],
+    });
+    const server = docWith({
+      ideas: [idea()],
+      businesses: [
+        {
+          id: "biz-1",
+          doneByTask: { "4.1.1": true, "4.1.2": true },
+          doneAtByTask: { "4.1.1": 50, "4.1.2": 999 },
+        },
+      ],
+    });
+    const merged = unionCompletionMaps(local, server);
+    expect(merged.businesses).toHaveLength(1);
+    expect(merged.businesses?.[0].doneByTask).toEqual({ "4.1.1": true, "4.1.2": true });
+    // Local timestamp wins on the both-present conflict; server-only unions in.
+    expect(merged.businesses?.[0].doneAtByTask).toEqual({ "4.1.1": 50, "4.1.2": 100 });
+  });
+
+  it("`archived` with NO timestamps: the local flag wins (tie/absent rule)", () => {
+    const local = docWith({
+      ideas: [idea()],
+      businesses: [{ id: "biz-1", archived: true }],
+    });
+    const server = docWith({
+      ideas: [idea()],
+      businesses: [{ id: "biz-1", archived: false, doneByTask: { "4.1.1": true } }],
+    });
+    const merged = unionCompletionMaps(local, server);
+    // Neither side stamped archiveStateAt -> local wins; completion unions in.
+    expect(merged.businesses).toEqual([
+      { id: "biz-1", archived: true, doneByTask: { "4.1.1": true } },
+    ]);
+  });
+
+  it("`archived` resolves by the LARGER archiveStateAt (last-action-wins, both directions)", () => {
+    const archivedSide = [{ id: "biz-1", archived: true, archiveStateAt: 200 }];
+    const unarchivedSide = [{ id: "biz-1", archived: false, archiveStateAt: 100 }];
+    // Direction 1: the fresher archive is on the SERVER — it beats local.
+    const a = unionCompletionMaps(
+      docWith({ ideas: [idea()], businesses: unarchivedSide }),
+      docWith({ ideas: [idea()], businesses: archivedSide }),
+    );
+    expect(a.businesses).toEqual([{ id: "biz-1", archived: true, archiveStateAt: 200 }]);
+    // Direction 2: the fresher archive is LOCAL — the server's stale flag loses.
+    const b = unionCompletionMaps(
+      docWith({ ideas: [idea()], businesses: archivedSide }),
+      docWith({ ideas: [idea()], businesses: unarchivedSide }),
+    );
+    expect(b.businesses).toEqual([{ id: "biz-1", archived: true, archiveStateAt: 200 }]);
+  });
+
+  it("a stamped server flag beats an UNSTAMPED local flag; an equal stamp keeps local", () => {
+    // Server stamped, local not: the stamped action wins.
+    const stamped = unionCompletionMaps(
+      docWith({ ideas: [idea()], businesses: [{ id: "biz-1", archived: false }] }),
+      docWith({ ideas: [idea()], businesses: [{ id: "biz-1", archived: true, archiveStateAt: 50 }] }),
+    );
+    expect(stamped.businesses).toEqual([{ id: "biz-1", archived: true, archiveStateAt: 50 }]);
+    // Exact tie: local wins (deterministic only because a tie implies the same
+    // action; the skewed-clock caveat is documented on Business.archiveStateAt).
+    const tie = unionCompletionMaps(
+      docWith({ ideas: [idea()], businesses: [{ id: "biz-1", archived: false, archiveStateAt: 50 }] }),
+      docWith({ ideas: [idea()], businesses: [{ id: "biz-1", archived: true, archiveStateAt: 50 }] }),
+    );
+    expect(tie.businesses).toEqual([{ id: "biz-1", archived: false, archiveStateAt: 50 }]);
+  });
+
+  it("RESURRECT SCENARIO: a stale tab's completion write + a fresh archive converge to archived WITH the completion", () => {
+    // Tab A (stale, resident unarchived copy) completed a Grow task; tab B
+    // archived the business (stamped). Both merge directions converge on the
+    // archived record CARRYING the completion — never a resurrected active
+    // business, never a lost completion.
+    const staleWithWork = [
+      { id: "biz-1", archived: false, doneByTask: { "4.1.1": true }, doneAtByTask: { "4.1.1": 10 } },
+    ];
+    const freshlyArchived = [{ id: "biz-1", archived: true, archiveStateAt: 999 }];
+    const expected = [
+      {
+        id: "biz-1",
+        archived: true,
+        archiveStateAt: 999,
+        doneByTask: { "4.1.1": true },
+        doneAtByTask: { "4.1.1": 10 },
+      },
+    ];
+    const a = unionCompletionMaps(
+      docWith({ ideas: [idea()], businesses: staleWithWork }),
+      docWith({ ideas: [idea()], businesses: freshlyArchived }),
+    );
+    expect(a.businesses).toEqual(expected);
+    const b = unionCompletionMaps(
+      docWith({ ideas: [idea()], businesses: freshlyArchived }),
+      docWith({ ideas: [idea()], businesses: staleWithWork }),
+    );
+    expect(b.businesses).toEqual(expected);
+  });
+
+  it("TWO ACTIVES normalize to exactly ONE (earliest promotedAt), the SAME winner in both directions", () => {
+    const mine = [{ id: "biz-mine", archived: false, promotedAt: 500 }];
+    const theirs = [{ id: "biz-theirs", archived: false, promotedAt: 300 }];
+    const a = unionCompletionMaps(
+      docWith({ ideas: [idea()], businesses: mine }),
+      docWith({ ideas: [idea()], businesses: theirs }),
+    );
+    const b = unionCompletionMaps(
+      docWith({ ideas: [idea()], businesses: theirs }),
+      docWith({ ideas: [idea()], businesses: mine }),
+    );
+    for (const merged of [a, b]) {
+      const active = (merged.businesses ?? []).filter((x) => !x.archived);
+      expect(active).toHaveLength(1);
+      expect(active[0].id).toBe("biz-theirs"); // earliest promotedAt wins, both ways
+    }
+    // Normalization is DERIVED: the loser is archived WITHOUT an archiveStateAt
+    // stamp, so a later real action still wins the timestamped union.
+    const loserA = a.businesses?.find((x) => x.id === "biz-mine");
+    expect(loserA).toEqual({ id: "biz-mine", archived: true, promotedAt: 500 });
+  });
+
+  it("local-only businesses survive; a server-only one is APPENDED beside them", () => {
+    const local = docWith({
+      ideas: [idea()],
+      businesses: [{ id: "biz-local", archived: false }],
+    });
+    const server = docWith({
+      ideas: [idea()],
+      businesses: [{ id: "biz-server", archived: true, doneByTask: { "4.1.1": true } }],
+    });
+    const merged = unionCompletionMaps(local, server);
+    expect(merged.businesses).toEqual([
+      { id: "biz-local", archived: false },
+      { id: "biz-server", archived: true, doneByTask: { "4.1.1": true } },
+    ]);
+  });
+
+  it("does not invent an absent businesses list (absent-stays-absent on both sides)", () => {
+    const merged = unionCompletionMaps(docWith({ ideas: [idea()] }), docWith({ ideas: [idea()] }));
+    expect(merged).not.toHaveProperty("businesses");
+    // Local-only list passes through untouched when the server has none.
+    const localOnly = unionCompletionMaps(
+      docWith({ ideas: [idea()], businesses: [{ id: "biz-1" }] }),
+      docWith({ ideas: [idea()] }),
+    );
+    expect(localOnly.businesses).toEqual([{ id: "biz-1" }]);
+  });
+
+  // ── Idea matching BY ID (Unit 7 review FIX 3) ──────────────────────────────
+  it("EQUAL-LENGTH DIVERGENT CREATION: same-index different-id ideas are NOT fused — both survive", () => {
+    // Each tab created its own idea concurrently; both docs have one idea at
+    // index 0 with different ids. Fusing them would graft one idea's
+    // completions onto the other's fields.
+    const local = docWith({
+      ideas: [idea({ id: "uuid-local", fields: { oneLiner: "local idea" }, doneByTask: { "1.1.1": true } })],
+    });
+    const server = docWith({
+      ideas: [idea({ id: "uuid-server", fields: { oneLiner: "server idea" }, doneByTask: { "1.1.2": true } })],
+    });
+    const merged = unionCompletionMaps(local, server);
+    expect(merged.ideas).toHaveLength(2);
+    // Local keeps its position and its own state, untouched by the server idea.
+    expect(merged.ideas[0]).toEqual(
+      idea({ id: "uuid-local", fields: { oneLiner: "local idea" }, doneByTask: { "1.1.1": true } }),
+    );
+    // The unmatched server idea APPENDS at the tail with identity/fields/completions intact.
+    expect(merged.ideas[1]).toEqual(
+      idea({ id: "uuid-server", fields: { oneLiner: "server idea" }, doneByTask: { "1.1.2": true } }),
+    );
+  });
+
+  it("ideas match BY ID even at different positions (a shifted list still unions correctly)", () => {
+    const local = docWith({
+      ideas: [idea({ id: "A", doneByTask: { "1.2.1": true } })],
+    });
+    // Server has an extra idea FIRST, pushing A to index 1.
+    const server = docWith({
+      ideas: [
+        idea({ id: "B", fields: { oneLiner: "new sibling" } }),
+        idea({ id: "A", doneByTask: { "1.1.1": true } }),
+      ],
+    });
+    const merged = unionCompletionMaps(local, server);
+    expect(merged.ideas).toHaveLength(2);
+    // A unions with A (not with B, despite sharing index 0): both completions.
+    expect(merged.ideas[0].id).toBe("A");
+    expect(merged.ideas[0].doneByTask).toEqual({ "1.2.1": true, "1.1.1": true });
+    // B appends at the tail (server-unmatched ideas append in server order).
+    expect(merged.ideas[1]).toEqual(idea({ id: "B", fields: { oneLiner: "new sibling" } }));
+  });
+
+  it("ID-LESS legacy local ideas keep INDEX matching (deterministic legacy-idea-{index} ids make it safe)", () => {
+    // A local in-memory legacy idea (created before ids existed, not yet
+    // re-loaded) has no id; the server copy of the same doc was loaded through
+    // fromSaveDoc and carries the deterministic minted id.
+    const local = docWith({ ideas: [idea({ doneByTask: { "1.2.1": true } })] });
+    const server = docWith({
+      ideas: [idea({ id: "legacy-idea-0", doneByTask: { "1.1.1": true } })],
+    });
+    const merged = unionCompletionMaps(local, server);
+    expect(merged.ideas).toHaveLength(1); // index-matched, not duplicated
+    expect(merged.ideas[0].doneByTask).toEqual({ "1.2.1": true, "1.1.1": true });
+  });
+});
+
 // ── insertLedger ─────────────────────────────────────────────────────────────
 describe("insertLedger", () => {
   const row: LedgerInsertRow = { id: "led-1", kind: "sale", payer: "Mom", amountCents: 500 };
@@ -572,6 +875,15 @@ describe("classifyWriteError", () => {
       expect.objectContaining({ reason: "retryable", needsReauth: false }),
     );
     expect(classifyWriteError({ code: "42703", message: "undefined column" })).toEqual(
+      expect.objectContaining({ reason: "retryable", needsReauth: false }),
+    );
+  });
+
+  it("maps a statement-timeout cancellation (57014 query_canceled) to retryable, NOT terminal", () => {
+    // Transient-by-load: the server killed the statement mid-flight; the
+    // identical replay normally succeeds. A terminal classification here would
+    // silently discard the pending snapshot on a timeout spike.
+    expect(classifyWriteError({ code: "57014", message: "canceling statement due to statement timeout" })).toEqual(
       expect.objectContaining({ reason: "retryable", needsReauth: false }),
     );
   });
@@ -882,6 +1194,159 @@ describe("createSyncEngine", () => {
     expect(attempt).toBeGreaterThanOrEqual(2);
     expect(revision).toBe(9); // rebased base(8) + 1
     expect(statuses).toContain("saved");
+    engine.stop();
+  });
+
+  it("CAS reject → the rebased write UNIONS the concurrent session's completions, keeps local intent", async () => {
+    const engine = makeEngine();
+    // Local tab: completed 1.3.1 (stable-only) and holds its own field text.
+    doc = docWith({
+      ideas: [{ fields: { oneLiner: "local" }, done: {}, doneByTask: { "1.3.1": true } }],
+    });
+    const sentDocs: SaveDoc[] = [];
+    let attempt = 0;
+    handlers.update = (patch) => {
+      attempt += 1;
+      sentDocs.push((patch as { doc: SaveDoc }).doc);
+      return attempt === 1
+        ? { data: [], error: null } // stale base: the concurrent session won the race
+        : { data: [{ profile_id: PROFILE }], error: null };
+    };
+    await engine.start();
+    // Server doc (the concurrent session's save): a legacy completion (1.1#0,
+    // with its timestamp), a stable completion (1.2.1), and its own field text.
+    const serverDoc = docWith({
+      ideas: [
+        {
+          fields: { oneLiner: "server" },
+          done: { "1.1#0": true },
+          doneAt: { "1.1#0": 777 },
+          doneByTask: { "1.2.1": true },
+        },
+      ],
+    });
+    handlers.select = () => ({ data: { doc: serverDoc, revision: 8 }, error: null });
+
+    engine.notifySnapshotChange();
+    await vi.advanceTimersByTimeAsync(3_000);
+    await vi.advanceTimersByTimeAsync(0);
+
+    const rebased = sentDocs[1];
+    // Server-only completions survive the rebase: the raw legacy key, its
+    // loadSave-migrated stable id (with timestamp), and the stable-only key.
+    expect(rebased.ideas[0].done["1.1#0"]).toBe(true);
+    expect(rebased.ideas[0].doneByTask?.["1.1.1"]).toBe(true);
+    expect(rebased.ideas[0].doneAtByTask?.["1.1.1"]).toBe(777);
+    expect(rebased.ideas[0].doneByTask?.["1.2.1"]).toBe(true);
+    // Local completions kept; latest-intent text stays LOCAL-authoritative.
+    expect(rebased.ideas[0].doneByTask?.["1.3.1"]).toBe(true);
+    expect(rebased.ideas[0].fields).toEqual({ oneLiner: "local" });
+    expect(revision).toBe(9); // rebased base(8) + 1
+    expect(statuses).toContain("saved");
+    engine.stop();
+  });
+
+  // ── FIX 1: the committed rebased doc feeds back to the caller ──────────────
+  it("invokes onRebasedDoc with the MERGED doc after the rebased save COMMITS (and adopts the revision)", async () => {
+    statuses = [];
+    revision = 5;
+    reauth = 0;
+    doc = docWith({
+      ideas: [{ id: "A", fields: { oneLiner: "local" }, done: {}, doneByTask: { "1.3.1": true } }],
+    });
+    const rebasedDocs: SaveDoc[] = [];
+    const engine = createSyncEngine({
+      userId: USER,
+      storage: fakeStorage(),
+      getSnapshot: () => ({ doc, revision }),
+      setRevision: (r) => {
+        revision = r;
+      },
+      onStatus: (s) => statuses.push(s),
+      onReauthNeeded: () => undefined,
+      onRebasedDoc: (d) => rebasedDocs.push(d),
+    });
+    let attempt = 0;
+    handlers.update = () => {
+      attempt += 1;
+      return attempt === 1
+        ? { data: [], error: null } // stale base: a concurrent session won
+        : { data: [{ profile_id: PROFILE }], error: null };
+    };
+    await engine.start();
+    const serverDoc = docWith({
+      ideas: [{ id: "A", fields: { oneLiner: "server" }, done: {}, doneByTask: { "1.2.1": true } }],
+    });
+    handlers.select = () => ({ data: { doc: serverDoc, revision: 8 }, error: null });
+
+    engine.notifySnapshotChange();
+    await vi.advanceTimersByTimeAsync(3_000);
+    await vi.advanceTimersByTimeAsync(0);
+
+    // Exactly one callback, carrying the union that was COMMITTED: both tabs'
+    // completions, local latest-intent text.
+    expect(rebasedDocs).toHaveLength(1);
+    expect(rebasedDocs[0].ideas[0].doneByTask).toEqual({ "1.2.1": true, "1.3.1": true });
+    expect(rebasedDocs[0].ideas[0].fields).toEqual({ oneLiner: "local" });
+    expect(revision).toBe(9);
+    expect(statuses).toContain("saved");
+    engine.stop();
+  });
+
+  it("does NOT invoke onRebasedDoc on a plain (non-rebased) successful save", async () => {
+    statuses = [];
+    revision = 5;
+    doc = docWith();
+    const rebasedDocs: SaveDoc[] = [];
+    const engine = createSyncEngine({
+      userId: USER,
+      storage: fakeStorage(),
+      getSnapshot: () => ({ doc, revision }),
+      setRevision: (r) => {
+        revision = r;
+      },
+      onStatus: (s) => statuses.push(s),
+      onReauthNeeded: () => undefined,
+      onRebasedDoc: (d) => rebasedDocs.push(d),
+    });
+    handlers.update = () => ({ data: [{ profile_id: PROFILE }], error: null });
+    await engine.start();
+    engine.notifySnapshotChange();
+    await vi.advanceTimersByTimeAsync(3_000);
+    expect(statuses).toContain("saved");
+    expect(rebasedDocs).toHaveLength(0);
+    engine.stop();
+  });
+
+  it("does NOT invoke onRebasedDoc when the rebased retry FAILS (nothing committed)", async () => {
+    statuses = [];
+    revision = 5;
+    doc = docWith();
+    const rebasedDocs: SaveDoc[] = [];
+    const engine = createSyncEngine({
+      userId: USER,
+      storage: fakeStorage(),
+      getSnapshot: () => ({ doc, revision }),
+      setRevision: (r) => {
+        revision = r;
+      },
+      onStatus: (s) => statuses.push(s),
+      onReauthNeeded: () => undefined,
+      onRebasedDoc: (d) => rebasedDocs.push(d),
+    });
+    let attempt = 0;
+    handlers.update = () => {
+      attempt += 1;
+      return attempt === 1
+        ? { data: [], error: null } // stale base
+        : { data: null, error: new Error("network dropped") }; // rebased retry fails
+    };
+    await engine.start();
+    handlers.select = () => ({ data: { doc: docWith(), revision: 8 }, error: null });
+    engine.notifySnapshotChange();
+    await vi.advanceTimersByTimeAsync(3_000);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(rebasedDocs).toHaveLength(0); // the merged doc never committed
     engine.stop();
   });
 

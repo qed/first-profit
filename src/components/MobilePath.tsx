@@ -12,15 +12,17 @@ import { useEffect, useRef } from "react";
 import { useGame } from "../state/GameContext";
 import { AvatarSprite } from "./Avatar";
 import { PhasesFloor } from "./PhasesFloor";
-import { SellFloor } from "./SellFloor";
+import { CriterionFloor } from "./CriterionFloor";
 import type { FloorProps } from "./FactoryFloor";
 
-export function MobilePath({ walkTo, onArrived, onWalk, floorView, onBack }: FloorProps) {
+export function MobilePath({ walkTo, onArrived, onWalk, floorView, onBack, onOpenSwitcher, overlayOpen }: FloorProps) {
   const { profile } = useGame();
   const timer = useRef<number | null>(null);
 
   // Resume/complete any in-flight walk from the parent's intent. On this variant
   // the avatar is a fixed top sprite (cosmetic); the durable part is the intent.
+  // walkTo → null is CANCELLATION (unit review FIX 1b): the dep change makes
+  // the cleanup below clear the pending arrival timer before the early return.
   useEffect(() => {
     if (!walkTo) return;
     if (timer.current) window.clearTimeout(timer.current);
@@ -36,9 +38,14 @@ export function MobilePath({ walkTo, onArrived, onWalk, floorView, onBack }: Flo
       <div className="flex justify-center pt-4">
         <AvatarSprite name={profile.firstName || profile.handle || "Founder"} />
       </div>
-      {/* pb-80 reserves space for the future bottom-docked coach / HUD. */}
+      {/* pb-80 keeps the bottom-docked Next Step coach clear of the last card
+          (repo convention from CLAUDE.md — preserve this padding). */}
       <div className="px-4 pb-80 pt-2">
-        {floorView === "phases" ? <PhasesFloor onWalk={onWalk} /> : <SellFloor onWalk={onWalk} onBack={onBack} />}
+        {floorView === "phases" ? (
+          <PhasesFloor onWalk={onWalk} onOpenSwitcher={onOpenSwitcher} overlayOpen={overlayOpen} />
+        ) : (
+          <CriterionFloor phase={floorView} onWalk={onWalk} onBack={onBack} onOpenSwitcher={onOpenSwitcher} overlayOpen={overlayOpen} />
+        )}
       </div>
     </div>
   );

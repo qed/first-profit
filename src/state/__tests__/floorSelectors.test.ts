@@ -1,18 +1,45 @@
 import { describe, expect, it } from "vitest";
-import { initialState, reducer, type Action, type GameState } from "../gameCore";
-import { stepById } from "../../data/path";
 import {
+  CRITERION_SEQUENCE,
+  criterionIdsForPhase,
+  initialState,
+  nextUpFor,
+  reducer,
+  type Action,
+  type GameState,
+} from "../gameCore";
+import { BUILT_CRITERIA, stepById, type PhaseId } from "../../data/path";
+import {
+  currentPhaseFor,
   ideaProgressLabel,
   ideaSummaryName,
   nextCoachTarget,
   nextTaskId,
-  playableTaskTotal,
+  phaseTaskTotal,
+  phaseTasksDone,
   roomEntryFor,
 } from "../floorSelectors";
 
 function apply(state: GameState, ...actions: Action[]): GameState {
   return actions.reduce(reducer, state);
 }
+
+/**
+ * An OPEN content-readiness allowlist (every criterion "built"), injected into
+ * nextCoachTarget/roomEntryFor where a test exercises the ENGINE's full-sequence
+ * behavior rather than today's shipped UI. Since Unit 8 shipped all 25 surfaces
+ * this equals the default; kept so the engine tests stay independent of the
+ * shipped list.
+ */
+const ALL_BUILT: ReadonlySet<string> = new Set(CRITERION_SEQUENCE);
+
+/**
+ * A RESTRICTED allowlist (the pre-Unit-8 shipped pair), injected where a test
+ * pins the readiness-GATE machinery itself: the gate must keep working so a
+ * future criterion whose content lands before its surface can be pulled back
+ * out of BUILT_CRITERIA.
+ */
+const ONLY_11_12: ReadonlySet<string> = new Set(["1.1", "1.2"]);
 
 /** Base state with N onboarding-seeded ideas (runner closed for clarity). */
 function withIdeas(n: number): GameState {
@@ -27,6 +54,14 @@ function completeStep(state: GameState, ideaIndex: number, stepId: string): Game
   if (!step) throw new Error(`no step ${stepId}`);
   return step.tasks.reduce(
     (s, _t, index) => reducer(s, { type: "COMPLETE_TASK", ideaIndex, stepId, index }),
+    state,
+  );
+}
+
+/** Complete every criterion of a phase, in order, for one idea. */
+function completePhase(state: GameState, ideaIndex: number, phase: PhaseId): GameState {
+  return criterionIdsForPhase(phase).reduce(
+    (s, stepId) => completeStep(s, ideaIndex, stepId),
     state,
   );
 }
@@ -60,12 +95,41 @@ describe("floorSelectors — progress + next task id", () => {
     expect(nextTaskId(s, 0)).toBe("1.1.2");
   });
 
-  it("reports 'ready for Build' once both playable criteria are done", () => {
+  it("keeps walking the Sell phase past 1.2 (Unit 6: no more two-criterion dead end)", () => {
     let s = withIdeas(1);
     s = completeStep(s, 0, "1.1");
     s = completeStep(s, 0, "1.2");
+    expect(nextTaskId(s, 0)).toBe("1.3.1");
+    expect(ideaProgressLabel(s, 0)).toBe(`10/${phaseTaskTotal("sell")} tasks · next 1.3.1`);
+  });
+
+  it("rolls onto phase 2 with phase-scoped counts once Sell is complete", () => {
+    const s = completePhase(withIdeas(1), 0, "sell");
+    expect(currentPhaseFor(s, 0)).toBe("build");
+    expect(nextTaskId(s, 0)).toBe("2.1.1");
+    expect(ideaProgressLabel(s, 0)).toBe(`0/${phaseTaskTotal("build")} tasks · next 2.1.1`);
+  });
+
+  it("reports 'ready for Grow' at the gated frontier (phases 1-3 done, no business)", () => {
+    let s = withIdeas(1);
+    s = completePhase(s, 0, "sell");
+    s = completePhase(s, 0, "build");
+    s = completePhase(s, 0, "validate");
     expect(nextTaskId(s, 0)).toBeNull();
-    expect(ideaProgressLabel(s, 0)).toBe(`${playableTaskTotal()}/${playableTaskTotal()} tasks · ready for Build`);
+    expect(currentPhaseFor(s, 0)).toBe("validate");
+    const total = phaseTaskTotal("validate");
+    expect(ideaProgressLabel(s, 0)).toBe(`${total}/${total} tasks · ready for Grow`);
+  });
+
+  it("phase task totals come from the content (variable counts, per-phase totals)", () => {
+    expect(phaseTaskTotal("sell")).toBe(25);
+    expect(phaseTaskTotal("build")).toBe(26);
+    expect(phaseTaskTotal("validate")).toBe(24);
+    expect(phaseTaskTotal("grow")).toBe(25);
+    expect(phaseTaskTotal("scale")).toBe(25);
+    const s = completeStep(withIdeas(1), 0, "1.1");
+    expect(phaseTasksDone(s, 0, "sell")).toBe(5);
+    expect(phaseTasksDone(s, 0, "build")).toBe(0);
   });
 });
 
@@ -122,15 +186,127 @@ describe("floorSelectors — Next Step coach target", () => {
     expect(nextCoachTarget(s)).toEqual({ kind: "criterion", stepId: "1.1", room: "idea" });
   });
 
-  it("falls back to another idea with work when the active idea is done", () => {
+  it("STOPS at an unbuilt frontier under a RESTRICTED allowlist (gate machinery pinned)", () => {
     let s = withIdeas(2);
-    s = completeStep(completeStep(s, 1, "1.1"), 1, "1.2"); // active idea 1 fully done
-    expect(nextCoachTarget(s)).toEqual({ kind: "criterion", stepId: "1.1", room: "idea" });
+    s = completeStep(completeStep(s, 1, "1.1"), 1, "1.2"); // active idea 1 through 1.2
+    // The ENGINE's frontier for the active idea is 1.3 (the curriculum walks on)...
+    expect(nextUpFor(s, 1)).toBe("1.3");
+    // ...and under the pre-Unit-8 restricted list the coach does NOT point
+    // there: it falls back to the other idea's BUILT work. The gate must keep
+    // working so a criterion can be pulled back out of BUILT_CRITERIA.
+    expect(nextCoachTarget(s, ONLY_11_12)).toEqual({ kind: "criterion", stepId: "1.1", room: "idea" });
+    // The shipped default (all 25 built since Unit 8) walks straight on.
+    expect(nextCoachTarget(s)).toEqual({ kind: "criterion", stepId: "1.3", room: "market" });
   });
 
-  it("hides (null) once every idea has finished the playable criteria", () => {
+  it("hides entirely at an unbuilt frontier with no other built work (restricted allowlist)", () => {
+    const s = completeStep(completeStep(withIdeas(1), 0, "1.1"), 0, "1.2");
+    expect(nextUpFor(s, 0)).toBe("1.3"); // engine walks
+    expect(nextCoachTarget(s, ONLY_11_12)).toBeNull(); // coach stops at the built frontier
+    expect(nextCoachTarget(s)).toEqual({ kind: "criterion", stepId: "1.3", room: "market" });
+  });
+
+  it("crosses the phase boundary UNDER THE DEFAULT ALLOWLIST: Sell complete -> 2.1 in the Build Room", () => {
+    const s = completePhase(withIdeas(1), 0, "sell");
+    expect(nextUpFor(s, 0)).toBe("2.1");
+    // Unit 8: 2.1 is a shipped surface, so the DEFAULT coach targets it; the
+    // restricted list still hides it (gate proof).
+    expect(nextCoachTarget(s)).toEqual({ kind: "criterion", stepId: "2.1", room: "build" });
+    expect(nextCoachTarget(s, ONLY_11_12)).toBeNull();
+    expect(nextCoachTarget(s, ALL_BUILT)).toEqual({ kind: "criterion", stepId: "2.1", room: "build" });
+  });
+
+  it("the default allowlist is BUILT_CRITERIA (ALL 25 criteria since Unit 8)", () => {
+    expect([...BUILT_CRITERIA].sort()).toEqual([...CRITERION_SEQUENCE].sort());
+    expect(BUILT_CRITERIA.size).toBe(25);
+  });
+
+  it("targets the PROMOTION seam once the active idea completes phase 3 (business gate)", () => {
     let s = withIdeas(1);
-    s = completeStep(completeStep(s, 0, "1.1"), 0, "1.2");
-    expect(nextCoachTarget(s)).toBeNull();
+    s = completePhase(s, 0, "sell");
+    s = completePhase(s, 0, "build");
+    s = completePhase(s, 0, "validate");
+    // Unit 8 consumes this target (the promotion screen); the coach hides on it
+    // for now rather than pointing at the locked Grow phase.
+    expect(nextCoachTarget(s)).toEqual({ kind: "promote", ideaIndex: 0 });
+  });
+
+  it("the promotion seam WINS over another idea's remaining work for the active idea", () => {
+    let s = withIdeas(2);
+    // Active idea (1) validated end-to-end; idea 0 untouched.
+    s = completePhase(s, 1, "sell");
+    s = completePhase(s, 1, "build");
+    s = completePhase(s, 1, "validate");
+    expect(s.activeIdea).toBe(1);
+    expect(nextCoachTarget(s)).toEqual({ kind: "promote", ideaIndex: 1 });
+  });
+
+  it("the promote target CARRIES the eligible idea's stable id (Unit 7)", () => {
+    let s = apply(initialState(), { type: "CREATE_IDEA", ideaId: "idea-a" }, { type: "CLOSE_RUNNER" });
+    s = completePhase(s, 0, "sell");
+    s = completePhase(s, 0, "build");
+    s = completePhase(s, 0, "validate");
+    expect(nextCoachTarget(s)).toEqual({ kind: "promote", ideaIndex: 0, ideaId: "idea-a" });
+  });
+});
+
+describe("floorSelectors — locked-phase entry is a no-op (Unit 6)", () => {
+  // These pin the ENGINE's phase gating, so they inject the OPEN allowlist —
+  // otherwise the readiness gate would mask what is being tested.
+  it("roomEntryFor no-ops on a phase-4 criterion while the business gate is closed", () => {
+    let s = withIdeas(1);
+    s = completePhase(s, 0, "sell");
+    s = completePhase(s, 0, "build");
+    s = completePhase(s, 0, "validate");
+    expect(roomEntryFor(s, "4.1", ALL_BUILT)).toEqual({ action: "noop" });
+    expect(roomEntryFor(s, "5.1", ALL_BUILT)).toEqual({ action: "noop" });
+  });
+
+  it("roomEntryFor no-ops on a phase-2 criterion before phase 1 is complete", () => {
+    expect(roomEntryFor(withIdeas(1), "2.1", ALL_BUILT)).toEqual({ action: "noop" });
+  });
+
+  it("roomEntryFor enters a phase-2 criterion once phase 1 is complete (open allowlist)", () => {
+    const s = completePhase(withIdeas(1), 0, "sell");
+    expect(roomEntryFor(s, "2.1", ALL_BUILT)).toEqual({ action: "enter", ideaIndex: 0, index: 0 });
+  });
+});
+
+describe("floorSelectors — content-readiness gate on room entry (BUILT_CRITERIA)", () => {
+  it("an ELIGIBLE criterion no-ops under a RESTRICTED allowlist (gate machinery pinned)", () => {
+    let s = withIdeas(1);
+    s = completeStep(s, 0, "1.1");
+    s = completeStep(s, 0, "1.2");
+    // The engine says 1.3 is workable; a restricted list still gates the entry
+    // (the gate must survive Unit 8 so a surface can be un-shipped again).
+    expect(nextUpFor(s, 0)).toBe("1.3");
+    expect(roomEntryFor(s, "1.3", ONLY_11_12)).toEqual({ action: "noop" });
+    // The shipped default (all 25 built) enters — proof the gate (not the
+    // engine) produced the noop above.
+    expect(roomEntryFor(s, "1.3")).toEqual({ action: "enter", ideaIndex: 0, index: 0 });
+  });
+
+  it("a SCRIPTED walk drives every room entry 1.1 -> 3.5 through roomEntryFor under an open allowlist", () => {
+    // FIX-4 coverage: the exact selector the floor uses to open the runner is
+    // exercised across the deep sequence (samples span 1.3-3.5 with variable
+    // task counts: 2.3 has six tasks, 3.4 has four), not just the built pair.
+    let s = withIdeas(1);
+    let guard = 0;
+    const entered: string[] = [];
+    for (;;) {
+      const stepId = nextUpFor(s, 0);
+      if (!stepId) break;
+      if (++guard > 25) throw new Error("walk did not terminate");
+      const entry = roomEntryFor(s, stepId, ALL_BUILT);
+      expect(entry).toEqual({ action: "enter", ideaIndex: 0, index: 0 });
+      entered.push(stepId);
+      s = completeStep(s, 0, stepId);
+      s = apply(s, { type: "DISMISS_CELEBRATION" });
+    }
+    // The walk covered all of phases 1-3 and stopped at the business gate.
+    expect(entered).toEqual(CRITERION_SEQUENCE.slice(0, 15));
+    for (const sample of ["1.3", "1.5", "2.3", "3.4", "3.5"]) {
+      expect(entered).toContain(sample);
+    }
   });
 });

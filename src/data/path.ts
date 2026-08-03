@@ -1,3 +1,28 @@
+/**
+ * Path data — the ASSEMBLY POINT for the app's step/task API (Unit 4).
+ *
+ * Task content (titles, bodies, done-when lines, grade-band variants) is
+ * GENERATED from the canonical curriculum brief into
+ * `pathContent.generated.ts` (rebuild: `npx tsx scripts/build-path-content.ts`).
+ * Behavior hooks (artifact auto-complete, the real-sale target, authored input
+ * fields) are hand-kept in `pathHooks.ts` keyed by stable task id. This module
+ * combines the two — plus the hand-kept per-criterion app chrome below — into
+ * the SAME exported API the app has always consumed (`STEPS`, `stepById`,
+ * `parseTask`, `PHASES`), and adds band-aware accessors for later units.
+ *
+ * Every hook and chrome reference is asserted against the generated content at
+ * module load: a broken task/criterion id fails the build and the test suite,
+ * never the child.
+ */
+import { PATH_CONTENT } from "./pathContent.generated";
+import type { Band, ContentPhase, PathContent, UnitTask } from "./parseCurriculum";
+import { assertMatchesManifest, resolveVariant } from "./parseCurriculum";
+import {
+  ARTIFACT_HOOKS,
+  FIELD_HOOKS,
+  SALE_AUTO_COMPLETE_TASK_ID,
+} from "./pathHooks";
+
 export type PhaseId = 'sell' | 'build' | 'validate' | 'grow' | 'scale';
 
 export type RoomId =
@@ -17,14 +42,51 @@ export interface Phase {
   index: number;
   name: string;
   promise: string;
+  /** Brand hex (onboarding/marketing surfaces). */
   color: string;
+  /** Brand hex wash (onboarding/marketing surfaces). */
   tint: string;
+  /**
+   * In-app UI chrome (Unit 8) — the SINGLE source for phase-colored floors,
+   * runner chrome, HUD chip, and celebration accents. These are the fpv2
+   * design-token hsl values (tailwind.config's sell/build/validate/grow/scale),
+   * which the shipped Sell UI already used, so Sell renders EXACTLY as before
+   * the generalization. The old duplicated PHASE_UI map in PodCardContent is
+   * retired in favor of these fields.
+   */
+  accent: string;
+  /** Darker accent for text/labels on light backgrounds. */
+  text: string;
+  /** 30%-alpha accent for locked/dashed treatments. */
+  faded: string;
+  /** 9%-alpha accent for header/chip background washes. */
+  wash: string;
+  /**
+   * WCAG-safe CTA fill (unit review FIX 4): a solid the phase's primary action
+   * button can paint UNDER WHITE TEXT at >= 4.5:1 contrast. The raw `accent`
+   * values fail that bar for several phases (scale's amber is 1.97:1), so each
+   * phase carries a deepened fill chosen by computed relative-luminance ratio;
+   * a test (src/data/__tests__/phaseContrast.test.ts) recomputes every ratio
+   * and fails the suite if a future tweak drops one below 4.5.
+   */
+  ctaFill: string;
+  /** The pressed/3D shadow under a ctaFill button (fill deepened further). */
+  ctaShadow: string;
 }
 
 export interface Step {
   id: string;
   phase: PhaseId;
   room: RoomId;
+  /** Floor-card emoji sign for this criterion's room (STEP_META chrome). */
+  sign: string;
+  /**
+   * The display name of the room this criterion is played in ("The Sales
+   * Room"). Every criterion has one (Unit 8): rooms without a built dialog are
+   * still NAMED cards on the floor and in the celebration's next-step block —
+   * they are simply inert (the Step Runner is the playing surface).
+   */
+  roomName: string;
   title: string;
   brief: string;
   doneWhen: string;
@@ -47,7 +109,13 @@ export const PHASES: Phase[] = [
   name: 'Sell',
   promise: 'Learn to confidently sell anything.',
   color: '#E0562A',
-  tint: '#FBEAE1'
+  tint: '#FBEAE1',
+  accent: 'hsl(14 78% 54%)',
+  text: 'hsl(14 78% 44%)',
+  faded: 'hsl(14 78% 54% / .3)',
+  wash: 'hsl(14 78% 54% / .09)',
+  ctaFill: 'hsl(14 78% 44%)',
+  ctaShadow: 'hsl(14 78% 30%)'
 },
 {
   id: 'build',
@@ -55,7 +123,13 @@ export const PHASES: Phase[] = [
   name: 'Build',
   promise: 'Ship a real thing people can buy.',
   color: '#2F5D8C',
-  tint: '#E3EBF3'
+  tint: '#E3EBF3',
+  accent: 'hsl(217 74% 56%)',
+  text: 'hsl(217 74% 46%)',
+  faded: 'hsl(217 74% 56% / .3)',
+  wash: 'hsl(217 74% 56% / .09)',
+  ctaFill: 'hsl(217 74% 44%)',
+  ctaShadow: 'hsl(217 74% 30%)'
 },
 {
   id: 'validate',
@@ -63,7 +137,13 @@ export const PHASES: Phase[] = [
   name: 'Validate',
   promise: 'Prove it works before you scale it.',
   color: '#6B4E8C',
-  tint: '#EBE5F2'
+  tint: '#EBE5F2',
+  accent: 'hsl(265 52% 58%)',
+  text: 'hsl(265 52% 48%)',
+  faded: 'hsl(265 52% 58% / .3)',
+  wash: 'hsl(265 52% 58% / .09)',
+  ctaFill: 'hsl(265 52% 58%)',
+  ctaShadow: 'hsl(265 52% 44%)'
 },
 {
   id: 'grow',
@@ -71,7 +151,13 @@ export const PHASES: Phase[] = [
   name: 'Grow',
   promise: 'Get to your first $1,000 in sales.',
   color: '#2E7D53',
-  tint: '#E2F0E8'
+  tint: '#E2F0E8',
+  accent: 'hsl(150 52% 42%)',
+  text: 'hsl(150 52% 34%)',
+  faded: 'hsl(150 52% 42% / .3)',
+  wash: 'hsl(150 52% 42% / .09)',
+  ctaFill: 'hsl(150 52% 32%)',
+  ctaShadow: 'hsl(150 52% 18%)'
 },
 {
   id: 'scale',
@@ -79,477 +165,489 @@ export const PHASES: Phase[] = [
   name: 'Scale',
   promise: 'Build the plan to $10,000 in profit.',
   color: '#C98A16',
-  tint: '#F7EDD8'
+  tint: '#F7EDD8',
+  accent: 'hsl(41 88% 52%)',
+  text: 'hsl(41 88% 38%)',
+  faded: 'hsl(41 88% 52% / .3)',
+  wash: 'hsl(41 88% 52% / .09)',
+  ctaFill: 'hsl(41 88% 32%)',
+  ctaShadow: 'hsl(41 88% 18%)'
 }];
 
 
 export const phaseById = (id: PhaseId): Phase =>
 PHASES.find((p) => p.id === id) as Phase;
 
-export const STEPS: Step[] = [
-// ── PHASE 01 · SELL ───────────────────────────────────────────────
-{
-  id: '1.1',
-  phase: 'sell',
-  room: 'idea',
-  title: 'Pitch a product in 60 seconds, no notes',
-  brief:
-  'Pick the thing you want to sell and get a 60-second pitch out of your mouth in front of an adult who is not family.',
-  doneWhen:
-  'A non-family adult can say back what your product is and what you asked them to do.',
-  coach:
-  'Start here. Write one sentence. What it is, who it is for, why they want it. Everything else in First Profit hangs off that sentence.',
-  xp: 60,
-  fields: [
-  {
-    key: 'productName',
-    label: 'Product name',
-    placeholder: 'Recess bracelets'
+// ── Per-criterion app chrome (hand-kept) ─────────────────────────────────
+// The brief carries task content only; the room a criterion lives in and the
+// game-voice framing (title/brief/done-when/coach/xp) are app design, authored
+// here. Keyed by criterion id; the assembly asserts this table covers exactly
+// the criteria the generated content carries.
+
+export interface StepMeta {
+  room: RoomId;
+  sign: string;
+  roomName: string;
+  title: string;
+  brief: string;
+  doneWhen: string;
+  coach: string;
+  xp: number;
+}
+
+export const STEP_META: Record<string, StepMeta> = {
+  // ── PHASE 01 · SELL ─────────────────────────────────────────────
+  '1.1': {
+    room: 'idea',
+    sign: '💡',
+    roomName: 'The Idea Room',
+    title: 'Pitch a product in 60 seconds, no notes',
+    brief:
+    'Pick the thing you want to sell and get a 60-second pitch out of your mouth in front of an adult who is not family.',
+    doneWhen:
+    'A non-family adult can say back what your product is and what you asked them to do.',
+    coach:
+    'Start here. Write one sentence. What it is, who it is for, why they want it. Everything else in First Profit hangs off that sentence.',
+    xp: 60
   },
-  {
-    key: 'oneLiner',
-    label: 'Your one-liner',
-    placeholder: 'Custom friendship bracelets for kids who want to trade at recess.'
-  }],
-
-  tasks: [
-  'Pick the product and write the one-liner',
-  'Write the 60-second pitch: hook, what it is, why it is good, the ask',
-  'Rehearse to camera until three clean runs in a row',
-  'Cold-pitch a parent and revise one thing',
-  'Deliver it to a non-family adult with no notes']
-
-},
-{
-  id: '1.2',
-  phase: 'sell',
-  room: 'market',
-  title: 'Make a real sale',
-  brief:
-  'A real customer who is not family. Real money changing hands. This is the moment you become a founder.',
-  doneWhen: 'Money from a non-family customer is in hand and the sale is logged.',
-  coach:
-  'Head to the Market Stall. Build a list of ten people you can safely ask, rehearse the money handover, then ask until one person says yes.',
-  xp: 120,
-  tasks: [
-  'Choose the offer and set the price',
-  'Build the first prospect list of ten',
-  'Set up the point of sale and dress-rehearse it',
-  'Ask until one yes',
-  'Deliver, thank, and log the sale']
-
-},
-{
-  id: '1.3',
-  phase: 'sell',
-  room: 'market',
-  title: 'Hear "no" three times',
-  brief:
-  'Collect three real nos and write down what each one taught you. Nos are data, not damage.',
-  doneWhen: 'Three nos are logged with a lesson written under each.',
-  coach:
-  'Open the No Ledger at the Market Stall. Log every no with the reason you heard. You are hunting for the pattern.',
-  xp: 70,
-  tasks: [
-  'Log no #1 and what it taught you',
-  'Log no #2 and what it taught you',
-  'Log no #3 and what it taught you',
-  'Name the pattern across all three']
-
-},
-{
-  id: '1.4',
-  phase: 'sell',
-  room: 'product',
-  title: 'Explain cost, price and profit on one page',
-  brief:
-  'What one unit costs you to make, what you charge, and what is left over. In your own words, on one page.',
-  doneWhen: 'The one-pager is in the Founder File and you can explain it out loud.',
-  coach:
-  'Use the Unit Economics bench in the Product Room. Set your cost and your price — the machine shows you the profit per unit.',
-  xp: 80,
-  tasks: [
-  'List every cost that goes into one unit',
-  'Write your price and why you chose it',
-  'Do the profit math: price minus cost',
-  'Explain the page out loud to your coach']
-
-},
-{
-  id: '1.5',
-  phase: 'sell',
-  room: 'market',
-  title: '25 supervised outreach attempts',
-  brief:
-  'A booth, door to door, calls, messages — 25 real attempts with a parent present.',
-  doneWhen: 'The outreach tally reads 25 with channel and outcome for each.',
-  coach:
-  'Grind the tally. Every knock counts whether they buy or not. Twenty-five is the credential.',
-  xp: 100,
-  tasks: [
-  'Pick your channels and get them parent-approved',
-  'Run attempts 1–10',
-  'Run attempts 11–25',
-  'Write what converted best and why']
-
-},
-
-// ── PHASE 02 · BUILD ──────────────────────────────────────────────
-{
-  id: '2.1',
-  phase: 'build',
-  room: 'build',
-  title: 'Ship the smallest thing that works',
-  brief:
-  'A working product, site or offer built with AI tools — with a live URL, a price and instructions.',
-  doneWhen: 'A stranger could find it, understand it and buy it without you in the room.',
-  coach:
-  'In the Build Room, strip your idea down to the smallest version that still solves the problem. Ship that. Then publish it in the Website Studio.',
-  xp: 140,
-  tasks: [
-  'Cut the idea down to one job it does',
-  'Build v1 with your AI tools',
-  'Write the instructions a buyer needs',
-  '@website Publish it at a live URL']
-
-},
-{
-  id: '2.2',
-  phase: 'build',
-  room: 'idea',
-  title: 'Connect the product to a real gap',
-  brief:
-  'A one-page brief on the gap you spotted in a world you actually know — your sport, your school, your street.',
-  doneWhen: 'The brief names the gap, who feels it, and how your product closes it.',
-  coach:
-  'Back to the Idea Room. Name the gap in a domain you know better than most adults do.',
-  xp: 80,
-  field: {
-    key: 'gapBrief',
-    label: 'The gap, in your words',
-    placeholder:
-    'Kids on my team lose their mouthguards every season and the store version takes two weeks...',
-    long: true
+  '1.2': {
+    room: 'market',
+    sign: '🛒',
+    roomName: 'The Sales Room',
+    title: 'Make a real sale',
+    brief:
+    'A real customer who is not family. Real money changing hands. This is the moment you become a founder.',
+    doneWhen: 'Money from a non-family customer is in hand and the sale is logged.',
+    coach:
+    'Head to the Market Stall. Build a list of ten people you can safely ask, rehearse the money handover, then ask until one person says yes.',
+    xp: 120
   },
-  tasks: [
-  'Name the domain you know well',
-  'Describe the gap and who feels it',
-  'Show how your product closes it']
+  '1.3': {
+    room: 'market',
+    sign: '🎓',
+    roomName: 'The Learning Room',
+    title: 'Hear "no" three times',
+    brief:
+    'Collect three real nos and write down what each one taught you. Nos are data, not damage.',
+    doneWhen: 'Three nos are logged with a lesson written under each.',
+    coach:
+    'Open the No Ledger at the Market Stall. Log every no with the reason you heard. You are hunting for the pattern.',
+    xp: 70
+  },
+  '1.4': {
+    room: 'product',
+    sign: '🏷️',
+    roomName: 'The Pricing Room',
+    title: 'Explain cost, price and profit on one page',
+    brief:
+    'What one unit costs you to make, what you charge, and what is left over. In your own words, on one page.',
+    doneWhen: 'The one-pager is in the Founder File and you can explain it out loud.',
+    coach:
+    'Use the Unit Economics bench in the Product Room. Set your cost and your price. The machine shows you the profit per unit.',
+    xp: 80
+  },
+  '1.5': {
+    room: 'market',
+    sign: '📣',
+    roomName: 'The Outreach Room',
+    title: '25 supervised outreach attempts',
+    brief:
+    'A booth, door to door, calls, messages: 25 real attempts with a parent present.',
+    doneWhen: 'The outreach tally reads 25 with channel and outcome for each.',
+    coach:
+    'Grind the tally. Every knock counts whether they buy or not. Twenty-five is the credential.',
+    xp: 100
+  },
 
-},
-{
-  id: '2.3',
-  phase: 'build',
-  room: 'market',
-  title: 'Contact 40 potential customers',
-  brief:
-  'Forty real contacts, plus one piece of marketing you launch and measure.',
-  doneWhen: 'The contact tally reads 40 and your marketing piece has numbers attached.',
-  coach:
-  'Volume time. Work the tally to 40, then launch one poster, post or flyer and write down what it actually did.',
-  xp: 120,
-  tasks: [
-  'Reach 40 contacts on the tally',
-  'Launch one piece of marketing',
-  'Record the metric it produced']
+  // ── PHASE 02 · BUILD ────────────────────────────────────────────
+  '2.1': {
+    room: 'build',
+    sign: '🔧',
+    roomName: 'The Build Room',
+    title: 'Ship the smallest thing that works',
+    brief:
+    'A working product, site or offer built with AI tools, with a live URL, a price and instructions.',
+    doneWhen: 'A stranger could find it, understand it and buy it without you in the room.',
+    coach:
+    'In the Build Room, strip your idea down to the smallest version that still solves the problem. Ship that. Then publish it in the Website Studio.',
+    xp: 140
+  },
+  '2.2': {
+    room: 'idea',
+    sign: '💡',
+    roomName: 'The Idea Room',
+    title: 'Connect the product to a real gap',
+    brief:
+    'A one-page brief on the gap you spotted in a world you actually know: your sport, your school, your street.',
+    doneWhen: 'The brief names the gap, who feels it, and how your product closes it.',
+    coach:
+    'Back to the Idea Room. Name the gap in a domain you know better than most adults do.',
+    xp: 80
+  },
+  '2.3': {
+    room: 'market',
+    sign: '📣',
+    roomName: 'The Outreach Room',
+    title: 'Contact 40 potential customers',
+    brief:
+    'Forty real contacts, plus one piece of marketing you launch and measure.',
+    doneWhen: 'The contact tally reads 40 and your marketing piece has numbers attached.',
+    coach:
+    'Volume time. Work the tally to 40, then launch one poster, post or flyer and write down what it actually did.',
+    xp: 120
+  },
+  '2.4': {
+    room: 'build',
+    sign: '🔧',
+    roomName: 'The Build Room',
+    title: 'Ship a v2 from real feedback',
+    brief:
+    'Three real users tell you what is wrong. You change it and ship again.',
+    doneWhen: 'v2 is live and each of the three changes traces back to a user.',
+    coach:
+    'Feedback in, version out. In the Build Room, log three pieces of feedback and ship the change each one demands.',
+    xp: 110
+  },
+  '2.5': {
+    room: 'workshop',
+    sign: '🎤',
+    roomName: 'The Demo Stage',
+    title: 'Give a 3–5 minute live demo',
+    brief:
+    'The build, the results, the lessons. Live, to an audience with at least one non-family adult.',
+    doneWhen: 'The demo happened, was recorded, and the recording is in the Founder File.',
+    coach:
+    'Book the Demo Stage in the Workshop Room. Three minutes, three beats: what I built, what happened, what I learned.',
+    xp: 120
+  },
 
-},
-{
-  id: '2.4',
-  phase: 'build',
-  room: 'build',
-  title: 'Ship a v2 from real feedback',
-  brief:
-  'Three real users tell you what is wrong. You change it and ship again.',
-  doneWhen: 'v2 is live and each of the three changes traces back to a user.',
-  coach:
-  'Feedback in, version out. In the Build Room, log three pieces of feedback and ship the change each one demands.',
-  xp: 110,
-  tasks: [
-  'Collect feedback from three real users',
-  'Choose the three changes worth making',
-  'Ship v2 and tell the users what changed']
+  // ── PHASE 03 · VALIDATE ─────────────────────────────────────────
+  '3.1': {
+    room: 'product',
+    sign: '🔁',
+    roomName: 'The Loop Bench',
+    title: 'Run two validation loops',
+    brief: 'Hypothesis, test, outcome. Twice. Write the outcome even when you were wrong.',
+    doneWhen: 'Two complete loops are logged with an honest outcome on each.',
+    coach:
+    'Use the Loop Bench. Guess out loud, run the smallest test that could prove you wrong, then write what actually happened.',
+    xp: 110
+  },
+  '3.2': {
+    room: 'checkout',
+    sign: '💳',
+    roomName: 'The Checkout Booth',
+    title: 'Run a pricing experiment',
+    brief:
+    'Two price points, the margin math for each, and feedback from two different groups.',
+    doneWhen: 'You can say which price wins and show the math behind it.',
+    coach:
+    'The Checkout Booth lets you swap the price on your live checkout. Try both. Watch what people actually do.',
+    xp: 100
+  },
+  '3.3': {
+    room: 'workshop',
+    sign: '🤖',
+    roomName: 'The AI Workshop',
+    title: 'Audit your AI tools',
+    brief:
+    'Three tools you adopted since Day 1: why you picked them, what they produced, whether they stay.',
+    doneWhen: 'Three tools are audited with a keep-or-cut decision on each.',
+    coach:
+    'Sit the AI Audit workshop. Tools are staff. If one is not earning its keep, fire it.',
+    xp: 80
+  },
+  '3.4': {
+    room: 'product',
+    sign: '📦',
+    roomName: 'The Product Room',
+    title: 'Choose a validation path solo',
+    brief:
+    'No adult help. You pick the path, you run it, you present the reasoning and the outcome.',
+    doneWhen: 'You presented the decision and the result at a Family Demo Session.',
+    coach:
+    'This one is yours alone. Pick the test, defend the choice, live with the answer.',
+    xp: 120
+  },
+  '3.5': {
+    room: 'website',
+    sign: '🌐',
+    roomName: 'The Website Studio',
+    title: 'Publish two pieces of content',
+    brief: 'Two posts, videos or pages that pull in engagement from outside your household.',
+    doneWhen: 'Both are published and you can show real external engagement.',
+    coach:
+    'Publish from the Website Studio. Content is the cheapest way to get strangers to look at you.',
+    xp: 90
+  },
 
-},
-{
-  id: '2.5',
-  phase: 'build',
-  room: 'workshop',
-  title: 'Give a 3–5 minute live demo',
-  brief:
-  'The build, the results, the lessons — live, to an audience with at least one non-family adult.',
-  doneWhen: 'The demo happened, was recorded, and the recording is in the Founder File.',
-  coach:
-  'Book the Demo Stage in the Workshop Room. Three minutes, three beats: what I built, what happened, what I learned.',
-  xp: 120,
-  tasks: [
-  'Write the three-beat demo script',
-  'Rehearse it to time',
-  'Deliver it live and record it']
+  // ── PHASE 04 · GROW ─────────────────────────────────────────────
+  '4.1': {
+    room: 'checkout',
+    sign: '💳',
+    roomName: 'The Checkout Booth',
+    title: '10 sales or 3 repeat customers',
+    brief: 'Proof this is a business and not a one-off favour.',
+    doneWhen: 'The sales ledger shows ten sales, or three customers who bought twice.',
+    coach:
+    'Run real checkouts. Every completed payment lands in your ledger and pushes the $1,000 bar.',
+    xp: 160
+  },
+  // PP2 forward reference (Unit 7): when the P&L is built here, the "money out"
+  // lines are the chosen provider's MONTHLY SUBSCRIPTION (providers.ts
+  // subscriptionCents) plus the PER-SALE FEES already snapshotted on each fp_ledger
+  // sale row (feeCents). The Checkout Booth only shows a light directional
+  // "subscription so far" estimate today; the real accounting belongs in this task.
+  '4.2': {
+    room: 'command',
+    sign: '🧮',
+    roomName: 'The Command Deck',
+    title: 'Track a P&L for four weeks',
+    brief: 'Money in, money out, what is left. Four consecutive weeks of a live business.',
+    doneWhen: 'Four weeks of numbers are in the ledger with a total on the bottom.',
+    coach:
+    'The Command Deck keeps your P&L. Enter each week honestly. The ugly weeks teach the most.',
+    xp: 130
+  },
+  '4.3': {
+    room: 'command',
+    sign: '⚙️',
+    roomName: 'The Command Deck',
+    title: 'Build one repeating AI process',
+    brief: 'A daily or weekly job an AI tool does for the business, every time, without you rewriting it.',
+    doneWhen: 'The process has run at least twice on schedule.',
+    coach:
+    'Write the prompt once, run it on a schedule. This is where your time starts coming back.',
+    xp: 110
+  },
+  '4.4': {
+    room: 'market',
+    sign: '🤝',
+    roomName: 'The Market Stall',
+    title: 'Close a real negotiation',
+    brief: 'A real back-and-forth with documented terms both sides agreed to.',
+    doneWhen: 'The agreed terms are written down and both sides have a copy.',
+    coach:
+    'Ask for something: a better price, a bulk order, a stall at a market. Then write the deal down.',
+    xp: 120
+  },
+  '4.5': {
+    room: 'command',
+    sign: '📊',
+    roomName: 'The Command Deck',
+    title: 'Present your financials to the board',
+    brief:
+    'Parents plus a non-family adult sit as your board. You present the numbers like a founder.',
+    doneWhen: 'The board meeting happened and the board asked at least two questions.',
+    coach:
+    'Pull your P&L into a board pack. Lead with the number, then the story behind it.',
+    xp: 150
+  },
 
-},
+  // ── PHASE 05 · SCALE ────────────────────────────────────────────
+  '5.1': {
+    room: 'command',
+    sign: '⚙️',
+    roomName: 'The Command Deck',
+    title: 'Automate one real part of the business',
+    brief: 'An agent or automation doing a real job, and you can show it running.',
+    doneWhen: 'The automation runs live in front of a witness.',
+    coach:
+    'Wire the automation into your Command Deck and let it work while you watch.',
+    xp: 140
+  },
+  '5.2': {
+    room: 'product',
+    sign: '📦',
+    roomName: 'The Delivery Bay',
+    title: 'Delegate a task with written instructions',
+    brief: 'Someone else does a real job for your business using only what you wrote down.',
+    doneWhen: 'The task got done correctly by someone else, from your instructions alone.',
+    coach:
+    'Write the instructions in the Delivery Bay, hand them over, and do not rescue them.',
+    xp: 120
+  },
+  '5.3': {
+    room: 'product',
+    sign: '🏝️',
+    roomName: 'The Delivery Bay',
+    title: 'Take a week off, stay open',
+    brief: 'Customers still get served through a week you did not work.',
+    doneWhen: 'A week passed with no founder hours and at least one customer served.',
+    coach:
+    'Your systems go on trial. Turn on auto-delivery, hand off the rest, and step away.',
+    xp: 150
+  },
+  '5.4': {
+    room: 'workshop',
+    sign: '📖',
+    roomName: 'The Workshop Room',
+    title: 'Write the one-page playbook',
+    brief: 'One page that lets someone else run your business.',
+    doneWhen: 'A stranger could run a week of the business from the page alone.',
+    coach:
+    'Everything you know, on one page: the offer, the process, the numbers, the rules.',
+    xp: 130
+  },
+  '5.5': {
+    room: 'workshop',
+    sign: '🎤',
+    roomName: 'The Capstone Stage',
+    title: 'Pitch next year, on stage',
+    brief:
+    'The Capstone Showcase: five people, two of them non-family adults, and a real stage moment.',
+    doneWhen: 'You pitched what the business becomes next year, live, to that audience.',
+    coach:
+    'Last step. Show where the business goes next and what it takes to get to $10,000 in profit.',
+    xp: 200
+  }
+};
 
-// ── PHASE 03 · VALIDATE ───────────────────────────────────────────
-{
-  id: '3.1',
-  phase: 'validate',
-  room: 'product',
-  title: 'Run two validation loops',
-  brief: 'Hypothesis, test, outcome. Twice. Write the outcome even when you were wrong.',
-  doneWhen: 'Two complete loops are logged with an honest outcome on each.',
-  coach:
-  'Use the Loop Bench. Guess out loud, run the smallest test that could prove you wrong, then write what actually happened.',
-  xp: 110,
-  tasks: [
-  'Loop 1: write the hypothesis',
-  'Loop 1: run the test and log the outcome',
-  'Loop 2: write the hypothesis',
-  'Loop 2: run the test and log the outcome']
+// ── Assembly ─────────────────────────────────────────────────────────────
 
-},
-{
-  id: '3.2',
-  phase: 'validate',
-  room: 'checkout',
-  title: 'Run a pricing experiment',
-  brief:
-  'Two price points, the margin math for each, and feedback from two different groups.',
-  doneWhen: 'You can say which price wins and show the math behind it.',
-  coach:
-  'The Checkout Booth lets you swap the price on your live checkout. Try both. Watch what people actually do.',
-  xp: 100,
-  tasks: [
-  '@checkout Put a working checkout live',
-  'Test price A and record the response',
-  'Test price B and record the response',
-  'Pick the winner and show the margin math']
+/** Hooks shape consumed by the assembly (mirrors pathHooks.ts's exports). */
+export interface PathHooks {
+  artifacts: Readonly<Record<string, ArtifactKey>>;
+  saleAutoCompleteTaskId: string;
+  fields: Readonly<Record<string, StepField[]>>;
+}
 
-},
-{
-  id: '3.3',
-  phase: 'validate',
-  room: 'workshop',
-  title: 'Audit your AI tools',
-  brief:
-  'Three tools you adopted since Day 1: why you picked them, what they produced, whether they stay.',
-  doneWhen: 'Three tools are audited with a keep-or-cut decision on each.',
-  coach:
-  'Sit the AI Audit workshop. Tools are staff — if one is not earning its keep, fire it.',
-  xp: 80,
-  tasks: [
-  'List every tool you have used',
-  'Write the rationale and outcome for three',
-  'Make a keep-or-cut call on each']
+const PHASE_ID_BY_KEY: Record<ContentPhase['key'], PhaseId> = {
+  SELL: 'sell',
+  BUILD: 'build',
+  VALIDATE: 'validate',
+  GROW: 'grow',
+  SCALE: 'scale'
+};
 
-},
-{
-  id: '3.4',
-  phase: 'validate',
-  room: 'product',
-  title: 'Choose a validation path solo',
-  brief:
-  'No adult help. You pick the path, you run it, you present the reasoning and the outcome.',
-  doneWhen: 'You presented the decision and the result at a Family Demo Session.',
-  coach:
-  'This one is yours alone. Pick the test, defend the choice, live with the answer.',
-  xp: 120,
-  tasks: [
-  'Choose the path with no adult input',
-  'Run it start to finish',
-  'Present the reasoning and the outcome']
+/** A task's checklist label: the brief's title, sans its trailing period. */
+const taskLabel = (task: UnitTask): string => task.title.replace(/\.$/, '');
 
-},
-{
-  id: '3.5',
-  phase: 'validate',
-  room: 'website',
-  title: 'Publish two pieces of content',
-  brief: 'Two posts, videos or pages that pull in engagement from outside your household.',
-  doneWhen: 'Both are published and you can show real external engagement.',
-  coach:
-  'Publish from the Website Studio. Content is the cheapest way to get strangers to look at you.',
-  xp: 90,
-  tasks: [
-  '@website Publish piece one',
-  'Publish piece two',
-  'Log the external engagement each one pulled']
+/**
+ * Combine generated content × hooks × chrome into the app's Step list.
+ * Exported for the test suite; the app consumes the assembled `STEPS` below.
+ *
+ * Throws (failing the build and every test run) when:
+ *  - a hook references a task or criterion id the content does not carry,
+ *  - the sale auto-complete target is not the LAST task of its criterion
+ *    (gameCore addresses it positionally as `tasks.length - 1`),
+ *  - the chrome table and the content's criteria don't match 1:1.
+ */
+export function assembleSteps(
+  content: PathContent,
+  hooks: PathHooks,
+  meta: Record<string, StepMeta> = STEP_META,
+): Step[] {
+  const criteria = content.phases.flatMap((phase) =>
+    phase.criteria.map((criterion) => ({ phase, criterion })),
+  );
+  const taskIds = new Set(
+    criteria.flatMap(({ criterion }) => criterion.tasks.map((t) => t.id)),
+  );
+  const criterionIds = new Set(criteria.map(({ criterion }) => criterion.id));
 
-},
+  for (const taskId of Object.keys(hooks.artifacts)) {
+    if (!taskIds.has(taskId)) {
+      throw new Error(
+        `pathHooks: artifact hook references nonexistent task id "${taskId}".`,
+      );
+    }
+  }
+  for (const criterionId of Object.keys(hooks.fields)) {
+    if (!criterionIds.has(criterionId)) {
+      throw new Error(
+        `pathHooks: field hook references nonexistent criterion id "${criterionId}".`,
+      );
+    }
+  }
 
-// ── PHASE 04 · GROW ───────────────────────────────────────────────
-{
-  id: '4.1',
-  phase: 'grow',
-  room: 'checkout',
-  title: '10 sales or 3 repeat customers',
-  brief: 'Proof this is a business and not a one-off favour.',
-  doneWhen: 'The sales ledger shows ten sales, or three customers who bought twice.',
-  coach:
-  'Run real checkouts. Every completed payment lands in your ledger and pushes the $1,000 bar.',
-  xp: 160,
-  tasks: [
-  '@checkout Take payments through your checkout',
-  'Reach ten sales or three repeat customers',
-  'Thank every customer by name']
+  const saleId = hooks.saleAutoCompleteTaskId;
+  if (!taskIds.has(saleId)) {
+    throw new Error(
+      `pathHooks: sale auto-complete references nonexistent task id "${saleId}".`,
+    );
+  }
+  const saleCriterionId = saleId.split('.').slice(0, 2).join('.');
+  const saleCriterion = criteria.find(({ criterion }) => criterion.id === saleCriterionId);
+  const saleLast = saleCriterion?.criterion.tasks[saleCriterion.criterion.tasks.length - 1];
+  if (!saleLast || saleLast.id !== saleId) {
+    throw new Error(
+      `pathHooks: sale auto-complete target "${saleId}" must be the LAST task of ` +
+        `criterion ${saleCriterionId} (gameCore addresses it as tasks.length - 1), ` +
+        `but the last task is "${saleLast?.id}".`,
+    );
+  }
 
-},
-// PP2 forward reference (Unit 7): when the P&L is built here, the "money out"
-// lines are the chosen provider's MONTHLY SUBSCRIPTION (providers.ts
-// subscriptionCents) plus the PER-SALE FEES already snapshotted on each fp_ledger
-// sale row (feeCents). The Checkout Booth only shows a light directional
-// "subscription so far" estimate today; the real accounting belongs in this task.
-{
-  id: '4.2',
-  phase: 'grow',
-  room: 'command',
-  title: 'Track a P&L for four weeks',
-  brief: 'Money in, money out, what is left. Four consecutive weeks of a live business.',
-  doneWhen: 'Four weeks of numbers are in the ledger with a total on the bottom.',
-  coach:
-  'The Command Deck keeps your P&L. Enter each week honestly — the ugly weeks teach the most.',
-  xp: 130,
-  tasks: [
-  '@ledger Open the P&L ledger',
-  'Log four consecutive weeks',
-  'Write one sentence on what the numbers say']
+  for (const metaId of Object.keys(meta)) {
+    if (!criterionIds.has(metaId)) {
+      throw new Error(`path.ts STEP_META has chrome for unknown criterion "${metaId}".`);
+    }
+  }
 
-},
-{
-  id: '4.3',
-  phase: 'grow',
-  room: 'command',
-  title: 'Build one repeating AI process',
-  brief: 'A daily or weekly job an AI tool does for the business, every time, without you rewriting it.',
-  doneWhen: 'The process has run at least twice on schedule.',
-  coach:
-  'Write the prompt once, run it on a schedule. This is where your time starts coming back.',
-  xp: 110,
-  tasks: [
-  'Pick the repeating job',
-  'Write the reusable prompt or recipe',
-  'Run it twice on schedule']
+  return criteria.map(({ phase, criterion }) => {
+    const m = meta[criterion.id];
+    if (!m) {
+      throw new Error(`path.ts STEP_META is missing chrome for criterion "${criterion.id}".`);
+    }
+    const fields = hooks.fields[criterion.id];
+    return {
+      id: criterion.id,
+      phase: PHASE_ID_BY_KEY[phase.key],
+      room: m.room,
+      sign: m.sign,
+      roomName: m.roomName,
+      title: m.title,
+      brief: m.brief,
+      doneWhen: m.doneWhen,
+      coach: m.coach,
+      xp: m.xp,
+      tasks: criterion.tasks.map((task) => {
+        const auto = hooks.artifacts[task.id];
+        return auto ? `@${auto} ${taskLabel(task)}` : taskLabel(task);
+      }),
+      // One authored input keeps the legacy `field` shape; several use `fields`
+      // (exactly reproducing the hand-written Step objects the app consumed).
+      ...(fields && fields.length === 1 ? { field: fields[0] } : {}),
+      ...(fields && fields.length > 1 ? { fields } : {}),
+    };
+  });
+}
 
-},
-{
-  id: '4.4',
-  phase: 'grow',
-  room: 'market',
-  title: 'Close a real negotiation',
-  brief: 'A real back-and-forth with documented terms both sides agreed to.',
-  doneWhen: 'The agreed terms are written down and both sides have a copy.',
-  coach:
-  'Ask for something: a better price, a bulk order, a stall at a market. Then write the deal down.',
-  xp: 120,
-  tasks: [
-  'Prepare your ask and your walk-away',
-  'Run the negotiation',
-  'Document the terms both sides agreed']
+// Belt-and-braces: the generated module is validated against the manifest at
+// import time, so a corrupted or hand-edited pathContent.generated.ts fails
+// the dev server and the app the moment it loads — not when a child reaches
+// the affected screen. (The build preflight runs the same check pre-deploy.)
+assertMatchesManifest(PATH_CONTENT);
 
-},
-{
-  id: '4.5',
-  phase: 'grow',
-  room: 'command',
-  title: 'Present your financials to the board',
-  brief:
-  'Parents plus a non-family adult sit as your board. You present the numbers like a founder.',
-  doneWhen: 'The board meeting happened and the board asked at least two questions.',
-  coach:
-  'Pull your P&L into a board pack. Lead with the number, then the story behind it.',
-  xp: 150,
-  tasks: [
-  'Assemble the board pack from your ledger',
-  'Present revenue, costs and profit',
-  'Answer at least two board questions']
-
-},
-
-// ── PHASE 05 · SCALE ──────────────────────────────────────────────
-{
-  id: '5.1',
-  phase: 'scale',
-  room: 'command',
-  title: 'Automate one real part of the business',
-  brief: 'An agent or automation doing a real job — and you can show it running.',
-  doneWhen: 'The automation runs live in front of a witness.',
-  coach:
-  'Wire the automation into your Command Deck and let it work while you watch.',
-  xp: 140,
-  tasks: [
-  'Choose the part of the business to automate',
-  'Build the automation',
-  'Show it running live']
-
-},
-{
-  id: '5.2',
-  phase: 'scale',
-  room: 'product',
-  title: 'Delegate a task with written instructions',
-  brief: 'Someone else does a real job for your business using only what you wrote down.',
-  doneWhen: 'The task got done correctly by someone else, from your instructions alone.',
-  coach:
-  'Write the instructions in the Delivery Bay, hand them over, and do not rescue them.',
-  xp: 120,
-  tasks: [
-  '@delivery Set up the delivery system so it can be handed over',
-  'Write instructions someone else can follow',
-  'Hand it off and check the result']
-
-},
-{
-  id: '5.3',
-  phase: 'scale',
-  room: 'product',
-  title: 'Take a week off — stay open',
-  brief: 'Customers still get served through a week you did not work.',
-  doneWhen: 'A week passed with no founder hours and at least one customer served.',
-  coach:
-  'Your systems go on trial. Turn on auto-delivery, hand off the rest, and step away.',
-  xp: 150,
-  tasks: [
-  'Set the systems and the cover before you leave',
-  'Take the full week off',
-  'Show a customer served while you were away']
-
-},
-{
-  id: '5.4',
-  phase: 'scale',
-  room: 'workshop',
-  title: 'Write the one-page playbook',
-  brief: 'One page that lets someone else run your business.',
-  doneWhen: 'A stranger could run a week of the business from the page alone.',
-  coach:
-  'Everything you know, on one page: the offer, the process, the numbers, the rules.',
-  xp: 130,
-  tasks: [
-  'Write the offer and the process',
-  'Add the numbers and the rules',
-  'Have someone read it back to you']
-
-},
-{
-  id: '5.5',
-  phase: 'scale',
-  room: 'workshop',
-  title: 'Pitch next year, on stage',
-  brief:
-  'The Capstone Showcase: five people, two of them non-family adults, and a real stage moment.',
-  doneWhen: 'You pitched what the business becomes next year, live, to that audience.',
-  coach:
-  'Last step. Show where the business goes next and what it takes to get to $10,000 in profit.',
-  xp: 200,
-  tasks: [
-  'Write the next-year plan and the path to $10,000 profit',
-  'Rehearse the stage pitch',
-  'Deliver it to the Capstone audience']
-
-}];
-
+export const STEPS: Step[] = assembleSteps(PATH_CONTENT, {
+  artifacts: ARTIFACT_HOOKS,
+  saleAutoCompleteTaskId: SALE_AUTO_COMPLETE_TASK_ID,
+  fields: FIELD_HOOKS,
+});
 
 export const stepById = (id: string): Step | undefined =>
 STEPS.find((s) => s.id === id);
+
+// ── Content readiness (BUILT UI surfaces) ────────────────────────────────
+
+/**
+ * The content-readiness allowlist: the ONE source of truth for which criteria
+ * have a SHIPPED UI surface. Unit 8 shipped the generalized criterion floor,
+ * phase-aware runner chrome, the promotion screen, and the Grow/Scale surface
+ * in one pass, so ALL 25 criteria are built — phases 4-5 remain gated by the
+ * BUSINESS MODEL (gameCore's isPhaseUnlocked), not by this list. The coach,
+ * room entry, and floor cards all consume THIS list so no surface can outrun
+ * another; if a future criterion ships content before its surface, shrink the
+ * list again rather than gating in components.
+ *
+ * Deliberate split: the ENGINE (gameCore's isStepUnlocked / nextUpFor / the
+ * unlock and progress machinery) is allowlist-FREE — it models the full
+ * 25-criterion CURRICULUM. This set models the shipped UI only. Presentation
+ * selectors (floorSelectors) and floor components gate on it; the engine never
+ * does, so save data and progress semantics stay independent of what the UI
+ * has built.
+ */
+export const BUILT_CRITERIA: ReadonlySet<string> = new Set(STEPS.map((s) => s.id));
 
 export const parseTask = (
 raw: string)
@@ -558,3 +656,47 @@ raw: string)
   if (match) return { label: match[2], auto: match[1] as ArtifactKey };
   return { label: raw };
 };
+
+// ── Band-aware content accessors (for later units) ───────────────────────
+
+export type { Band, UnitTask } from "./parseCurriculum";
+export { PATH_CONTENT } from "./pathContent.generated";
+
+const TASKS_BY_ID: ReadonlyMap<string, UnitTask> = new Map(
+  PATH_CONTENT.phases.flatMap((p) =>
+    p.criteria.flatMap((c) => c.tasks.map((t) => [t.id, t] as const)),
+  ),
+);
+
+/** The generated unit task for a stable task id ("1.2.5"), if it exists. */
+export const taskById = (taskId: string): UnitTask | undefined =>
+  TASKS_BY_ID.get(taskId);
+
+/** The checklist title for a task. Titles do not vary by band today; the band
+ *  parameter keeps the call sites honest if that ever changes. */
+export function taskTitleForBand(taskId: string, _band: Band): string | undefined {
+  const task = TASKS_BY_ID.get(taskId);
+  return task ? taskLabel(task) : undefined;
+}
+
+/**
+ * The full instruction body for a task at a band: the shared body, plus the
+ * band's variant line when one is authored (variants are PARTIAL overlays —
+ * a band without one reads the body alone).
+ */
+export function taskBodyForBand(taskId: string, band: Band): string | undefined {
+  const task = TASKS_BY_ID.get(taskId);
+  if (!task) return undefined;
+  const variant = resolveVariant(task, band);
+  return variant ? `${task.body}\n${variant}` : task.body;
+}
+
+/** The binary Done-when line for a task (identical across bands). */
+export function doneWhenForBand(taskId: string, _band: Band): string | undefined {
+  return TASKS_BY_ID.get(taskId)?.doneWhen;
+}
+
+/** The `All bands:` note for a task, when the brief carries one. */
+export function allBandsNoteFor(taskId: string): string | undefined {
+  return TASKS_BY_ID.get(taskId)?.allBandsNote;
+}

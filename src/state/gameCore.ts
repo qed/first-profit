@@ -8,21 +8,68 @@
  * This is intentionally NOT yet wired into GameContext.tsx / App.tsx — that
  * rewiring is Unit 5's job. The existing app keeps compiling; this module only
  * adds new code.
+ *
+ * VOCABULARY: "step" (historical, from the v1 path) === "criterion" (the
+ * curriculum brief's term) throughout this module — `stepId` IS a criterion id.
+ * The rename is deferred to the Unit 9 cleanup; do not mix a partial rename in.
  */
-import { parseTask, stepById, type RoomId } from "../data/path";
+import { STEPS, stepById, type PhaseId, type RoomId } from "../data/path";
+import { SALE_AUTO_COMPLETE_TASK_ID } from "../data/pathHooks";
 import { PROVIDER_IDS, computeFee, providerById, type ProviderId } from "../data/providers";
+import {
+  LEGACY_KEY_REMAP,
+  TASK_REMAP,
+  resolveTaskId,
+  taskIdAt,
+  type RemapTarget,
+} from "../data/taskRemap";
 
 /** Schema version stored inside every serialized save doc. Bump on shape change. */
 export const DOC_VERSION = 1;
 
-/** The criteria that are actually playable in Slice A. */
-export const PLAYABLE_STEPS = ["1.1", "1.2"] as const;
+/**
+ * The full ordered criterion sequence (25 ids, "1.1".."5.5"), derived from the
+ * generated content via path.ts's assembly (Unit 6). This RETIRES the old
+ * PLAYABLE_STEPS constant: unlock/progress/next-up logic now walks this
+ * sequence, phase-aware, per idea. Task counts per criterion are VARIABLE
+ * (2.3 has six, 3.4 has four) — always read `step.tasks.length`, never ×5.
+ */
+export const CRITERION_SEQUENCE: readonly string[] = STEPS.map((s) => s.id);
+
+/** Phases in play order (indices match PHASES' 1-based `index` - 1). */
+export const PHASE_ORDER: readonly PhaseId[] = ["sell", "build", "validate", "grow", "scale"];
+
+const CRITERIA_BY_PHASE: ReadonlyMap<PhaseId, readonly string[]> = new Map(
+  PHASE_ORDER.map((phase) => [phase, STEPS.filter((s) => s.phase === phase).map((s) => s.id)]),
+);
+
+const PHASE_BY_CRITERION: ReadonlyMap<string, PhaseId> = new Map(
+  STEPS.map((s) => [s.id, s.phase]),
+);
+
+/** The ordered criterion ids of one phase (e.g. 'sell' → ["1.1".."1.5"]). */
+export function criterionIdsForPhase(phase: PhaseId): readonly string[] {
+  return CRITERIA_BY_PHASE.get(phase) ?? [];
+}
+
+/** The phase a criterion belongs to, or undefined for an unknown id. */
+export function phaseOfCriterion(stepId: string): PhaseId | undefined {
+  return PHASE_BY_CRITERION.get(stepId);
+}
 
 /** Maximum parallel product ideas per the handoff multi-idea model. */
 export const MAX_IDEAS = 5;
 
 /** taskKey shape mirrors the existing GameContext convention: `${stepId}#${index}`. */
 export const taskKey = (stepId: string, index: number): string => `${stepId}#${index}`;
+
+/**
+ * The criterion the real-sale auto-complete lives in, derived from the hooks
+ * registry's stable task id ("1.2.5" → "1.2"). path.ts's assembly asserts the
+ * target id exists AND is the last task of this criterion, so ADD_LEDGER can
+ * keep addressing it positionally as `tasks.length - 1`.
+ */
+const SALE_STEP_ID = SALE_AUTO_COMPLETE_TASK_ID.split(".").slice(0, 2).join(".");
 
 /**
  * Top-level stage machine. `signup` is the parent-facing Start Building flow
@@ -68,6 +115,18 @@ export interface ChosenProvider {
 }
 
 export interface Idea {
+  /**
+   * Stable idea identity (Unit 7). ADDITIVE OPTIONAL (the doneAt precedent — no
+   * DOC_VERSION bump): NEW ideas are minted a caller-stamped crypto UUID via
+   * CREATE_IDEA's `ideaId` field (this module stays Math.random()-free), while
+   * LEGACY ideas get a DETERMINISTIC id minted on load inside fromSaveDoc
+   * (`legacy-idea-{index}`). Determinism there is load-bearing: the rebase-union
+   * path (sync.ts unionCompletionMaps) matches businesses to ideas BY ID across
+   * tabs/devices, so two tabs independently loading the same legacy doc must
+   * mint the SAME id — random minting would fork the identity and orphan a
+   * business promoted in the other tab.
+   */
+  id?: string;
   /** Task text answers, keyed by field key (e.g. `oneLiner`). */
   fields: Record<string, string>;
   /** Task completion, keyed by `${stepId}#${index}`. */
@@ -80,6 +139,58 @@ export interface Idea {
    * no DOC_VERSION bump. Makes silent stalls queryable for the cohort (R13).
    */
   doneAt?: Record<string, number>;
+  /**
+   * Task completion keyed by STABLE task id ("1.1.3") — the forward shape
+   * (Unit 5). ADDITIVE OPTIONAL (no DOC_VERSION bump): fromSaveDoc UNIONS the
+   * legacy `done` keys into this map through taskRemap's explicit table on
+   * every load (merge-on-load: completions are monotonic, so the union only
+   * ever adds — this is what makes a stale old tab, which strips these fields
+   * on save, unable to lose any legacy-representable completion). The legacy
+   * maps are retained untouched beside it during the transition.
+   */
+  doneByTask?: Record<string, boolean>;
+  /** Completion timestamps keyed by stable task id, migrated/dual-written
+   *  alongside `doneByTask` exactly as `doneAt` is beside `done`. */
+  doneAtByTask?: Record<string, number>;
+}
+
+/**
+ * A promoted business (Unit 7). One idea is PROMOTED into a business to open
+ * phases 4-5; a business can be archived (and later unarchived) rather than
+ * deleted. `ideaId` ties it back to the idea it grew from. Written by the
+ * PROMOTE_IDEA / ARCHIVE_BUSINESS / UNARCHIVE_BUSINESS reducer actions.
+ *
+ * Phase 4-5 progress BELONGS TO THE BUSINESS (origin R7): `doneByTask` /
+ * `doneAtByTask` mirror the Idea stable-id maps but live on the business
+ * record, so archiving preserves Grow/Scale progress with the record and a
+ * LATER promotion of a different idea starts a fresh record with no
+ * inheritance. Grow/Scale tasks never had legacy `${stepId}#${index}` keys
+ * (no pre-Unit-7 build could complete them), so only the stable-id maps exist
+ * here — there is deliberately no legacy `done` map.
+ */
+export interface Business {
+  id: string;
+  ideaId?: string;
+  archived?: boolean;
+  /**
+   * Caller-stamped epoch ms of the LAST archive/unarchive ACTION on this record
+   * (stamped by ARCHIVE_BUSINESS / UNARCHIVE_BUSINESS; absent until one runs).
+   * The cross-tab union resolves a conflicting `archived` flag by the LARGER
+   * archiveStateAt — last-action-wins, deterministic in both merge directions —
+   * with local winning only on a tie or when neither side carries a stamp.
+   * Skewed-clock caveat: the stamps come from device clocks, so a badly skewed
+   * clock can win a conflict it "shouldn't" — accepted, because the archive UI
+   * is operated by one owner family and the flag is trivially re-toggled.
+   * NOT written by normalization (normalizeBusinesses), which is derived state,
+   * not an action.
+   */
+  archiveStateAt?: number;
+  /** Caller-stamped epoch ms of the promotion (module stays Date.now()-free). */
+  promotedAt?: number;
+  /** Grow/Scale task completion, keyed by STABLE task id ("4.1.2"). */
+  doneByTask?: Record<string, boolean>;
+  /** Completion timestamps (caller-stamped epoch ms), keyed by stable task id. */
+  doneAtByTask?: Record<string, number>;
 }
 
 export interface Profile {
@@ -119,6 +230,13 @@ export interface GameState {
   room: RoomId | null;
   /** The chosen payment provider (durable, in the save doc), or null. */
   chosenProvider: ChosenProvider | null;
+  /**
+   * Promoted businesses (Unit 7). ADDITIVE OPTIONAL per the house discipline
+   * (the chosenProvider/doneAt precedent): absent on every pre-Unit-7
+   * state/doc and STAYS absent until PROMOTE_IDEA writes it — no DOC_VERSION
+   * bump. activeBusinessExists reads it defensively.
+   */
+  businesses?: Business[];
   /** True once onboarding screens 2..5 are complete (persisted in the save doc). */
   onboardingComplete: boolean;
   docVersion: number;
@@ -158,6 +276,21 @@ export interface SaveDoc {
    * DOC_VERSION stays 1 (a bump would discard in-flight outbox entries).
    */
   chosenProvider?: ChosenProvider | null;
+  /**
+   * Promoted businesses (Unit 7). ADDITIVE OPTIONAL: absent on existing
+   * docs and stays absent through the round-trip until one exists (the doneAt
+   * absent-stays-absent discipline); coerced defensively on load.
+   */
+  businesses?: Business[];
+}
+
+/** Deep-copy one business record (its completion maps must never be aliased). */
+function copyBusiness(b: Business): Business {
+  return {
+    ...b,
+    ...(b.doneByTask ? { doneByTask: { ...b.doneByTask } } : {}),
+    ...(b.doneAtByTask ? { doneAtByTask: { ...b.doneAtByTask } } : {}),
+  };
 }
 
 /**
@@ -168,15 +301,27 @@ export function toSaveDoc(state: GameState): SaveDoc {
   return {
     docVersion: DOC_VERSION,
     ideas: state.ideas.map((idea) => ({
+      // Emit the id only when it exists (absent-stays-absent; legacy in-memory
+      // ideas without one get a deterministic id on the NEXT load).
+      ...(idea.id ? { id: idea.id } : {}),
       fields: { ...idea.fields },
       done: { ...idea.done },
       // Emit doneAt only when it exists so an untimestamped doc stays byte-stable.
       ...(idea.doneAt ? { doneAt: { ...idea.doneAt } } : {}),
+      // Emit BOTH shapes during the transition (dual-write): the new stable-id
+      // maps ride beside the legacy index maps, absent-stays-absent. Retirement
+      // condition for the dual-write: see markTaskDone's doc comment.
+      ...(idea.doneByTask ? { doneByTask: { ...idea.doneByTask } } : {}),
+      ...(idea.doneAtByTask ? { doneAtByTask: { ...idea.doneAtByTask } } : {}),
     })),
     activeIdea: state.activeIdea,
     siteHeadline: state.profile.siteHeadline,
     onboardingComplete: state.onboardingComplete,
     chosenProvider: state.chosenProvider,
+    // Absent-stays-absent (Unit 7): a state that never promoted a business
+    // emits a byte-identical doc to before the field existed. Per-business
+    // completion maps are deep-copied so the doc never aliases live state.
+    ...(state.businesses ? { businesses: state.businesses.map(copyBusiness) } : {}),
   };
 }
 
@@ -206,6 +351,15 @@ function coerceIdea(value: unknown): Idea {
       if (typeof leaf === "boolean") done[key] = leaf;
     }
   }
+  // Additive-optional id (Unit 7): kept only when a well-typed string (a
+  // missing/malformed one is minted deterministically in fromSaveDoc below).
+  // The id leads the literal so a minted and a persisted id serialize with the
+  // SAME key order (byte-stability across repeated loads).
+  const idea: Idea = {
+    ...(typeof value.id === "string" && value.id ? { id: value.id } : {}),
+    fields,
+    done,
+  };
   // Additive-optional doneAt: absent on old docs -> stays absent (never invented).
   // Only finite, non-negative numeric leaves survive (NaN would JSON.stringify to
   // null and poison the next load, mirroring the chosenAt discipline).
@@ -214,9 +368,99 @@ function coerceIdea(value: unknown): Idea {
     for (const [key, leaf] of Object.entries(value.doneAt)) {
       if (typeof leaf === "number" && Number.isFinite(leaf) && leaf >= 0) doneAt[key] = leaf;
     }
-    return { fields, done, doneAt };
+    idea.doneAt = doneAt;
   }
-  return { fields, done };
+  // The stable-id maps (Unit 5), same leaf discipline: malformed leaves are
+  // dropped by coercion — a bad key/value never fails the load.
+  if (isRecord(value.doneByTask)) {
+    const doneByTask: Record<string, boolean> = {};
+    for (const [key, leaf] of Object.entries(value.doneByTask)) {
+      if (typeof leaf === "boolean") doneByTask[key] = leaf;
+    }
+    idea.doneByTask = doneByTask;
+  }
+  if (isRecord(value.doneAtByTask)) {
+    const doneAtByTask: Record<string, number> = {};
+    for (const [key, leaf] of Object.entries(value.doneAtByTask)) {
+      if (typeof leaf === "number" && Number.isFinite(leaf) && leaf >= 0) doneAtByTask[key] = leaf;
+    }
+    idea.doneAtByTask = doneAtByTask;
+  }
+  return idea;
+}
+
+/**
+ * MERGE-on-load migration (Unit 5): union an idea's legacy `${stepId}#${index}`
+ * completions into the stable-id maps, and carry stable-id keys through the
+ * (future-edit) remap table. Pure doc transform — it only MARKS state; it never
+ * dispatches actions, so loading can never fire a celebration or the sale
+ * auto-complete (the remap table is behavior; see taskRemap.ts).
+ *
+ * Properties the tests pin:
+ * - UNION: completions are monotonic, so migration only ever ADDS to the new
+ *   maps (an old tab that stripped them on save is fully recovered next load);
+ *   on a timestamp conflict the already-present new-shape value wins.
+ * - Idempotent / re-runnable: a second pass over its own output is byte-stable.
+ * - Legacy fields are retained untouched (old tabs keep working).
+ * - Unmappable legacy keys (anything outside the explicit ten-entry table) are
+ *   preserved raw in the legacy map — never invented into the new shape, never
+ *   dropped.
+ * - A remap entry old→new moves a stable-id completion exactly once; a retired
+ *   entry (null) leaves it preserved in place.
+ */
+function migrateIdeaProgress(
+  idea: Idea,
+  remap: Readonly<Record<string, RemapTarget>>,
+): Idea {
+  const doneByTask: Record<string, boolean> = { ...(idea.doneByTask ?? {}) };
+  const doneAtByTask: Record<string, number> = { ...(idea.doneAtByTask ?? {}) };
+
+  // 1) Move existing stable-id keys through the remap table (exactly once:
+  //    after the move the old key is gone, so a re-run is a no-op).
+  for (const key of Object.keys(doneByTask)) {
+    const target = resolveTaskId(key, remap);
+    if (target === key) continue;
+    const value = doneByTask[key];
+    delete doneByTask[key];
+    if (value) doneByTask[target] = true; // union: never un-complete the target
+    else if (!(target in doneByTask)) doneByTask[target] = value;
+  }
+  for (const key of Object.keys(doneAtByTask)) {
+    const target = resolveTaskId(key, remap);
+    if (target === key) continue;
+    const at = doneAtByTask[key];
+    delete doneAtByTask[key];
+    if (!(target in doneAtByTask)) doneAtByTask[target] = at;
+  }
+
+  // 2) Union legacy index keys through the explicit legacy table (and onward
+  //    through the remap chain, so a later-remapped target is landed directly).
+  for (const [key, value] of Object.entries(idea.done)) {
+    if (value !== true) continue;
+    const mapped = LEGACY_KEY_REMAP[key];
+    if (!mapped) continue; // unmappable: preserved raw in the legacy map
+    const target = resolveTaskId(mapped, remap);
+    if (!doneByTask[target]) doneByTask[target] = true;
+  }
+  for (const [key, at] of Object.entries(idea.doneAt ?? {})) {
+    // Mirror the done loop's completion guard: an ORPHANED legacy timestamp
+    // (doneAt entry without done:true — e.g. a hand-edited or partially
+    // corrupted doc) must never mint a doneAtByTask entry for a task that was
+    // never completed.
+    if (idea.done?.[key] !== true) continue;
+    const mapped = LEGACY_KEY_REMAP[key];
+    if (!mapped) continue;
+    const target = resolveTaskId(mapped, remap);
+    if (!(target in doneAtByTask)) doneAtByTask[target] = at; // new shape wins
+  }
+
+  return {
+    ...idea, // legacy fields retained untouched
+    // Absent-stays-absent: a doc that never had (or never needed) the new maps
+    // keeps its exact shape, so fresh docs load clean and byte-stable.
+    ...(idea.doneByTask || Object.keys(doneByTask).length ? { doneByTask } : {}),
+    ...(idea.doneAtByTask || Object.keys(doneAtByTask).length ? { doneAtByTask } : {}),
+  };
 }
 
 // Coerce a persisted chosenProvider leaf. ADDITIVE OPTIONAL: an existing v1 doc
@@ -242,20 +486,96 @@ function coerceChosenProvider(value: unknown): ChosenProvider | null {
   return null;
 }
 
+// Coerce the persisted businesses list (Unit 7). ADDITIVE OPTIONAL:
+// absent (or not an array) stays ABSENT — never invented as []. Each entry
+// needs a string id to survive; the optional leaves are kept only when
+// well-typed (the coerceIdea leaf-filtering discipline), so a malformed entry
+// can neither fail the load nor half-poison the model.
+function coerceBusinesses(value: unknown): Business[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const businesses: Business[] = [];
+  for (const entry of value) {
+    if (!isRecord(entry) || typeof entry.id !== "string") continue;
+    const business: Business = { id: entry.id };
+    if (typeof entry.ideaId === "string") business.ideaId = entry.ideaId;
+    if (typeof entry.archived === "boolean") business.archived = entry.archived;
+    // Timestamp leaves follow the chosenAt discipline: finite, non-negative
+    // only (NaN would JSON.stringify to null and poison the next load).
+    if (
+      typeof entry.promotedAt === "number" &&
+      Number.isFinite(entry.promotedAt) &&
+      entry.promotedAt >= 0
+    ) {
+      business.promotedAt = entry.promotedAt;
+    }
+    if (
+      typeof entry.archiveStateAt === "number" &&
+      Number.isFinite(entry.archiveStateAt) &&
+      entry.archiveStateAt >= 0
+    ) {
+      business.archiveStateAt = entry.archiveStateAt;
+    }
+    if (isRecord(entry.doneByTask)) {
+      const doneByTask: Record<string, boolean> = {};
+      for (const [key, leaf] of Object.entries(entry.doneByTask)) {
+        if (typeof leaf === "boolean") doneByTask[key] = leaf;
+      }
+      business.doneByTask = doneByTask;
+    }
+    if (isRecord(entry.doneAtByTask)) {
+      const doneAtByTask: Record<string, number> = {};
+      for (const [key, leaf] of Object.entries(entry.doneAtByTask)) {
+        if (typeof leaf === "number" && Number.isFinite(leaf) && leaf >= 0) {
+          doneAtByTask[key] = leaf;
+        }
+      }
+      business.doneAtByTask = doneAtByTask;
+    }
+    businesses.push(business);
+  }
+  return businesses;
+}
+
 /**
  * Parse a loaded save doc into a validated `SaveDoc`, or signal that the caller
  * should DISCARD it. An unknown/absent docVersion is signaled for discard so a
  * newer reducer is never fed a stale (or future) shape.
+ *
+ * Runs the Unit 5 MERGE-on-load migration on every idea (see
+ * `migrateIdeaProgress`). `remap` is injectable for tests of future remap
+ * entries; production always uses the committed TASK_REMAP table.
  */
-export function fromSaveDoc(raw: unknown): FromSaveResult {
+export function fromSaveDoc(
+  raw: unknown,
+  remap: Readonly<Record<string, RemapTarget>> = TASK_REMAP,
+): FromSaveResult {
   if (!isRecord(raw)) return { ok: false, reason: "malformed" };
   if (raw.docVersion !== DOC_VERSION) return { ok: false, reason: "unknown-version" };
-  const ideas = Array.isArray(raw.ideas) ? raw.ideas.map(coerceIdea) : [];
+  const ideas = Array.isArray(raw.ideas)
+    ? raw.ideas
+        .map(coerceIdea)
+        .map((idea) => migrateIdeaProgress(idea, remap))
+        // Legacy-id minting (Unit 7): an idea saved before ids existed gets a
+        // DETERMINISTIC id derived from its position. Determinism is required
+        // (never crypto-random here): two tabs/devices independently loading
+        // the same legacy doc must mint IDENTICAL ids, or the rebase-union
+        // path would fork the idea's identity and orphan any business promoted
+        // from it in the other tab. Idea order is append-only (ideas are never
+        // reordered or deleted), so the index is stable. NEW ideas get
+        // caller-minted crypto UUIDs via CREATE_IDEA's `ideaId` instead.
+        // (Id first, matching coerceIdea's key order, so a minted doc is
+        // byte-identical to its own re-load.)
+        .map((idea, index) => (idea.id ? idea : { id: `legacy-idea-${index}`, ...idea }))
+    : [];
   const activeIdea = typeof raw.activeIdea === "number" ? raw.activeIdea : 0;
   const siteHeadline = typeof raw.siteHeadline === "string" ? raw.siteHeadline : "";
   const onboardingComplete = raw.onboardingComplete === true;
   // Additive-optional field: absent in existing v1 docs -> null, NOT a discard.
   const chosenProvider = coerceChosenProvider(raw.chosenProvider);
+  // Additive-optional businesses: absent stays absent. NORMALIZED on every
+  // load so the one-active invariant holds even for a doc written before the
+  // normalization existed (or hand-edited): see normalizeBusinesses.
+  const businesses = coerceBusinesses(raw.businesses);
   return {
     ok: true,
     doc: {
@@ -265,8 +585,166 @@ export function fromSaveDoc(raw: unknown): FromSaveResult {
       siteHeadline,
       onboardingComplete,
       chosenProvider,
+      ...(businesses ? { businesses: normalizeBusinesses(businesses) } : {}),
     },
   };
+}
+
+// ── Business normalization (one-active invariant, derived) ───────────────
+
+/**
+ * Enforce the ONE-ACTIVE invariant on a businesses list, deterministically:
+ * when more than one business is unarchived (only ever producible by a
+ * cross-tab union or a hand-edited doc — the reducer's PROMOTE/UNARCHIVE
+ * refusals keep live state at <= 1), the EARLIEST-promoted record stays
+ * active (missing promotedAt sorts last; ties break on the smaller id
+ * string) and every other active record is marked archived.
+ *
+ * Normalization is DERIVED state, not an action: it never stamps
+ * archiveStateAt, so a later real archive/unarchive still wins the
+ * timestamped union cleanly. Pure; returns the input list unchanged
+ * (same reference) when the invariant already holds. Applied in
+ * fromSaveDoc AND to every unionBusinesses output, so both merge
+ * directions converge on the same single active business.
+ */
+export function normalizeBusinesses(list: Business[]): Business[] {
+  const active = list.filter((b) => !b.archived);
+  if (active.length <= 1) return list;
+  let winner = active[0];
+  for (const b of active.slice(1)) {
+    const wAt = winner.promotedAt ?? Number.POSITIVE_INFINITY;
+    const bAt = b.promotedAt ?? Number.POSITIVE_INFINITY;
+    if (bAt < wAt || (bAt === wAt && b.id < winner.id)) winner = b;
+  }
+  return list.map((b) => (!b.archived && b !== winner ? { ...b, archived: true } : b));
+}
+
+// ── Rebase union (cross-tab merge of monotonic state) ────────────────────
+
+/**
+ * Union one map: server-only entries are ADDED, both-present conflicts keep the
+ * LOCAL value, nothing is ever removed. Absent-stays-absent: when neither side
+ * carries the map, none is invented (byte-stable docs stay byte-stable).
+ */
+function unionMap<T>(
+  local: Record<string, T> | undefined,
+  server: Record<string, T> | undefined,
+): Record<string, T> | undefined {
+  if (!server || Object.keys(server).length === 0) return local;
+  if (!local) return { ...server };
+  return { ...server, ...local }; // spread order: local wins on conflicts
+}
+
+/** Union one idea's four completion maps (server → local); everything else local. */
+function unionIdeaCompletions(local: Idea, server: Idea): Idea {
+  const merged: Idea = { ...local, done: { ...server.done, ...local.done } };
+  const doneAt = unionMap(local.doneAt, server.doneAt);
+  const doneByTask = unionMap(local.doneByTask, server.doneByTask);
+  const doneAtByTask = unionMap(local.doneAtByTask, server.doneAtByTask);
+  if (doneAt) merged.doneAt = doneAt;
+  if (doneByTask) merged.doneByTask = doneByTask;
+  if (doneAtByTask) merged.doneAtByTask = doneAtByTask;
+  return merged;
+}
+
+/**
+ * Union the businesses lists (Unit 7). Businesses are MONOTONIC-ish:
+ * - a business present only on the SERVER is KEPT (appended in server order —
+ *   a concurrent session promoted it; dropping it would erase a promotion);
+ * - matched BY BUSINESS ID, each business's completion maps union exactly like
+ *   an idea's (server-only entries added, local wins on conflicts);
+ * - `archived` resolves by the LARGER archiveStateAt (last-ACTION-wins, so a
+ *   fresh archive beats a stale tab's resident unarchived flag in BOTH merge
+ *   directions); local wins only on a tie or when neither side is stamped
+ *   (see Business.archiveStateAt for the skewed-clock caveat). The other
+ *   scalar leaves stay local (latest intent).
+ * - The output is NORMALIZED (normalizeBusinesses) so a union can never
+ *   surface two active businesses.
+ * Absent-stays-absent: when neither side carries the list, none is invented.
+ */
+function unionBusinesses(
+  local: Business[] | undefined,
+  server: Business[] | undefined,
+): Business[] | undefined {
+  if (!server || server.length === 0) return local ? normalizeBusinesses(local) : local;
+  if (!local || local.length === 0) return normalizeBusinesses(server.map(copyBusiness));
+  const merged = local.map((lb) => {
+    const sb = server.find((b) => b.id === lb.id);
+    if (!sb) return lb;
+    const out: Business = { ...lb }; // scalar leaves: local wins (latest intent)
+    // archived: last-action-wins via archiveStateAt (deterministic both ways).
+    const lAt = lb.archiveStateAt;
+    const sAt = sb.archiveStateAt;
+    if (typeof sAt === "number" && (typeof lAt !== "number" || sAt > lAt)) {
+      out.archived = sb.archived ?? false;
+      out.archiveStateAt = sAt;
+    }
+    const doneByTask = unionMap(lb.doneByTask, sb.doneByTask);
+    const doneAtByTask = unionMap(lb.doneAtByTask, sb.doneAtByTask);
+    if (doneByTask) out.doneByTask = doneByTask;
+    if (doneAtByTask) out.doneAtByTask = doneAtByTask;
+    return out;
+  });
+  for (const sb of server) {
+    if (!local.some((b) => b.id === sb.id)) merged.push(copyBusiness(sb)); // kept, never dropped
+  }
+  return normalizeBusinesses(merged);
+}
+
+/**
+ * The cross-tab merge contract (fix for the concurrent-session clobber), used
+ * by BOTH the sync engine's CAS rebase (src/lib/sync.ts flushPending) and the
+ * UNION_REMOTE reducer action that feeds a committed rebased doc back into
+ * live state: the result is the LOCAL doc with the server doc's MONOTONIC
+ * state unioned in — never a raw replacement that would erase what a
+ * concurrent session (another tab / another device) did.
+ *
+ * - Completions (`done`, `doneAt`, `doneByTask`, `doneAtByTask`) are MONOTONIC:
+ *   they only ever move toward "more complete", so union is always safe and
+ *   lossless. Per idea: server-only entries are added, local wins on
+ *   both-present conflicts, nothing is ever removed.
+ * - IDEAS MATCH BY ID when both sides carry one (every idea loaded through
+ *   fromSaveDoc has an id — minted deterministically for legacy docs). A
+ *   same-index pair with DIFFERENT ids is two different ideas created
+ *   concurrently: they are NOT fused — the local idea keeps its position and
+ *   the unmatched server idea APPENDS at the tail (in server order),
+ *   preserving its identity, fields, and completions. An id-LESS local idea
+ *   (in-memory legacy, created before ids existed and not yet re-loaded)
+ *   falls back to index matching — safe because legacy ids are the
+ *   deterministic `legacy-idea-{index}`.
+ * - Everything else (`fields` text, `activeIdea`, `siteHeadline`,
+ *   `onboardingComplete`, `chosenProvider`) stays LOCAL-authoritative: those are
+ *   latest-intent values, not monotonic sets — "merging" free text or a provider
+ *   choice has no well-defined union, and the child's most recent edit in the
+ *   live tab is the intent to honor. Last-writer-wins is correct there.
+ * - BUSINESSES union per `unionBusinesses`: server-only records are kept,
+ *   per-business completion maps union like an idea's, `archived` resolves by
+ *   archiveStateAt (last action wins), and the output is normalized to one
+ *   active business.
+ *
+ * Pure and exported for direct testing; `serverDoc` is null when the server row
+ * was empty/unreadable (nothing to union — local is returned unchanged).
+ */
+export function unionCompletionMaps(localDoc: SaveDoc, serverDoc: SaveDoc | null): SaveDoc {
+  if (!serverDoc) return localDoc;
+  // Match ideas by id (index fallback for id-less local legacy ideas).
+  const usedServer = new Set<number>();
+  const ideas = localDoc.ideas.map((idea, i) => {
+    let si = -1;
+    if (idea.id) {
+      si = serverDoc.ideas.findIndex((s, j) => !usedServer.has(j) && s.id === idea.id);
+    } else if (i < serverDoc.ideas.length && !usedServer.has(i)) {
+      si = i; // id-less legacy local idea: deterministic index match
+    }
+    if (si < 0) return idea; // no counterpart: local idea passes through
+    usedServer.add(si);
+    return unionIdeaCompletions(idea, serverDoc.ideas[si]);
+  });
+  for (let j = 0; j < serverDoc.ideas.length; j++) {
+    if (!usedServer.has(j)) ideas.push(serverDoc.ideas[j]); // appended at tail, never dropped
+  }
+  const businesses = unionBusinesses(localDoc.businesses, serverDoc.businesses);
+  return { ...localDoc, ideas, ...(businesses ? { businesses } : {}) };
 }
 
 // ── Selectors (pure functions of state) ──────────────────────────────────
@@ -288,17 +766,30 @@ export function isTaskDone(
   index: number,
 ): boolean {
   if (!hasIdea(state, ideaIndex)) return false;
-  const step = stepById(stepId);
-  const raw = step?.tasks[index];
-  if (raw) {
-    const { auto } = parseTask(raw);
-    // fpv2 core carries no artifact map yet; an @artifact task is only ever
-    // complete via the explicit done map until artifact state exists.
-    if (auto) {
-      return Boolean(state.ideas[ideaIndex].done[taskKey(stepId, index)]);
-    }
+  // Grow/Scale progress belongs to the BUSINESS (Unit 7; origin R7): read the
+  // ACTIVE business's stable-id map — never an idea's — and NOTHING is done
+  // when no active business exists (an archived business keeps its maps, but
+  // they are unreadable until unarchived). SCOPED TO THE PROMOTED IDEA: the
+  // business's progress is only readable through the idea it grew from — a
+  // second Validate-complete idea reads nothing from it. No legacy fallback:
+  // grow/scale tasks never had `${stepId}#${index}` keys.
+  const taskPhase = PHASE_BY_CRITERION.get(stepId);
+  if (taskPhase === "grow" || taskPhase === "scale") {
+    const business = activeBusiness(state);
+    if (!business || business.ideaId !== state.ideas[ideaIndex].id) return false;
+    const businessTaskId = taskIdAt(stepId, index);
+    return Boolean(businessTaskId && business.doneByTask?.[resolveTaskId(businessTaskId)]);
   }
-  return Boolean(state.ideas[ideaIndex].done[taskKey(stepId, index)]);
+  const idea = state.ideas[ideaIndex];
+  // fpv2 core carries no artifact map yet; an @artifact task (parseTask's
+  // `auto` hook) is only ever complete via the explicit done maps until
+  // artifact state exists — the hook is preserved for later phases.
+  // Stable-id map first (Unit 5), resolved through the remap table; then fall
+  // back to the legacy `${stepId}#${index}` map (belt and braces — a stale tab
+  // or pre-migration in-memory state may carry only the legacy key).
+  const taskId = taskIdAt(stepId, index);
+  if (taskId && idea.doneByTask?.[resolveTaskId(taskId)]) return true;
+  return Boolean(idea.done[taskKey(stepId, index)]);
 }
 
 /** Whether every task of a criterion is complete for an idea. */
@@ -315,20 +806,105 @@ export function stepPips(state: GameState, ideaIndex: number, stepId: string): b
   return step.tasks.map((_, i) => isTaskDone(state, ideaIndex, stepId, i));
 }
 
-/** The first incomplete playable criterion for an idea, or null if all done. */
-export function nextUpFor(state: GameState, ideaIndex: number): string | null {
-  if (!hasIdea(state, ideaIndex)) return null;
-  for (const stepId of PLAYABLE_STEPS) {
+/**
+ * The single ACTIVE (non-archived) business, or null. At most one business is
+ * ever unarchived: the reducer's PROMOTE/UNARCHIVE refusals hold the invariant
+ * in live state, and normalizeBusinesses re-establishes it on every load and
+ * every cross-tab union (earliest promotedAt wins, id tiebreak) — so the
+ * `find` here is over a list that genuinely contains at most one active record.
+ */
+export function activeBusiness(state: GameState): Business | null {
+  return state.businesses?.find((b) => !b.archived) ?? null;
+}
+
+/**
+ * The business promoted from `ideaId`, or undefined. A re-promotion after an
+ * archive creates a NEW record for the same idea, so the CURRENT record is the
+ * LATEST-promoted match — resolved by the LARGEST promotedAt (not list order,
+ * which a cross-tab union can reshuffle by appending server-only records at
+ * the tail; a missing promotedAt sorts earliest, ties keep the later list
+ * entry). Earlier matches are the archived history.
+ */
+export function businessFor(state: GameState, ideaId: string): Business | undefined {
+  let current: Business | undefined;
+  for (const b of state.businesses ?? []) {
+    if (b.ideaId !== ideaId) continue;
+    if (!current || (b.promotedAt ?? -1) >= (current.promotedAt ?? -1)) current = b;
+  }
+  return current;
+}
+
+/**
+ * Whether ANY active (non-archived) business exists — the account-level half
+ * of the Grow/Scale gate (written by PROMOTE_IDEA / UNARCHIVE_BUSINESS). The
+ * per-idea half (the queried idea must BE the promoted one) lives in
+ * isPhaseUnlocked. The read is defensive: an absent list is "no business".
+ */
+export function activeBusinessExists(state: GameState): boolean {
+  return activeBusiness(state) !== null;
+}
+
+/** Whether every criterion of a phase is complete for an idea. */
+export function isPhaseComplete(state: GameState, ideaIndex: number, phase: PhaseId): boolean {
+  const ids = criterionIdsForPhase(phase);
+  return ids.length > 0 && ids.every((id) => isCriterionDone(state, ideaIndex, id));
+}
+
+/**
+ * Phase unlock per idea (Unit 6 rules):
+ *  - phase 1 (sell) is open for any existing idea;
+ *  - phases 2 and 3 unlock for an idea when THAT idea completed every
+ *    criterion of the previous phase;
+ *  - phases 4-5 additionally gate on the active business AND on the QUERIED
+ *    idea being the one it was promoted from (`business.ideaId`): a second
+ *    Validate-complete idea stays locked out of Grow/Scale until it is itself
+ *    promoted (after the current business is archived).
+ */
+export function isPhaseUnlocked(state: GameState, ideaIndex: number, phase: PhaseId): boolean {
+  if (!hasIdea(state, ideaIndex)) return false;
+  const pos = PHASE_ORDER.indexOf(phase);
+  if (pos < 0) return false;
+  if (phase === "grow" || phase === "scale") {
+    const business = activeBusiness(state);
+    if (!business || business.ideaId !== state.ideas[ideaIndex].id) return false;
+  }
+  if (pos === 0) return true;
+  return isPhaseComplete(state, ideaIndex, PHASE_ORDER[pos - 1]);
+}
+
+/**
+ * The first incomplete criterion of the full sequence for an idea — the idea's
+ * frontier — or null when every criterion is done. Pure position, no locking.
+ */
+function frontierFor(state: GameState, ideaIndex: number): string | null {
+  for (const stepId of CRITERION_SEQUENCE) {
     if (!isCriterionDone(state, ideaIndex, stepId)) return stepId;
   }
   return null;
 }
 
-/** Per-idea Sell progress across the playable criteria (task counts from path.ts). */
-export function sellProgress(state: GameState, ideaIndex: number): { done: number; total: number } {
+/**
+ * The next criterion an idea can actually WORK: its frontier when that
+ * frontier's phase is unlocked, else null (the frontier sits behind the
+ * business gate — e.g. 4.1 after 3.5 with no business promoted yet, which is
+ * the promotion seam floorSelectors surfaces). Null also once all 25 are done.
+ */
+export function nextUpFor(state: GameState, ideaIndex: number): string | null {
+  if (!hasIdea(state, ideaIndex)) return null;
+  const frontier = frontierFor(state, ideaIndex);
+  if (!frontier) return null;
+  return isStepUnlocked(state, ideaIndex, frontier) ? frontier : null;
+}
+
+/** Per-idea task progress across ONE phase (task counts from the content). */
+export function phaseProgress(
+  state: GameState,
+  ideaIndex: number,
+  phase: PhaseId,
+): { done: number; total: number } {
   let done = 0;
   let total = 0;
-  for (const stepId of PLAYABLE_STEPS) {
+  for (const stepId of criterionIdsForPhase(phase)) {
     const step = stepById(stepId);
     if (!step) continue;
     total += step.tasks.length;
@@ -338,15 +914,37 @@ export function sellProgress(state: GameState, ideaIndex: number): { done: numbe
 }
 
 /**
- * Sequential room unlock: whether the criterion's room is reachable for an idea
- * (the previous criterion is complete). The first playable criterion is always
- * unlocked. Distinct from eligibility, which also requires this one NOT done.
+ * Total XP an idea has earned: the sum of `xp` (path.ts STEP_META) over every
+ * criterion the idea has completed across the full sequence.
+ */
+export function xpFor(state: GameState, ideaIndex: number): number {
+  if (!hasIdea(state, ideaIndex)) return 0;
+  return STEPS.reduce(
+    (sum, step) => (isCriterionDone(state, ideaIndex, step.id) ? sum + step.xp : sum),
+    0,
+  );
+}
+
+/** Total XP across every idea (the account's XP). */
+export function totalXp(state: GameState): number {
+  return state.ideas.reduce((sum, _idea, i) => sum + xpFor(state, i), 0);
+}
+
+/**
+ * Sequential criterion unlock, phase-aware (Unit 6): the criterion's PHASE must
+ * be unlocked for the idea (see isPhaseUnlocked — phases 4-5 gate on the
+ * promoted business), and criteria unlock linearly WITHIN the phase (the previous
+ * criterion complete; the phase's first criterion rides the phase gate alone).
+ * Distinct from eligibility, which also requires this one NOT done.
  */
 export function isStepUnlocked(state: GameState, ideaIndex: number, stepId: string): boolean {
-  const pos = (PLAYABLE_STEPS as readonly string[]).indexOf(stepId);
-  if (pos < 0 || !hasIdea(state, ideaIndex)) return false;
-  if (pos === 0) return true;
-  return isCriterionDone(state, ideaIndex, PLAYABLE_STEPS[pos - 1]);
+  const phase = PHASE_BY_CRITERION.get(stepId);
+  if (!phase || !hasIdea(state, ideaIndex)) return false;
+  if (!isPhaseUnlocked(state, ideaIndex, phase)) return false;
+  const ids = criterionIdsForPhase(phase);
+  const pos = ids.indexOf(stepId);
+  if (pos <= 0) return pos === 0;
+  return isCriterionDone(state, ideaIndex, ids[pos - 1]);
 }
 
 /**
@@ -394,13 +992,26 @@ export type Action =
   | { type: "SET_OB"; ob: number }
   | { type: "SET_PROFILE"; patch: Partial<Profile> }
   | { type: "SET_ONBOARDING_COMPLETE"; value?: boolean }
-  | { type: "CREATE_IDEA" }
+  /**
+   * `ideaId` is the CALLER-minted stable identity for the new idea (crypto
+   * UUID at the GameContext boundary — this module stays Math.random()-free,
+   * the chosenAt/at precedent). Optional so legacy callers/tests stay valid;
+   * an idea created without one gets a deterministic id on the next load.
+   */
+  | { type: "CREATE_IDEA"; ideaId?: string }
   | { type: "SET_ACTIVE_IDEA"; ideaIndex: number }
   | { type: "SET_FIELD"; ideaIndex: number; key: string; value: string }
   /**
    * `at` is the caller-stamped completion time (epoch ms) — this module stays
    * Date.now()-free (the chosenAt precedent). Optional so stale/legacy callers
    * remain valid; without it the task completes with no doneAt entry.
+   *
+   * LOCK ENFORCEMENT IS SELECTOR-LAYER BY DESIGN: this action does NOT check
+   * isStepUnlocked — a direct dispatch can complete a task in a locked phase.
+   * Dispatch is app-internal (every UI path routes through the selectors,
+   * which gate on unlock/eligibility), and both the load migration and the
+   * test suite depend on free writes to construct arbitrary progress. Do not
+   * add an unlock guard here.
    */
   | { type: "COMPLETE_TASK"; ideaIndex: number; stepId: string; index: number; at?: number }
   | { type: "OPEN_RUNNER"; stepId?: string; index?: number }
@@ -411,8 +1022,38 @@ export type Action =
   | ({ type: "ADD_LEDGER"; mock?: boolean } & LedgerEntry)
   | { type: "SET_LEDGER"; ledger: LedgerEntry[] }
   | { type: "DISMISS_CELEBRATION" }
+  /**
+   * Promote a phase-3-complete idea to THE business (origin R7: an explicit
+   * moment, one active business at a time). `businessId` and `at` are
+   * caller-stamped (crypto UUID / Date.now at the GameContext boundary).
+   * REFUSED (state unchanged) unless the idea exists, completed every
+   * Validate criterion, no unarchived business exists, and the businessId is
+   * unused. A promotion after an archive creates a NEW record — Grow/Scale
+   * progress is never inherited across promotions (origin decision).
+   */
+  | { type: "PROMOTE_IDEA"; ideaId: string; businessId: string; at: number }
+  /**
+   * Archive the business (kept, never deleted; its 4-5 progress rides along).
+   * `at` is the caller-stamped action time (epoch ms, the chosenAt precedent),
+   * recorded as `archiveStateAt` so the cross-tab union can resolve archived
+   * conflicts last-action-wins. Optional so legacy dispatchers stay valid —
+   * without it the flag flips with no stamp (local-wins union semantics).
+   */
+  | { type: "ARCHIVE_BUSINESS"; businessId: string; at?: number }
+  /** Restore an archived business — refused while another business is active.
+   *  `at` stamps `archiveStateAt` exactly like ARCHIVE_BUSINESS. */
+  | { type: "UNARCHIVE_BUSINESS"; businessId: string; at?: number }
   | { type: "SET_PROVIDER"; providerId: ProviderId; chosenAt: number }
   | { type: "RESET_SESSION" }
+  /**
+   * Feed a committed CAS-rebased (merged) save doc back into live state so
+   * tabs converge instead of split-braining (sync engine onRebasedDoc →
+   * GameContext). Unions ONLY the doc's MONOTONIC state (completions,
+   * businesses, appended ideas) via unionCompletionMaps; latest-intent fields
+   * and all UI state are untouched — like the load migration, it MARKS state
+   * only and can never close the runner or fire a celebration.
+   */
+  | { type: "UNION_REMOTE"; doc: SaveDoc }
   | { type: "HYDRATE"; doc: SaveDoc };
 
 /**
@@ -420,6 +1061,20 @@ export type Action =
  * fire the celebration and advance the runner to the next playable criterion.
  * Idempotent and out-of-range tolerant: returns the same state if the index is
  * invalid or the task was already done.
+ *
+ * LEGACY-WRITE SCOPE (intended): a task OUTSIDE the ten-entry legacy table
+ * (anything past 1.2) writes ONLY the stable-id maps — no legacy
+ * `${stepId}#${index}` key is ever minted for it. That is deliberate: no legacy
+ * reader ever existed for post-1.2 tasks (old builds could not complete them),
+ * so a legacy mirror would be an invented key with no consumer. Their
+ * loss-protection against a concurrent stale tab is the sync engine's
+ * rebase-union (unionCompletionMaps in src/lib/sync.ts), not the legacy map.
+ *
+ * DUAL-WRITE RETIREMENT: the legacy dual-write (and the legacy fallback in
+ * isTaskDone) retires when every cohort save has been re-persisted under the
+ * stable-id shape AND no pre-stable-key build can still run — practically: a
+ * deliberate cleanup unit after the cohort's saves are observed migrated (all
+ * rows carry doneByTask); not before, and never as a drive-by edit.
  */
 function markTaskDone(
   state: GameState,
@@ -437,32 +1092,87 @@ function markTaskDone(
   // a missing/malformed stamp completes the task with no doneAt entry.
   const stampValid = typeof at === "number" && Number.isFinite(at) && at >= 0;
   const wasCriterionDone = isCriterionDone(state, ideaIndex, stepId);
+
+  // Grow/Scale completion writes the ACTIVE business's maps (Unit 7; origin
+  // R7) — never an idea's. With no active business there is nothing to write
+  // (the phase is gated anyway), and the write is SCOPED TO THE PROMOTED IDEA:
+  // an action addressed through a different idea (e.g. a second Validate-
+  // complete idea) is a no-op rather than crediting the business. Stable ids
+  // only, no legacy key is ever minted for a business task.
+  const phase = PHASE_BY_CRITERION.get(stepId);
+  if (phase === "grow" || phase === "scale") {
+    const business = activeBusiness(state);
+    const rawId = taskIdAt(stepId, index);
+    const businessTaskId = rawId ? resolveTaskId(rawId) : undefined;
+    if (!business || !businessTaskId) return state;
+    if (business.ideaId !== state.ideas[ideaIndex].id) return state;
+    const businesses = (state.businesses ?? []).map((b) =>
+      b.id === business.id
+        ? {
+            ...b,
+            doneByTask: { ...(b.doneByTask ?? {}), [businessTaskId]: true },
+            ...(stampValid
+              ? { doneAtByTask: { ...(b.doneAtByTask ?? {}), [businessTaskId]: at } }
+              : {}),
+          }
+        : b,
+    );
+    return withCelebration({ ...state, businesses }, ideaIndex, stepId, wasCriterionDone);
+  }
+
+  // DUAL-WRITE (Unit 5 transition; retirement condition in the doc comment
+  // above): the stable-id maps are the forward shape; the legacy
+  // `${stepId}#${index}` key is ALSO written when the task maps back through
+  // the explicit legacy table, so an old tab that hydrates this doc and strips
+  // the new fields still carries every completion in its legacy map and the
+  // next new-code load re-unions losslessly (stale-tab risk row).
+  const legacyKey = taskKey(stepId, index);
+  const rawTaskId = taskIdAt(stepId, index);
+  const stableId = rawTaskId ? resolveTaskId(rawTaskId) : undefined;
+  const writeLegacy = legacyKey in LEGACY_KEY_REMAP || !stableId;
   const ideas = state.ideas.map((idea, i) =>
     i === ideaIndex
       ? {
           ...idea,
-          done: { ...idea.done, [taskKey(stepId, index)]: true },
-          ...(stampValid ? { doneAt: { ...(idea.doneAt ?? {}), [taskKey(stepId, index)]: at } } : {}),
+          done: writeLegacy ? { ...idea.done, [legacyKey]: true } : idea.done,
+          ...(stableId
+            ? { doneByTask: { ...(idea.doneByTask ?? {}), [stableId]: true } }
+            : {}),
+          ...(stampValid && writeLegacy
+            ? { doneAt: { ...(idea.doneAt ?? {}), [legacyKey]: at } }
+            : {}),
+          ...(stampValid && stableId
+            ? { doneAtByTask: { ...(idea.doneAtByTask ?? {}), [stableId]: at } }
+            : {}),
         }
       : idea,
   );
-  let next: GameState = { ...state, ideas };
+  return withCelebration({ ...state, ideas }, ideaIndex, stepId, wasCriterionDone);
+}
 
-  const nowCriterionDone = isCriterionDone(next, ideaIndex, stepId);
-  if (!wasCriterionDone && nowCriterionDone) {
-    const advanced = nextUpFor(next, ideaIndex);
-    next = {
-      ...next,
-      celebrate: stepId,
-      // The celebration takes over the whole screen. Close the runner so the
-      // two fixed aria-modal dialogs never stack (and focus never lands on the
-      // hidden runner underneath). DISMISS_CELEBRATION decides what re-opens.
-      runnerOpen: false,
-      runnerStep: advanced ?? next.runnerStep,
-      runnerIndex: 0,
-    };
-  }
-  return next;
+/**
+ * Shared criterion-completion tail of markTaskDone (idea and business writes):
+ * if the write just completed the criterion, fire the celebration and advance
+ * the runner to the next playable criterion.
+ */
+function withCelebration(
+  next: GameState,
+  ideaIndex: number,
+  stepId: string,
+  wasCriterionDone: boolean,
+): GameState {
+  if (wasCriterionDone || !isCriterionDone(next, ideaIndex, stepId)) return next;
+  const advanced = nextUpFor(next, ideaIndex);
+  return {
+    ...next,
+    celebrate: stepId,
+    // The celebration takes over the whole screen. Close the runner so the
+    // two fixed aria-modal dialogs never stack (and focus never lands on the
+    // hidden runner underneath). DISMISS_CELEBRATION decides what re-opens.
+    runnerOpen: false,
+    runnerStep: advanced ?? next.runnerStep,
+    runnerIndex: 0,
+  };
 }
 
 export function reducer(state: GameState, action: Action): GameState {
@@ -483,13 +1193,18 @@ export function reducer(state: GameState, action: Action): GameState {
 
     case "CREATE_IDEA": {
       if (state.ideas.length >= MAX_IDEAS) return state;
-      const ideas = [...state.ideas, { fields: {}, done: {} }];
+      // The caller-minted stable id rides in when supplied (absent-stays-absent
+      // for legacy dispatchers; see the Idea.id doc).
+      const ideas = [
+        ...state.ideas,
+        { ...(action.ideaId ? { id: action.ideaId } : {}), fields: {}, done: {} },
+      ];
       return {
         ...state,
         ideas,
         activeIdea: ideas.length - 1,
         runnerOpen: true,
-        runnerStep: PLAYABLE_STEPS[0],
+        runnerStep: CRITERION_SEQUENCE[0],
         runnerIndex: 0,
         pickFor: null,
       };
@@ -514,7 +1229,7 @@ export function reducer(state: GameState, action: Action): GameState {
       return markTaskDone(state, action.ideaIndex, action.stepId, action.index, action.at);
 
     case "OPEN_RUNNER": {
-      const stepId = action.stepId ?? nextUpFor(state, state.activeIdea) ?? PLAYABLE_STEPS[0];
+      const stepId = action.stepId ?? nextUpFor(state, state.activeIdea) ?? CRITERION_SEQUENCE[0];
       return {
         ...state,
         runnerOpen: true,
@@ -597,18 +1312,23 @@ export function reducer(state: GameState, action: Action): GameState {
       };
       let next: GameState = { ...state, ledger: [...state.ledger, entry] };
       if (action.kind === "sale" && !action.mock) {
-        // A REAL logged sale auto-completes the LAST task of 1.2 for the active
-        // idea, but only when 1.2 is unlocked for it (1.1 complete). A stray sale
-        // event before then must not light 1.2's final pip while earlier pips are
-        // dark. The `mock` opt-out lets the cosmetic Checkout Booth overlay log a
-        // ledger/HUD row (preserving pre-Unit-3 behavior) WITHOUT completing the
-        // real first sale or firing the first-sale celebration; the real sale
-        // path (Unit 5 Sales Room / booth log-a-sale) omits `mock` and completes.
-        const saleStep = stepById("1.2");
+        // A REAL logged sale auto-completes the sale target task — addressed by
+        // STABLE ID through the hooks registry (SALE_AUTO_COMPLETE_TASK_ID,
+        // "1.2.5"; path.ts's assembly asserts it is the LAST task of its
+        // criterion, so `tasks.length - 1` below is that exact task and the
+        // dual-write lands both `1.2#4` and doneByTask["1.2.5"]) — for the
+        // active idea, but only when its criterion is unlocked for it (1.1
+        // complete). A stray sale event before then must not light the final
+        // pip while earlier pips are dark. The `mock` opt-out lets the cosmetic
+        // Checkout Booth overlay log a ledger/HUD row (preserving pre-Unit-3
+        // behavior) WITHOUT completing the real first sale or firing the
+        // first-sale celebration; the real sale path (Sales Room / booth
+        // log-a-sale) omits `mock` and completes.
+        const saleStep = stepById(SALE_STEP_ID);
         if (
           saleStep &&
           hasIdea(next, next.activeIdea) &&
-          isStepUnlocked(next, next.activeIdea, "1.2")
+          isStepUnlocked(next, next.activeIdea, SALE_STEP_ID)
         ) {
           // Stamp the auto-completion from the row's caller-stamped createdAt
           // (the module stays Date.now()-free); an unparseable timestamp just
@@ -617,7 +1337,7 @@ export function reducer(state: GameState, action: Action): GameState {
           next = markTaskDone(
             next,
             next.activeIdea,
-            "1.2",
+            SALE_STEP_ID,
             saleStep.tasks.length - 1,
             Number.isFinite(at) && at >= 0 ? at : undefined,
           );
@@ -653,6 +1373,65 @@ export function reducer(state: GameState, action: Action): GameState {
       };
     }
 
+    case "PROMOTE_IDEA": {
+      // REFUSALS (state unchanged, never a throw): unknown idea, idea not
+      // through Validate, an active business already exists (archive first),
+      // or a replayed/duplicate businessId.
+      const ideaIndex = state.ideas.findIndex((idea) => idea.id === action.ideaId);
+      if (ideaIndex < 0) return state;
+      if (!isPhaseComplete(state, ideaIndex, "validate")) return state;
+      if (activeBusinessExists(state)) return state;
+      if (state.businesses?.some((b) => b.id === action.businessId)) return state;
+      const stampValid =
+        typeof action.at === "number" && Number.isFinite(action.at) && action.at >= 0;
+      // A NEW record every time (origin decision: no progress inheritance
+      // across promotions — an unarchived business resumes its OWN maps, but a
+      // fresh promotion starts empty).
+      const business: Business = {
+        id: action.businessId,
+        ideaId: action.ideaId,
+        archived: false,
+        ...(stampValid ? { promotedAt: action.at } : {}),
+      };
+      return { ...state, businesses: [...(state.businesses ?? []), business] };
+    }
+
+    case "ARCHIVE_BUSINESS": {
+      // Archive keeps the record AND its Grow/Scale maps (weeks of progress
+      // must never be a one-way door — UNARCHIVE_BUSINESS restores both).
+      // A valid caller stamp becomes archiveStateAt (last-action-wins union).
+      const target = state.businesses?.find((b) => b.id === action.businessId);
+      if (!target || target.archived) return state;
+      const stampValid =
+        typeof action.at === "number" && Number.isFinite(action.at) && action.at >= 0;
+      return {
+        ...state,
+        businesses: state.businesses!.map((b) =>
+          b.id === action.businessId
+            ? { ...b, archived: true, ...(stampValid ? { archiveStateAt: action.at } : {}) }
+            : b,
+        ),
+      };
+    }
+
+    case "UNARCHIVE_BUSINESS": {
+      // Refused while ANY business is active (the one-active invariant): the
+      // child archives the current business first, then unarchives.
+      const target = state.businesses?.find((b) => b.id === action.businessId);
+      if (!target || !target.archived) return state;
+      if (activeBusinessExists(state)) return state;
+      const stampValid =
+        typeof action.at === "number" && Number.isFinite(action.at) && action.at >= 0;
+      return {
+        ...state,
+        businesses: state.businesses!.map((b) =>
+          b.id === action.businessId
+            ? { ...b, archived: false, ...(stampValid ? { archiveStateAt: action.at } : {}) }
+            : b,
+        ),
+      };
+    }
+
     case "SET_PROVIDER":
       // Record (or switch to) the chosen provider. The choice is durable (rides
       // the save doc); a switch stamps a fresh chosenAt. Past ledger rows keep
@@ -684,16 +1463,46 @@ export function reducer(state: GameState, action: Action): GameState {
       };
     }
 
+    case "UNION_REMOTE": {
+      // Union a committed rebased doc's MONOTONIC state into live state (see
+      // the Action doc). Latest-intent leaves (fields text, activeIdea,
+      // chosenProvider, siteHeadline) and every UI flag (runner, celebrate,
+      // room, stage) are DELIBERATELY untouched: unionCompletionMaps keeps
+      // local fields on matched ideas, and only `ideas`/`businesses` are
+      // written back here. Like the load migration this MARKS state only —
+      // it can never close the runner, move it, or fire a celebration.
+      const merged = unionCompletionMaps(toSaveDoc(state), action.doc);
+      return {
+        ...state,
+        // Deep-copy every map so live state never aliases the engine's doc.
+        ideas: merged.ideas.map((idea) => ({
+          ...(idea.id ? { id: idea.id } : {}),
+          fields: { ...idea.fields },
+          done: { ...idea.done },
+          ...(idea.doneAt ? { doneAt: { ...idea.doneAt } } : {}),
+          ...(idea.doneByTask ? { doneByTask: { ...idea.doneByTask } } : {}),
+          ...(idea.doneAtByTask ? { doneAtByTask: { ...idea.doneAtByTask } } : {}),
+        })),
+        ...(merged.businesses ? { businesses: merged.businesses.map(copyBusiness) } : {}),
+      };
+    }
+
     case "HYDRATE": {
       const { doc } = action;
       return {
         ...state,
         ideas: doc.ideas.map((idea) => ({
+          // Stable idea identity (Unit 7): fromSaveDoc guarantees one on every
+          // loaded idea (minted deterministically when legacy).
+          ...(idea.id ? { id: idea.id } : {}),
           fields: { ...idea.fields },
           done: { ...idea.done },
           // Split-storage learning: HYDRATE must source every persisted slice it
           // resets — copying doneAt here keeps timestamps from being wiped on load.
           ...(idea.doneAt ? { doneAt: { ...idea.doneAt } } : {}),
+          // The stable-id maps (Unit 5) are sourced the same way, never wiped.
+          ...(idea.doneByTask ? { doneByTask: { ...idea.doneByTask } } : {}),
+          ...(idea.doneAtByTask ? { doneAtByTask: { ...idea.doneAtByTask } } : {}),
         })),
         // The ledger lives append-only in fp_ledger, never the save doc. Reset
         // it here so a hydrate can never carry a prior session's rows forward.
@@ -702,6 +1511,11 @@ export function reducer(state: GameState, action: Action): GameState {
         profile: { ...state.profile, siteHeadline: doc.siteHeadline },
         // Additive-optional: an existing v1 doc may omit it -> null.
         chosenProvider: doc.chosenProvider ?? null,
+        // Businesses (Unit 7), sourced per the split-storage learning:
+        // HYDRATE must reset every persisted slice — a doc without the field
+        // clears any resident list (undefined), absent-stays-absent. Deep copy
+        // so the doc's per-business maps are never aliased into live state.
+        businesses: doc.businesses?.map(copyBusiness),
         onboardingComplete: doc.onboardingComplete,
         docVersion: DOC_VERSION,
         stage: doc.onboardingComplete ? "app" : "onboard",

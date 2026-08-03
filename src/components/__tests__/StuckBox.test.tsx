@@ -17,7 +17,7 @@ import {
   FEEDBACK_TASK_ID_MAX,
   type FeedbackInsertRow,
 } from "../../lib/sync";
-import { stepById } from "../../data/path";
+import { PATH_CONTENT, STEPS } from "../../data/path";
 
 // A real React context stands in for GameContext; useGame reads it.
 vi.mock("../../state/GameContext", async () => {
@@ -95,22 +95,34 @@ const flush = () => act(async () => Promise.resolve());
 
 afterEach(cleanup);
 
-describe("taskIdFor (Phase A synthesized task id)", () => {
+describe("taskIdFor (synthesized stable task id)", () => {
   it("pins the 1:1 alignment: task index 4 of criterion 1.2 stamps 1.2.5", () => {
     expect(taskIdFor("1.2", 4)).toBe("1.2.5");
     expect(taskIdFor("1.1", 0)).toBe("1.1.1");
   });
 
-  it("SWEEP: every playable (stepId x task index) id satisfies the DB CHECK mirror", () => {
-    // Phase A play is limited to 1.1/1.2; every id the producer can mint for
-    // them must nest inside the acceptor pair (regex + 16-char bound).
-    for (const stepId of ["1.1", "1.2"]) {
-      const step = stepById(stepId);
-      expect(step).toBeDefined();
-      if (!step) continue;
+  it("ALL-25 SYNTHESIS PIN (unit review FIX 7): every criterion x index matches the GENERATED id", () => {
+    // Full play spans all 25 criteria now; the synthesis is only honest while
+    // the generated ids stay 1-based positional per criterion. Assert against
+    // PATH_CONTENT directly — a future id-scheme change fails here, not in a
+    // silent feedback-row mismatch.
+    const criteria = PATH_CONTENT.phases.flatMap((phase) => phase.criteria);
+    expect(criteria.length).toBe(25);
+    for (const criterion of criteria) {
+      expect(criterion.tasks.length).toBeGreaterThan(0);
+      criterion.tasks.forEach((task, index) => {
+        expect(taskIdFor(criterion.id, index)).toBe(task.id);
+      });
+    }
+  });
+
+  it("SWEEP: every (stepId x task index) id satisfies the DB CHECK mirror", () => {
+    // Every id the producer can mint across the full sequence must nest inside
+    // the acceptor pair (regex + 16-char bound).
+    for (const step of STEPS) {
       expect(step.tasks.length).toBeGreaterThan(0);
       for (let i = 0; i < step.tasks.length; i++) {
-        const id = taskIdFor(stepId, i);
+        const id = taskIdFor(step.id, i);
         expect(id).toMatch(FEEDBACK_TASK_ID_RE);
         expect(id.length).toBeLessThanOrEqual(FEEDBACK_TASK_ID_MAX);
       }
