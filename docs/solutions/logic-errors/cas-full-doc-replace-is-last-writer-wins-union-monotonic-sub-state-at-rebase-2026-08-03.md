@@ -90,6 +90,61 @@ The business-model review found the union alone still left split-brain:
    active, rest archived) applied on load and after every union so the
    one-active invariant is restored deterministically no matter what merges.
 
+## Round 3 (whole-branch seam review, same day): the client union cannot protect against writers running OLD CODE
+
+The rebase union only fires when THIS session's write is CAS-rejected. A
+still-open tab running the previously-deployed bundle whose cached revision is
+simply current performs an ordinary, successful full-column replace — omitting
+every key its build doesn't know (`businesses`, per-idea `doneByTask` maps,
+idea `id`s), with no legacy shadow for phases 2-5 and no union anywhere in its
+code path. If that is the last write for those keys, the loss is permanent. No
+client-side fix can reach code that is already deployed.
+
+Fix: a server-side BEFORE UPDATE trigger on the save row (The120,
+`20260906120000_fp_save_doc_guard.sql`, branch feat/fp-save-doc-guard) that
+grafts back monotonic keys the incoming doc omits AT THE KEY LEVEL (key absent
+= writer-unknown → graft from OLD; key present = intentional → untouched, with
+one evidence-based exception: `businesses` present-but-empty against a
+non-empty OLD is also carried, because the client's coercion emits `[]` for
+all-invalid entries and no legitimate writer shrinks the list to empty). Ideas
+are id-matched with index fallback; the trigger never raises (it repairs or
+warns-and-passes-through), and exempts service_role/JWT-less sessions so
+owner-initiated erasure via the Management API stays possible.
+
+Its own adversarial review then hardened it with three guards the first draft
+lacked — each a lesson on server-side repair of client-owned documents:
+
+1. **A repair trigger is an amplifier for attacker-shaped input.** The doc-size
+   CHECK bounds BYTES, not element count — compressible junk fits ~50k ideas
+   under 256KiB, turning the quadratic matcher into a repeatable CPU burn. An
+   element-count fuse (>200 ideas → pass through untouched) bounds the work;
+   past the fuse it is by definition not the mixed-build case. And the client
+   must classify SQLSTATE 57014 (statement timeout) as RETRYABLE — the unknown-
+   code→terminal default would have discarded the pending snapshot.
+2. **"No writer legitimately deletes X" must be checked against every shipped
+   discard path.** The client deliberately starts fresh on malformed/unknown-
+   version docs; an unconditional graft would resurrect exactly what it
+   discarded, silently block promotion via the one-active-business invariant,
+   and accrete the doc toward the size-cap brick. A docVersion-equality gate
+   (`OLD.doc->>'docVersion' is distinct from NEW.doc->>'docVersion'` → pass
+   through) scopes the repair to the no-bump window it was designed for.
+3. **A guard that fails open silently cannot be known to work.** The catch-all
+   handler now `raise warning`s (parity test relaxed from "no raise" to "no
+   raise exception"); gates are hoisted outside the protected region; the doc
+   is built in a local and assigned once (so the exception path truly returns
+   NEW as sent); and the apply ritual ends with a live probe — an old-shape
+   UPDATE under a real child JWT asserting the grafted keys survive.
+
+Accepted, documented loss mode: an id-less old-build idea can index-match an
+id-bearing OLD idea created concurrently by a new-build session and fuse with
+it — not fixable without defeating the graft; exposure is proportional to the
+mixed-build window, so deploy order and window length are the mitigation.
+
+Prevention addition: during any rollout that adds fields to a client-replaced
+document, enumerate the writers that CANNOT be updated (deployed bundles in
+open tabs) — the merge discipline must live at the last common chokepoint they
+all pass through, which is the database write, not the client.
+
 ## Prevention
 
 - Any time a client holds a whole document and saves it with CAS + rebase, ask

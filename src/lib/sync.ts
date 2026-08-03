@@ -197,6 +197,16 @@ const MISSING_TABLE_CODES = new Set(["PGRST205", "42P01"]);
 /** Unique-violation — for the ledger PK this means "already landed": success. */
 const DUPLICATE_CODE = "23505";
 
+/**
+ * Query-canceled (`57014`) — the server killed the statement mid-flight (a
+ * statement_timeout or a pooler cancel), which says nothing structural about
+ * the write: the identical replay normally succeeds once the load spike or
+ * timeout window passes. It MUST be RETRYABLE (park in the outbox and replay)
+ * — the unknown-code terminal default below would silently discard the
+ * pending snapshot on a transient timeout.
+ */
+const QUERY_CANCELED_CODE = "57014";
+
 function pgCode(error: unknown): string {
   if (isRecord(error) && typeof error.code === "string") return error.code;
   return "";
@@ -224,6 +234,10 @@ export function classifyWriteError(error: unknown): WriteFailure {
   // they are, so PARK + replay — do NOT drop the sale. Checked BEFORE the unknown
   // -code terminal default below.
   if (MISSING_COLUMN_CODES.has(code)) return { ok: false, reason: "retryable", needsReauth: false, error };
+  // A statement-timeout cancellation is transient-by-load, not structural —
+  // park + replay, never drop. Checked BEFORE the unknown-code terminal
+  // default below.
+  if (code === QUERY_CANCELED_CODE) return { ok: false, reason: "retryable", needsReauth: false, error };
   if (TERMINAL_CODES.has(code)) return { ok: false, reason: "terminal", error };
   // No code at all → a thrown network/offline error (fetch reject, timeout):
   // genuinely transient, so retryable.

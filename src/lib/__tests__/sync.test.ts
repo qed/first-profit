@@ -879,6 +879,15 @@ describe("classifyWriteError", () => {
     );
   });
 
+  it("maps a statement-timeout cancellation (57014 query_canceled) to retryable, NOT terminal", () => {
+    // Transient-by-load: the server killed the statement mid-flight; the
+    // identical replay normally succeeds. A terminal classification here would
+    // silently discard the pending snapshot on a timeout spike.
+    expect(classifyWriteError({ code: "57014", message: "canceling statement due to statement timeout" })).toEqual(
+      expect.objectContaining({ reason: "retryable", needsReauth: false }),
+    );
+  });
+
   it("maps an UNRECOGNIZED postgres error code to terminal (never wedge the queue)", () => {
     // A DB error carrying a code we don't list recurs identically on replay; if it
     // were retryable it would jam the outbox FIRST forever. Default it to terminal.
