@@ -24,7 +24,18 @@ import {
   type RemapTarget,
 } from "../data/taskRemap";
 
-/** Schema version stored inside every serialized save doc. Bump on shape change. */
+/**
+ * Schema version stored inside every serialized save doc. Bump on shape change.
+ *
+ * ⚠ CROSS-REPO CONSUMER: the120's fp_public_sites projection trigger
+ * (the120 repo, supabase/migrations/20260907120000_fp_public_sites.sql)
+ * parses this doc shape server-side — `doc->>'siteHeadline'` and
+ * `doc->'ideas'->(activeIdea)->'fields'->>'oneLiner'` — and GATES on
+ * `doc->>'docVersion' = '1'` (any other version is skipped, never misparsed).
+ * A shape change to those paths, or a DOC_VERSION bump, must update that
+ * trigger (and its shared extraction function fp_public_site_content) in the
+ * same rollout, or public-site content silently stops refreshing.
+ */
 export const DOC_VERSION = 1;
 
 /**
