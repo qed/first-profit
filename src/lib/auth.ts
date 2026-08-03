@@ -26,7 +26,18 @@ export interface ChildProfile {
 }
 
 export type LoginResult =
-  | { ok: true; profile: ChildProfile; userId: string | null }
+  | {
+      ok: true;
+      profile: ChildProfile;
+      userId: string | null;
+      /**
+       * The child's grade from the login response (Unit 3; R9): the roster's
+       * read-time derivation, or null when the roster doesn't know. Number-or-
+       * null coercion only — an older backend build without the field, or a
+       * malformed value, is null (the ask-once flow handles null).
+       */
+      grade: number | null;
+    }
   | { ok: false };
 
 export type LogoutScope = "idle" | "explicit";
@@ -35,10 +46,17 @@ interface LoginResponseBody {
   access_token?: unknown;
   refresh_token?: unknown;
   profile?: { handle?: unknown; firstName?: unknown };
+  grade?: unknown;
 }
 
 function asString(value: unknown): string {
   return typeof value === "string" ? value : "";
+}
+
+/** Number-or-null coercion for the login `grade` field: only a finite integer
+ *  survives; anything else (absent, null, string, NaN) is null. */
+function asGrade(value: unknown): number | null {
+  return typeof value === "number" && Number.isInteger(value) ? value : null;
 }
 
 /**
@@ -76,10 +94,65 @@ export async function loginChild(identifier: string, password: string): Promise<
         handle: asString(body.profile?.handle),
         firstName: asString(body.profile?.firstName),
       },
+      grade: asGrade(body.grade),
     };
   } catch {
     // Network failure, non-JSON body, etc. — the route already flattens every
     // reason to one generic failure; mirror that here. Never surface details.
+    return { ok: false };
+  }
+}
+
+export type SubmitBirthYearResult = { ok: true; grade: number } | { ok: false };
+
+/**
+ * The ask-once birth-year write-back (Unit 3; R9/R10): POST `{birthYear}` to
+ * The120's `/api/fp/grade` under the CURRENT session's access token (the
+ * child's Bearer token, mirroring createSignupChild's session read). On a 200
+ * with `{ok:true, grade}` the server has written the roster and returns the
+ * derived grade so the caller can adopt the band without a re-login.
+ *
+ * SERVER-AUTHORITATIVE, FILL-ONLY (contract alignment with The120): when the
+ * roster grade is ALREADY set, the route performs NO write and returns the
+ * EXISTING roster grade — which may DIFFER from what this birth year derives.
+ * The returned grade is therefore authoritative in every case: the caller
+ * (GameContext.submitGradeAnswer) must adopt `grade` from the response as-is,
+ * never re-derive locally on an `ok:true`.
+ *
+ * Flat-failure discipline like loginChild: the route answers ONE generic 401
+ * for every refusal (bad token, implausible year, rate limited), so every
+ * non-2xx / malformed body / missing session / network fault collapses to
+ * `{ ok: false }` and NEVER throws. The route is rate limited (5 per 15 min
+ * per user) — this function makes exactly one attempt; any retry is the
+ * caller's explicit, bounded choice.
+ *
+ * NEVER logs the birth year or the grade (child data rides the same
+ * never-log rule as credentials).
+ */
+export async function submitBirthYear(birthYear: number): Promise<SubmitBirthYearResult> {
+  try {
+    const { t120ApiUrl } = getConfig();
+    const supabase = getSupabase();
+    const { data } = await supabase.auth.getSession();
+    const accessToken = data.session?.access_token;
+    if (!accessToken) return { ok: false };
+
+    const res = await fetch(`${t120ApiUrl.replace(/\/$/, "")}/api/fp/grade`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${accessToken}`,
+      },
+      body: JSON.stringify({ birthYear }),
+    });
+    if (!res.ok) return { ok: false };
+
+    const parsed = (await res.json()) as { ok?: unknown; grade?: unknown };
+    if (parsed.ok !== true || typeof parsed.grade !== "number" || !Number.isInteger(parsed.grade)) {
+      return { ok: false };
+    }
+    return { ok: true, grade: parsed.grade };
+  } catch {
     return { ok: false };
   }
 }

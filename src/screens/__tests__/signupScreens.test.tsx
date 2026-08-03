@@ -170,7 +170,7 @@ describe("ConsentScreen (screen 4) gate + versioned policy", () => {
         )}
       />,
     );
-    expect(screen.getByText(/v2026-08-01\.1/)).toBeTruthy();
+    expect(screen.getByText(/v2026-08-03\.1/)).toBeTruthy();
     const cta = () => screen.getByRole("button", { name: /Create my child's account/ }) as HTMLButtonElement;
     expect(cta().disabled).toBe(true);
     fireEvent.click(cta());

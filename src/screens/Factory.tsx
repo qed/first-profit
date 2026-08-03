@@ -26,6 +26,7 @@ import { FactoryFloor, type FloorView, type WalkIntent } from "../components/Fac
 import { Hud } from "../components/Hud";
 import { StepRunner } from "../components/StepRunner";
 import { Celebration } from "../components/Celebration";
+import { GradeAsk } from "../components/GradeAsk";
 import { useFocusTrap } from "../lib/useFocusTrap";
 import { YourSite } from "../components/rooms/YourSite";
 import { CheckoutBooth } from "../components/rooms/CheckoutBooth";
@@ -268,6 +269,9 @@ export function Factory() {
           onBack={() => setFloorView("phases")}
         />
         <NextStepCoach onWalk={setWalkTo} />
+        {/* Ask-once birth-year card (Unit 3): non-modal, above the breakpoint
+            conditional like the coach, so it survives the lg variant swap. */}
+        <GradeAsk />
       </div>
 
       <StepRunner />

@@ -169,7 +169,7 @@ describe("Signup container", () => {
       jurisdiction: "California, US",
       child: { firstName: "Alex", ageBand: "13_to_15", dob: AGE_DOB },
       consent: {
-        policyVersion: "2026-08-01.1",
+        policyVersion: "2026-08-03.1",
         method: "email_plus_attestation",
       },
     });
@@ -188,7 +188,7 @@ const PENDING_A: PendingSignup = {
   createdAt: Date.now(),
   child: { firstName: "Alex", ageBand: "13_to_15", dob: "2011-05-04" },
   jurisdiction: "California, US",
-  consent: { policyVersion: "2026-08-01.1", policyHash: "f".repeat(64), method: "email_plus_attestation" },
+  consent: { policyVersion: "2026-08-03.1", policyHash: "f".repeat(64), method: "email_plus_attestation" },
 };
 
 describe("Signup verify-return", () => {
@@ -228,7 +228,7 @@ describe("Signup verify-return", () => {
       attemptId: "attempt-9",
       jurisdiction: "California, US",
       consent: {
-        echoedVersion: "2026-08-01.1",
+        echoedVersion: "2026-08-03.1",
         echoedHash: "f".repeat(64),
         method: "email_plus_attestation",
       },

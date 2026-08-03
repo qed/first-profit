@@ -79,7 +79,24 @@ import {
   createSyncEngine,
   KEEPALIVE_MAX_BYTES,
   OUTBOX_VERSION,
+  insertFeedback,
+  classifyFeedbackWriteError,
+  classifyFeedbackOutcome,
+  enqueueFeedback,
+  isValidFeedbackRow,
+  flushFeedbackViaKeepalive,
+  feedbackCountForDay,
+  bumpFeedbackCountForDay,
+  utcDayToday,
+  flushOutboxForPriorUser,
+  FEEDBACK_BODY_MAX,
+  FEEDBACK_DAILY_CAP,
+  FEEDBACK_CAP_ERRCODE,
+  FEEDBACK_TASK_ID_RE,
+  FEEDBACK_TASK_ID_MAX,
+  FEEDBACK_BANDS,
   type LedgerInsertRow,
+  type FeedbackInsertRow,
 } from "../sync";
 import { DOC_VERSION, type SaveDoc } from "../../state/gameCore";
 
@@ -1060,6 +1077,151 @@ describe("createSyncEngine", () => {
     engine.stop();
   });
 
+  // ── Feedback ("Stuck? Tell us") engine paths ────────────────────────────────
+  it("notifyFeedback enqueues durably then resolves 'sent' on a landed insert", async () => {
+    const engine = makeEngine();
+    let sent: Record<string, unknown> | null = null;
+    handlers.insert = (r) => {
+      sent = r as Record<string, unknown>;
+      return { error: null };
+    };
+    await engine.start();
+
+    const outcome = await engine.notifyFeedback({
+      id: "fb-1",
+      taskId: "1.2.5",
+      band: "unknown",
+      body: "stuck here",
+    });
+    expect(outcome).toBe("sent");
+    // The row shape the DB sees: snake_case columns, NEVER created_at (the
+    // column-scoped INSERT grant excludes it; sending it fails the insert).
+    expect(sent).toEqual({
+      id: "fb-1",
+      profile_id: PROFILE,
+      task_id: "1.2.5",
+      band: "unknown",
+      body: "stuck here",
+    });
+    expect(readOutbox(USER, engineStorage).feedback).toHaveLength(0); // resolved
+    engine.stop();
+  });
+
+  it("notifyFeedback with a missing TABLE (PGRST205) resolves 'queued' and the entry stays parked", async () => {
+    const engine = makeEngine();
+    handlers.insert = () => ({
+      error: { code: "PGRST205", message: "could not find the table 'public.fp_task_feedback' in the schema cache" },
+    });
+    await engine.start();
+
+    const outcome = await engine.notifyFeedback({ id: "fb-2", taskId: "1.1.1", band: "unknown", body: "" });
+    expect(outcome).toBe("queued");
+    expect(readOutbox(USER, engineStorage).feedback).toHaveLength(1); // parked, not dropped
+    engine.stop();
+  });
+
+  it("notifyFeedback FP429 resolves 'capped': entry RESOLVED out of the outbox (never parked, never silent) and the local day counter pinned to the cap", async () => {
+    const engine = makeEngine();
+    handlers.insert = () => ({
+      error: { code: FEEDBACK_CAP_ERRCODE, message: "fp_task_feedback: daily feedback cap reached" },
+    });
+    await engine.start();
+
+    const outcome = await engine.notifyFeedback({
+      id: "fb-cap",
+      taskId: "1.1.1",
+      band: "unknown",
+      body: "",
+    });
+    expect(outcome).toBe("capped"); // the child SEES the capped copy — not "sent", not silence
+    expect(readOutbox(USER, engineStorage).feedback).toHaveLength(0); // removed, not parked
+    // Server cap adopted locally: the next tap short-circuits to 'capped'
+    // without another doomed insert.
+    expect(feedbackCountForDay(USER, utcDayToday(), engineStorage)).toBe(FEEDBACK_DAILY_CAP);
+    engine.stop();
+  });
+
+  it("notifyFeedback whose outbox write is REFUSED (storage quota) resolves 'dropped' without throwing or inserting undurably", async () => {
+    const engine = makeEngine();
+    await engine.start();
+    let inserts = 0;
+    handlers.insert = () => {
+      inserts += 1;
+      return { error: null };
+    };
+    // Every subsequent write to the engine's storage now fails (quota).
+    engineStorage.setItem = () => {
+      throw new Error("QuotaExceededError");
+    };
+
+    const outcome = await engine.notifyFeedback({
+      id: "fb-q",
+      taskId: "1.1.2",
+      band: "unknown",
+      body: "full disk",
+    });
+    expect(outcome).toBe("dropped"); // honest: the row is not durable anywhere
+    expect(inserts).toBe(0); // no network attempt for an undurable row
+    // The day counter was not corrupted by the failed write path.
+    expect(feedbackCountForDay(USER, utcDayToday(), engineStorage)).toBe(0);
+    engine.stop();
+  });
+
+  it("start() records the resolved profile id under fp:<uid>:profileId (for the pre-wipe prior-user flush)", async () => {
+    const engine = makeEngine();
+    await engine.start();
+    expect(JSON.parse(engineStorage.getItem(`fp:${USER}:profileId`) as string)).toBe(PROFILE);
+    engine.stop();
+  });
+
+  it("GENERATION GUARD: a feedback insert resolving after stop() never touches the live session's reauth path", async () => {
+    const engine = makeEngine();
+    let release: (v: unknown) => void = () => undefined;
+    handlers.insert = () => new Promise((resolve) => {
+      release = resolve;
+    });
+    await engine.start();
+
+    const pending = engine.notifyFeedback({ id: "fb-3", taskId: "1.1.2", band: "unknown", body: "x" });
+    engine.stop(); // session switch on the shared device; generation bumps.
+    release({ error: { code: "42501", message: "RLS refusal" } }); // retryable + needsReauth
+    const outcome = await pending;
+
+    expect(outcome).toBe("queued"); // still honestly parked in USER's own outbox
+    expect(reauth).toBe(0); // but the superseded session never drives the live UI
+    expect(readOutbox(USER, engineStorage).feedback).toHaveLength(1);
+  });
+
+  it("notifyFeedback on a STOPPED engine refuses ('dropped') and enqueues nothing", async () => {
+    const engine = makeEngine();
+    await engine.start();
+    engine.stop();
+    const outcome = await engine.notifyFeedback({ id: "fb-4", taskId: "1.1.1", band: "unknown", body: "" });
+    expect(outcome).toBe("dropped");
+    expect(readOutbox(USER, engineStorage).feedback).toHaveLength(0);
+  });
+
+  it("flushOnHide fires queued feedback entries via keepalive (no created_at in the body)", async () => {
+    const engine = makeEngine();
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true });
+    global.fetch = fetchMock as unknown as typeof fetch;
+    handlers.insert = () => ({ error: new Error("offline") });
+    await engine.start();
+
+    await engine.notifyFeedback({ id: "fb-5", taskId: "1.2.3", band: "unknown", body: "help" });
+    expect(readOutbox(USER, engineStorage).feedback).toHaveLength(1); // still queued
+
+    engine.flushOnHide();
+    const posts = fetchMock.mock.calls.filter(
+      ([url]) => typeof url === "string" && url.includes("/rest/v1/fp_task_feedback"),
+    );
+    expect(posts).toHaveLength(1);
+    const body = JSON.parse(posts[0][1].body as string) as Record<string, unknown>;
+    expect(body).toEqual({ id: "fb-5", profile_id: PROFILE, task_id: "1.2.3", band: "unknown", body: "help" });
+    expect("created_at" in body).toBe(false);
+    engine.stop();
+  });
+
   // ── persistLedger immediate-write terminal branch ───────────────────────────
   it("an immediate ledger insert that fails terminally is dropped (outbox empty) and status ends error", async () => {
     const engine = makeEngine();
@@ -1072,5 +1234,427 @@ describe("createSyncEngine", () => {
     expect(readOutbox(USER, engineStorage).ledger).toHaveLength(0); // dropped, not stuck
     expect(statuses[statuses.length - 1]).toBe("error");
     engine.stop();
+  });
+});
+
+// ── Feedback ("Stuck? Tell us") module paths ─────────────────────────────────
+describe("insertFeedback + classification", () => {
+  const row: FeedbackInsertRow = { id: "fb-1", taskId: "1.2.5", band: "unknown", body: "stuck" };
+
+  it("inserts the row (no created_at) and reports ok", async () => {
+    let sent: Record<string, unknown> | null = null;
+    handlers.insert = (r) => {
+      sent = r as Record<string, unknown>;
+      return { error: null };
+    };
+    expect(await insertFeedback(PROFILE, row)).toEqual({ ok: true });
+    expect(sent).toEqual({
+      id: "fb-1",
+      profile_id: PROFILE,
+      task_id: "1.2.5",
+      band: "unknown",
+      body: "stuck",
+    });
+    expect("created_at" in (sent as unknown as Record<string, unknown>)).toBe(false);
+  });
+
+  it("classifies a duplicate-id insert (23505) as SUCCESS (already landed)", async () => {
+    handlers.insert = () => ({ error: { code: "23505", message: "duplicate key" } });
+    expect(await insertFeedback(PROFILE, row)).toEqual({ ok: true });
+  });
+
+  it("PARKS (keep) a missing-TABLE insert: PGRST205 schema-cache and 42P01 undefined_table", async () => {
+    // The table ships in a separate deploy lane (T120 migration). A report sent
+    // before it lands must PARK and replay, never DROP — else every pre-deploy
+    // stuck report is silently lost.
+    handlers.insert = () => ({
+      error: { code: "PGRST205", message: "could not find the table in the schema cache" },
+    });
+    let result = await insertFeedback(PROFILE, row);
+    expect(classifyFeedbackOutcome(result)).toEqual({ decision: "keep", needsReauth: false });
+
+    handlers.insert = () => ({ error: { code: "42P01", message: "relation does not exist" } });
+    result = await insertFeedback(PROFILE, row);
+    expect(classifyFeedbackOutcome(result)).toEqual({ decision: "keep", needsReauth: false });
+  });
+
+  it("FP429 (daily-cap trigger) classifies as the DISTINCT 'capped' outcome, end to end", async () => {
+    expect(classifyFeedbackWriteError({ code: FEEDBACK_CAP_ERRCODE })).toEqual(
+      expect.objectContaining({ ok: false, reason: "capped" }),
+    );
+    handlers.insert = () => ({
+      error: { code: "FP429", message: "fp_task_feedback: daily feedback cap reached" },
+    });
+    const result = await insertFeedback(PROFILE, row);
+    expect(classifyFeedbackOutcome(result)).toEqual({ decision: "capped", needsReauth: false });
+  });
+
+  it("23503 (profile provisioning race) is retryable for FEEDBACK ONLY; the ledger keeps it terminal", () => {
+    // A brand-new child's first tap can race the service-role profile
+    // provisioning: park + replay once the profile exists.
+    expect(classifyFeedbackWriteError({ code: "23503" })).toEqual(
+      expect.objectContaining({ reason: "retryable", needsReauth: false }),
+    );
+    // The ledger's classification is deliberately UNCHANGED (pre-existing
+    // terminal posture; out of this unit's scope).
+    expect(classifyWriteError({ code: "23503" })).toEqual(
+      expect.objectContaining({ reason: "terminal" }),
+    );
+  });
+
+  it("keeps the ledger rules otherwise: terminal drops, auth parks with reauth, unknown code terminal", async () => {
+    // The daily-cap trigger raise (P0001) and CHECK violations (23514) recur
+    // identically forever -> drop.
+    expect(classifyFeedbackWriteError({ code: "P0001" })).toEqual(
+      expect.objectContaining({ reason: "terminal" }),
+    );
+    expect(classifyFeedbackWriteError({ code: "23514" })).toEqual(
+      expect.objectContaining({ reason: "terminal" }),
+    );
+    expect(classifyFeedbackWriteError({ code: "42501" })).toEqual(
+      expect.objectContaining({ reason: "retryable", needsReauth: true }),
+    );
+    expect(classifyFeedbackWriteError({ code: "22P02" })).toEqual(
+      expect.objectContaining({ reason: "terminal" }),
+    );
+    handlers.insert = () => ({ error: { code: "23514", message: "body too long" } });
+    const result = await insertFeedback(PROFILE, row);
+    expect(classifyFeedbackOutcome(result)).toEqual({ decision: "drop", needsReauth: false });
+  });
+});
+
+describe("feedback outbox (CHECK mirror + queue)", () => {
+  const row: FeedbackInsertRow = { id: "fb-1", taskId: "1.1.3", band: "unknown", body: "" };
+
+  it("enqueues idempotently by id; empty body is VALID (a tap is signal)", () => {
+    const s = fakeStorage();
+    expect(enqueueFeedback(USER, row, s)).toBe(true);
+    expect(enqueueFeedback(USER, row, s)).toBe(true); // same id -> no duplicate
+    expect(readOutbox(USER, s).feedback).toHaveLength(1);
+  });
+
+  it("REFUSES a row failing the client-side CHECK mirror before it can ever draw a terminal refusal", () => {
+    const s = fakeStorage();
+    // Malformed task ids (regex mirror of the DB CHECK).
+    expect(enqueueFeedback(USER, { ...row, taskId: "1.2" }, s)).toBe(false);
+    expect(enqueueFeedback(USER, { ...row, taskId: "1.2.x" }, s)).toBe(false);
+    expect(enqueueFeedback(USER, { ...row, taskId: "12345.67890.12345" }, s)).toBe(false); // > 16 chars
+    // Body over the 1000-char CHECK.
+    expect(enqueueFeedback(USER, { ...row, body: "x".repeat(FEEDBACK_BODY_MAX + 1) }, s)).toBe(false);
+    // Band outside the enum.
+    expect(enqueueFeedback(USER, { ...row, band: "g1_2" as FeedbackInsertRow["band"] }, s)).toBe(false);
+    expect(readOutbox(USER, s).feedback).toHaveLength(0);
+
+    // The happy shapes all pass.
+    expect(isValidFeedbackRow({ id: "a", taskId: "1.2.5", band: "unknown", body: "" })).toBe(true);
+    expect(isValidFeedbackRow({ id: "a", taskId: "5.5.5", band: "g9_12", body: "x".repeat(1000) })).toBe(true);
+  });
+
+  it("a REFUSED storage write (quota) makes enqueueFeedback report false — never throws, never claims durability", () => {
+    const s = fakeStorage();
+    s.setItem = () => {
+      throw new Error("QuotaExceededError");
+    };
+    expect(() => enqueueFeedback(USER, row, s)).not.toThrow();
+    expect(enqueueFeedback(USER, row, s)).toBe(false);
+    // The day counter tolerates the same failure without throwing or corrupting.
+    expect(() => bumpFeedbackCountForDay(USER, "2026-08-03", s)).not.toThrow();
+    expect(feedbackCountForDay(USER, "2026-08-03", s)).toBe(0);
+  });
+
+  it("readOutbox drops unknown-version and malformed feedback entries, keeps valid ones", () => {
+    const s = fakeStorage();
+    s.setItem(
+      `fp:${USER}:outbox`,
+      JSON.stringify({
+        ledger: [],
+        feedback: [
+          { v: OUTBOX_VERSION, row },
+          { v: OUTBOX_VERSION + 1, row: { ...row, id: "future" } },
+          { v: OUTBOX_VERSION, row: { ...row, id: "bad", taskId: "nope" } },
+        ],
+        snapshot: null,
+      }),
+    );
+    expect(readOutbox(USER, s).feedback.map((e) => e.row.id)).toEqual(["fb-1"]);
+  });
+
+  it("a pre-feedback outbox (no feedback field) reads as an empty feedback queue", () => {
+    const s = fakeStorage();
+    s.setItem(`fp:${USER}:outbox`, JSON.stringify({ ledger: [], snapshot: null }));
+    expect(readOutbox(USER, s).feedback).toEqual([]);
+  });
+});
+
+describe("replayOutbox with feedback entries", () => {
+  const led = (id: string): LedgerInsertRow => ({ id, kind: "sale", payer: "P", amountCents: 100 });
+  const fb = (id: string, taskId = "1.1.1"): FeedbackInsertRow => ({
+    id,
+    taskId,
+    band: "unknown",
+    body: "stuck",
+  });
+
+  it("drains feedback to inserts AFTER the ledger, in queue order, resolving all", async () => {
+    const s = fakeStorage();
+    enqueueLedger(USER, led("led-a"), s);
+    enqueueFeedback(USER, fb("fb-a", "1.1.2"), s);
+    enqueueLedger(USER, led("led-b"), s);
+    enqueueFeedback(USER, fb("fb-b", "1.2.5"), s);
+
+    const seen: string[] = [];
+    handlers.insert = (r) => {
+      seen.push((r as { id: string }).id);
+      return { error: null };
+    };
+    const result = await replayOutbox(USER, PROFILE, s);
+    // Ledger first (money before telemetry), then feedback, each in enqueue order.
+    expect(seen).toEqual(["led-a", "led-b", "fb-a", "fb-b"]);
+    expect(result.ledgerSent).toBe(2);
+    expect(result.feedbackSent).toBe(2);
+    const outbox = readOutbox(USER, s);
+    expect(outbox.ledger).toHaveLength(0);
+    expect(outbox.feedback).toHaveLength(0);
+  });
+
+  it("a 23505 duplicate on replay is success (report already landed on a prior try)", async () => {
+    const s = fakeStorage();
+    enqueueFeedback(USER, fb("fb-dup"), s);
+    handlers.insert = () => ({ error: { code: "23505" } });
+    const result = await replayOutbox(USER, PROFILE, s);
+    expect(result.feedbackSent).toBe(1);
+    expect(readOutbox(USER, s).feedback).toHaveLength(0);
+  });
+
+  it("PGRST205 / 42P01 (table not deployed yet) PARKS the entry: retained for a later replay", async () => {
+    const s = fakeStorage();
+    enqueueFeedback(USER, fb("fb-park"), s);
+    handlers.insert = () => ({ error: { code: "PGRST205", message: "no such table in schema cache" } });
+    let result = await replayOutbox(USER, PROFILE, s);
+    expect(result.feedbackSent).toBe(0);
+    expect(result.feedbackDroppedTerminal).toBe(0);
+    expect(readOutbox(USER, s).feedback.map((e) => e.row.id)).toEqual(["fb-park"]);
+
+    handlers.insert = () => ({ error: { code: "42P01", message: "undefined table" } });
+    result = await replayOutbox(USER, PROFILE, s);
+    expect(readOutbox(USER, s).feedback.map((e) => e.row.id)).toEqual(["fb-park"]);
+
+    // Once the table lands, the same parked entry drains clean.
+    handlers.insert = () => ({ error: null });
+    result = await replayOutbox(USER, PROFILE, s);
+    expect(result.feedbackSent).toBe(1);
+    expect(readOutbox(USER, s).feedback).toHaveLength(0);
+  });
+
+  it("a terminal code DROPS the entry with the terminal classification (no retry storm)", async () => {
+    const s = fakeStorage();
+    enqueueFeedback(USER, fb("fb-term"), s);
+    handlers.insert = () => ({ error: { code: "P0001", message: "daily feedback cap reached" } });
+    const result = await replayOutbox(USER, PROFILE, s);
+    expect(result.feedbackDroppedTerminal).toBe(1);
+    expect(result.feedbackSent).toBe(0);
+    expect(readOutbox(USER, s).feedback).toHaveLength(0);
+  });
+
+  it("FP429 on replay REMOVES the entry without wedging the queue and pins the local counter to the cap", async () => {
+    const s = fakeStorage();
+    enqueueFeedback(USER, fb("fb-c1"), s);
+    enqueueFeedback(USER, fb("fb-c2", "1.2.2"), s);
+    handlers.insert = () => ({ error: { code: FEEDBACK_CAP_ERRCODE, message: "cap reached" } });
+
+    const result = await replayOutbox(USER, PROFILE, s);
+    // Capped never stops the drain (both entries were attempted and removed) —
+    // the queue can NEVER wedge behind a capped report.
+    expect(result.feedbackCapped).toBe(2);
+    expect(result.feedbackSent).toBe(0);
+    expect(result.feedbackDroppedTerminal).toBe(0);
+    expect(readOutbox(USER, s).feedback).toHaveLength(0);
+    expect(feedbackCountForDay(USER, utcDayToday(), s)).toBe(FEEDBACK_DAILY_CAP);
+  });
+
+  it("23503 (provisioning race) PARKS the entry, then drains clean once the profile exists", async () => {
+    const s = fakeStorage();
+    enqueueFeedback(USER, fb("fb-fk"), s);
+    handlers.insert = () => ({ error: { code: "23503", message: "fk violation on profile_id" } });
+
+    let result = await replayOutbox(USER, PROFILE, s);
+    expect(result.feedbackSent).toBe(0);
+    expect(result.feedbackDroppedTerminal).toBe(0);
+    expect(readOutbox(USER, s).feedback.map((e) => e.row.id)).toEqual(["fb-fk"]); // retained
+
+    // The profile lands (service-role provisioning completed): drains clean.
+    handlers.insert = () => ({ error: null });
+    result = await replayOutbox(USER, PROFILE, s);
+    expect(result.feedbackSent).toBe(1);
+    expect(readOutbox(USER, s).feedback).toHaveLength(0);
+  });
+
+  it("SYMMETRIC drain: a ledger retryable STOP does not block the feedback drain", async () => {
+    const s = fakeStorage();
+    enqueueLedger(USER, led("led-a"), s);
+    enqueueFeedback(USER, fb("fb-a"), s);
+    handlers.insert = (r) => {
+      const row = r as { task_id?: string };
+      // The ledger insert fails retryable (codeless network error); the
+      // feedback insert lands.
+      return row.task_id ? { error: null } : { error: new Error("offline") };
+    };
+
+    const result = await replayOutbox(USER, PROFILE, s);
+    expect(result.ledgerSent).toBe(0);
+    expect(readOutbox(USER, s).ledger.map((e) => e.row.id)).toEqual(["led-a"]); // ledger kept
+    expect(result.feedbackSent).toBe(1); // feedback drained anyway
+    expect(readOutbox(USER, s).feedback).toHaveLength(0);
+  });
+
+  it("a retryable feedback stop preserves order and does NOT block the ledger/snapshot drains", async () => {
+    const s = fakeStorage();
+    enqueueLedger(USER, led("led-a"), s);
+    enqueueFeedback(USER, fb("fb-a"), s);
+    enqueueFeedback(USER, fb("fb-b"), s);
+    parkSnapshot(USER, 3, docWith(), s);
+
+    handlers.insert = (r) => {
+      const row = r as { id: string; task_id?: string };
+      // Only feedback fails (table missing); the ledger insert lands.
+      return row.task_id ? { error: { code: "PGRST205" } } : { error: null };
+    };
+    handlers.update = () => ({ data: [{ profile_id: PROFILE }], error: null });
+
+    const result = await replayOutbox(USER, PROFILE, s);
+    expect(result.ledgerSent).toBe(1); // money drained
+    expect(result.snapshot).toEqual({ ok: true, revision: 4 }); // snapshot drained
+    expect(result.feedbackSent).toBe(0);
+    // Both feedback entries retained IN ORDER for the next replay.
+    expect(readOutbox(USER, s).feedback.map((e) => e.row.id)).toEqual(["fb-a", "fb-b"]);
+  });
+});
+
+describe("flushFeedbackViaKeepalive", () => {
+  it("POSTs the report with manual auth headers and return=minimal, no created_at", () => {
+    global.fetch = vi.fn().mockResolvedValue({ ok: true }) as unknown as typeof fetch;
+    const auth = { supabaseUrl: "https://supabase.test", apikey: "anon-key", accessToken: "tok" };
+    const res = flushFeedbackViaKeepalive(auth, PROFILE, {
+      id: "fb-k",
+      taskId: "1.1.4",
+      band: "unknown",
+      body: "hi",
+    });
+    expect(res).toEqual({ sent: true });
+    const [url, init] = (global.fetch as ReturnType<typeof vi.fn>).mock.calls[0];
+    expect(url).toContain("/rest/v1/fp_task_feedback");
+    expect(init.method).toBe("POST");
+    expect(init.keepalive).toBe(true);
+    expect(init.headers.apikey).toBe("anon-key");
+    expect(init.headers.Authorization).toBe("Bearer tok");
+    expect(init.headers.Prefer).toBe("return=minimal");
+    const body = JSON.parse(init.body) as Record<string, unknown>;
+    expect(body).toEqual({ id: "fb-k", profile_id: PROFILE, task_id: "1.1.4", band: "unknown", body: "hi" });
+    // created_at is server-managed (excluded from the INSERT grant): sending it
+    // would fail the whole insert. It must NEVER ride the keepalive body.
+    expect("created_at" in body).toBe(false);
+  });
+});
+
+// ── flushOutboxForPriorUser (pre-wipe best-effort flush, FIX 5) ──────────────
+describe("flushOutboxForPriorUser", () => {
+  beforeEach(() => {
+    global.fetch = vi.fn().mockResolvedValue({ ok: true }) as unknown as typeof fetch;
+    getSession.mockResolvedValue({ data: { session: { access_token: "prior-tok" } } });
+  });
+
+  function feedbackPosts() {
+    return (global.fetch as ReturnType<typeof vi.fn>).mock.calls.filter(
+      ([url]) => typeof url === "string" && url.includes("/rest/v1/fp_task_feedback"),
+    );
+  }
+
+  it("fires keepalive POSTs for the prior user's queued feedback rows, addressed by their stored profile id", async () => {
+    const s = fakeStorage();
+    s.setItem(`fp:${USER}:profileId`, JSON.stringify(PROFILE)); // persisted by engine.start
+    enqueueFeedback(
+      USER,
+      { id: "fb-prior", taskId: "1.1.2", band: "unknown", body: "left behind" },
+      s,
+    );
+
+    await flushOutboxForPriorUser(USER, s);
+
+    const posts = feedbackPosts();
+    expect(posts).toHaveLength(1);
+    const [, init] = posts[0] as [string, { keepalive: boolean; body: string }];
+    expect(init.keepalive).toBe(true);
+    expect(JSON.parse(init.body)).toEqual({
+      id: "fb-prior",
+      profile_id: PROFILE,
+      task_id: "1.1.2",
+      band: "unknown",
+      body: "left behind",
+    });
+  });
+
+  it("captures the outbox SYNCHRONOUSLY, so the caller's immediate wipe cannot race it", async () => {
+    const s = fakeStorage();
+    s.setItem(`fp:${USER}:profileId`, JSON.stringify(PROFILE));
+    enqueueFeedback(USER, { id: "fb-race", taskId: "1.2.4", band: "unknown", body: "" }, s);
+
+    // The login path fires the flush unawaited and wipes fp:* immediately after.
+    const pending = flushOutboxForPriorUser(USER, s);
+    s.clear();
+    await pending;
+
+    const posts = feedbackPosts();
+    expect(posts).toHaveLength(1);
+    expect((JSON.parse((posts[0][1] as { body: string }).body) as { id: string }).id).toBe(
+      "fb-race",
+    );
+  });
+
+  it("is inert (never throws, sends nothing) without a stored profile id or a session token", async () => {
+    const s = fakeStorage();
+    enqueueFeedback(USER, { id: "fb-x", taskId: "1.1.1", band: "unknown", body: "" }, s);
+    await flushOutboxForPriorUser(USER, s); // no profileId stored
+
+    s.setItem(`fp:${USER}:profileId`, JSON.stringify(PROFILE));
+    getSession.mockResolvedValue({ data: { session: null } });
+    await flushOutboxForPriorUser(USER, s); // no token
+
+    expect(global.fetch).not.toHaveBeenCalled();
+  });
+});
+
+// ── Cross-repo mirror parity (The120 app/fp/lib/fp-task-feedback-rules.ts) ───
+describe("feedback contract parity pins", () => {
+  it("pins the mirrored constants as LITERALS, byte-for-byte", () => {
+    // These literals mirror The120's app/fp/lib/fp-task-feedback-rules.ts (the
+    // counterpart contract module for the fp_task_feedback migration). Any byte
+    // drift here is a DELIBERATE test failure: change both repos (and the DB
+    // CHECKs/trigger they mirror) together, or not at all.
+    expect(FEEDBACK_TASK_ID_RE.source).toBe("^[0-9]+(\\.[0-9]+){2}$");
+    expect(FEEDBACK_TASK_ID_MAX).toBe(16);
+    expect(FEEDBACK_BODY_MAX).toBe(1000);
+    expect(FEEDBACK_DAILY_CAP).toBe(50);
+    expect(FEEDBACK_CAP_ERRCODE).toBe("FP429");
+    expect([...FEEDBACK_BANDS]).toEqual(["g3_5", "g6_8", "g9_12", "unknown"]);
+  });
+});
+
+describe("feedback daily counter (local mirror of the DB 50/day cap)", () => {
+  it("counts per UTC day and resets on a new day", () => {
+    const s = fakeStorage();
+    expect(feedbackCountForDay(USER, "2026-08-03", s)).toBe(0);
+    bumpFeedbackCountForDay(USER, "2026-08-03", s);
+    bumpFeedbackCountForDay(USER, "2026-08-03", s);
+    expect(feedbackCountForDay(USER, "2026-08-03", s)).toBe(2);
+    // A new day reads as zero; bumping it replaces the stale record.
+    expect(feedbackCountForDay(USER, "2026-08-04", s)).toBe(0);
+    bumpFeedbackCountForDay(USER, "2026-08-04", s);
+    expect(feedbackCountForDay(USER, "2026-08-04", s)).toBe(1);
+  });
+
+  it("tolerates a corrupted stored record (reads 0, never throws)", () => {
+    const s = fakeStorage();
+    s.setItem(`fp:${USER}:feedbackDay`, JSON.stringify({ day: 7, count: "many" }));
+    expect(feedbackCountForDay(USER, "2026-08-03", s)).toBe(0);
   });
 });

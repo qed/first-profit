@@ -48,10 +48,23 @@ function allKeys(storage: Storage): string[] {
   return keys;
 }
 
-/** Store a JSON-serialized draft value under `fp:<userId>:<name>`. */
-export function setDraft(userId: string, name: string, value: unknown, storage?: Storage): void {
-  const s = resolveStorage(storage);
-  s.setItem(draftKey(userId, name), JSON.stringify(value));
+/**
+ * Store a JSON-serialized draft value under `fp:<userId>:<name>`.
+ *
+ * NON-THROWING: a refused write (QuotaExceededError on a full disk, a
+ * private-mode/locked-down Storage, a serialization failure) reports `false`
+ * instead of throwing, so a caller on the outbox/feedback path can degrade to
+ * an honest "could not save" instead of crashing mid-submit. Returns `true`
+ * when the write landed.
+ */
+export function setDraft(userId: string, name: string, value: unknown, storage?: Storage): boolean {
+  try {
+    const s = resolveStorage(storage);
+    s.setItem(draftKey(userId, name), JSON.stringify(value));
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 /**

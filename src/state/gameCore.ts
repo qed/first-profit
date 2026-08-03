@@ -72,12 +72,29 @@ export interface Idea {
   fields: Record<string, string>;
   /** Task completion, keyed by `${stepId}#${index}`. */
   done: Record<string, boolean>;
+  /**
+   * Completion timestamps (caller-stamped epoch ms), keyed by the SAME legacy
+   * `${stepId}#${index}` scheme as `done` (Unit 5 remaps both together).
+   * ADDITIVE OPTIONAL (the chosenProvider precedent): existing docs/ideas have
+   * no such field, so it is absent until a timestamped completion happens —
+   * no DOC_VERSION bump. Makes silent stalls queryable for the cohort (R13).
+   */
+  doneAt?: Record<string, number>;
 }
 
 export interface Profile {
   firstName: string;
   handle: string;
   siteHeadline: string;
+  /**
+   * The child's grade (Unit 3; R9), or null while unknown. ROSTER-DERIVED and
+   * adopted at login from the /api/fp/login response (or from the ask-once
+   * answer), so it is deliberately NOT part of the save doc: persisting a
+   * grade snapshot would let it go stale across school years, while the
+   * roster's read-time derivation never does — every session re-adopts the
+   * current truth. Per-account child data, so RESET_SESSION nulls it.
+   */
+  grade: number | null;
 }
 
 export interface GameState {
@@ -111,7 +128,7 @@ export function initialState(): GameState {
   return {
     stage: "boot",
     ob: 2,
-    profile: { firstName: "", handle: "", siteHeadline: "" },
+    profile: { firstName: "", handle: "", siteHeadline: "", grade: null },
     ideas: [],
     activeIdea: 0,
     ledger: [],
@@ -153,6 +170,8 @@ export function toSaveDoc(state: GameState): SaveDoc {
     ideas: state.ideas.map((idea) => ({
       fields: { ...idea.fields },
       done: { ...idea.done },
+      // Emit doneAt only when it exists so an untimestamped doc stays byte-stable.
+      ...(idea.doneAt ? { doneAt: { ...idea.doneAt } } : {}),
     })),
     activeIdea: state.activeIdea,
     siteHeadline: state.profile.siteHeadline,
@@ -186,6 +205,16 @@ function coerceIdea(value: unknown): Idea {
     for (const [key, leaf] of Object.entries(value.done)) {
       if (typeof leaf === "boolean") done[key] = leaf;
     }
+  }
+  // Additive-optional doneAt: absent on old docs -> stays absent (never invented).
+  // Only finite, non-negative numeric leaves survive (NaN would JSON.stringify to
+  // null and poison the next load, mirroring the chosenAt discipline).
+  if (isRecord(value.doneAt)) {
+    const doneAt: Record<string, number> = {};
+    for (const [key, leaf] of Object.entries(value.doneAt)) {
+      if (typeof leaf === "number" && Number.isFinite(leaf) && leaf >= 0) doneAt[key] = leaf;
+    }
+    return { fields, done, doneAt };
   }
   return { fields, done };
 }
@@ -368,7 +397,12 @@ export type Action =
   | { type: "CREATE_IDEA" }
   | { type: "SET_ACTIVE_IDEA"; ideaIndex: number }
   | { type: "SET_FIELD"; ideaIndex: number; key: string; value: string }
-  | { type: "COMPLETE_TASK"; ideaIndex: number; stepId: string; index: number }
+  /**
+   * `at` is the caller-stamped completion time (epoch ms) — this module stays
+   * Date.now()-free (the chosenAt precedent). Optional so stale/legacy callers
+   * remain valid; without it the task completes with no doneAt entry.
+   */
+  | { type: "COMPLETE_TASK"; ideaIndex: number; stepId: string; index: number; at?: number }
   | { type: "OPEN_RUNNER"; stepId?: string; index?: number }
   | { type: "CLOSE_RUNNER" }
   | { type: "OPEN_ROOM"; room: RoomId }
@@ -392,16 +426,24 @@ function markTaskDone(
   ideaIndex: number,
   stepId: string,
   index: number,
+  at?: number,
 ): GameState {
   if (!hasIdea(state, ideaIndex)) return state;
   const step = stepById(stepId);
   if (!step || index < 0 || index >= step.tasks.length) return state;
   if (isTaskDone(state, ideaIndex, stepId, index)) return state;
 
+  // Only a well-formed caller stamp is recorded (finite, non-negative epoch ms);
+  // a missing/malformed stamp completes the task with no doneAt entry.
+  const stampValid = typeof at === "number" && Number.isFinite(at) && at >= 0;
   const wasCriterionDone = isCriterionDone(state, ideaIndex, stepId);
   const ideas = state.ideas.map((idea, i) =>
     i === ideaIndex
-      ? { ...idea, done: { ...idea.done, [taskKey(stepId, index)]: true } }
+      ? {
+          ...idea,
+          done: { ...idea.done, [taskKey(stepId, index)]: true },
+          ...(stampValid ? { doneAt: { ...(idea.doneAt ?? {}), [taskKey(stepId, index)]: at } } : {}),
+        }
       : idea,
   );
   let next: GameState = { ...state, ideas };
@@ -469,7 +511,7 @@ export function reducer(state: GameState, action: Action): GameState {
     }
 
     case "COMPLETE_TASK":
-      return markTaskDone(state, action.ideaIndex, action.stepId, action.index);
+      return markTaskDone(state, action.ideaIndex, action.stepId, action.index, action.at);
 
     case "OPEN_RUNNER": {
       const stepId = action.stepId ?? nextUpFor(state, state.activeIdea) ?? PLAYABLE_STEPS[0];
@@ -568,7 +610,17 @@ export function reducer(state: GameState, action: Action): GameState {
           hasIdea(next, next.activeIdea) &&
           isStepUnlocked(next, next.activeIdea, "1.2")
         ) {
-          next = markTaskDone(next, next.activeIdea, "1.2", saleStep.tasks.length - 1);
+          // Stamp the auto-completion from the row's caller-stamped createdAt
+          // (the module stays Date.now()-free); an unparseable timestamp just
+          // completes without a doneAt entry.
+          const at = Date.parse(action.createdAt);
+          next = markTaskDone(
+            next,
+            next.activeIdea,
+            "1.2",
+            saleStep.tasks.length - 1,
+            Number.isFinite(at) && at >= 0 ? at : undefined,
+          );
         }
       }
       return next;
@@ -620,12 +672,15 @@ export function reducer(state: GameState, action: Action): GameState {
     case "RESET_SESSION": {
       // Clear all per-account business/financial + UI state so no previous
       // child's ideas/ledger can leak into the next session on a shared device.
-      // `stage` and `profile` are deliberately left for the caller to set.
+      // `stage` and `profile` are deliberately left for the caller to set —
+      // EXCEPT `grade`, which is per-account child data adopted from the
+      // roster at login and must never survive a session boundary (the next
+      // child's login re-adopts, or the ask-once flow runs).
       const fresh = initialState();
       return {
         ...fresh,
         stage: state.stage,
-        profile: state.profile,
+        profile: { ...state.profile, grade: null },
       };
     }
 
@@ -636,6 +691,9 @@ export function reducer(state: GameState, action: Action): GameState {
         ideas: doc.ideas.map((idea) => ({
           fields: { ...idea.fields },
           done: { ...idea.done },
+          // Split-storage learning: HYDRATE must source every persisted slice it
+          // resets — copying doneAt here keeps timestamps from being wiped on load.
+          ...(idea.doneAt ? { doneAt: { ...idea.doneAt } } : {}),
         })),
         // The ledger lives append-only in fp_ledger, never the save doc. Reset
         // it here so a hydrate can never carry a prior session's rows forward.
