@@ -3,8 +3,10 @@
  * 2026-08-02-global-nav-design.md). Mounted ONCE in App's StageRouter above
  * the stage render, for every stage except `boot`, so it survives stage swaps.
  *
- * Logged out: wordmark routes home; the right side offers Log in (hidden on
- * the login stage itself). Logged in (`onboard`/`app`): the wordmark is inert
+ * Logged out: wordmark routes home; the right side offers Log in as a pill
+ * button (hidden on the login stage itself), plus a Start Building CTA on the
+ * landing stage only (same signup-flag cutover as the landing page CTAs).
+ * Logged in (`onboard`/`app`): the wordmark is inert
  * (a kid cannot accidentally leave the game) and the right side shows the
  * founder chip + Log out (moved here from the HUD).
  *
@@ -12,6 +14,7 @@
  * design; desktop floating dialogs leave it visible. No em dashes in copy.
  */
 import { isLoggedInStage, useGame } from "../state/GameContext";
+import { isSignupEnabled } from "../config";
 import { LogoMark } from "./LogoMark";
 
 export function GlobalNav() {
@@ -20,7 +23,7 @@ export function GlobalNav() {
   const founder = profile.firstName || profile.handle || "Founder";
 
   const wordmark = (
-    <span className="flex items-center gap-2.5">
+    <span className="flex items-center gap-2.5 whitespace-nowrap">
       <LogoMark className="h-6 w-auto" />
       <span className="text-[14px] font-extrabold tracking-[0.02em]">FIRST PROFIT</span>
     </span>
@@ -59,13 +62,29 @@ export function GlobalNav() {
             </button>
           </span>
         ) : stage !== "login" ? (
-          <button
-            type="button"
-            onClick={() => dispatch({ type: "SET_STAGE", stage: "login" })}
-            className="inline-flex min-h-[44px] items-center rounded-lg px-2 text-sm font-bold text-sell underline decoration-2 underline-offset-2 hover:text-sell/80"
-          >
-            Log in
-          </button>
+          <span className="flex items-center gap-2 sm:gap-2.5">
+            {stage === "landing" && (
+              <button
+                type="button"
+                onClick={() =>
+                  dispatch({
+                    type: "SET_STAGE",
+                    stage: isSignupEnabled() ? "signup" : "login",
+                  })
+                }
+                className="inline-flex min-h-[44px] items-center whitespace-nowrap rounded-full bg-verified px-3 font-display text-[13px] font-bold text-white shadow-[0_3px_0_hsl(150_52%_26%)] transition-transform hover:-translate-y-0.5 active:translate-y-px active:shadow-[0_1px_0_hsl(150_52%_26%)] sm:px-4 sm:text-sm"
+              >
+                Start Building
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={() => dispatch({ type: "SET_STAGE", stage: "login" })}
+              className="inline-flex min-h-[44px] items-center whitespace-nowrap rounded-full border-2 border-[hsl(25_34%_20%/0.15)] px-3 font-mono text-[11px] uppercase tracking-[0.06em] text-ink hover:border-[hsl(25_34%_20%/0.4)] sm:px-4"
+            >
+              Log in
+            </button>
+          </span>
         ) : null}
       </div>
     </nav>

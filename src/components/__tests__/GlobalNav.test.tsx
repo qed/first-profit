@@ -39,6 +39,20 @@ describe("GlobalNav logged out", () => {
     expect(dispatch).toHaveBeenCalledWith({ type: "SET_STAGE", stage: "login" });
   });
 
+  it("shows Start Building only on the landing stage, routed via the signup flag", () => {
+    stage = "landing";
+    render(<GlobalNav />);
+    fireEvent.click(screen.getByRole("button", { name: /start building/i }));
+    // Flag defaults OFF in tests, so the CTA routes to login (Slice A behavior).
+    expect(dispatch).toHaveBeenCalledWith({ type: "SET_STAGE", stage: "login" });
+  });
+
+  it("hides Start Building off the landing stage", () => {
+    stage = "signup";
+    render(<GlobalNav />);
+    expect(screen.queryByRole("button", { name: /start building/i })).toBeNull();
+  });
+
   it("hides Log in on the login stage itself", () => {
     stage = "login";
     render(<GlobalNav />);
