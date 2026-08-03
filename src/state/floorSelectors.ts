@@ -7,7 +7,7 @@
  * pure function of GameState so it is trivially testable (see the sibling test).
  */
 import { PLAYABLE_STEPS, isCriterionDone, isStepUnlocked, isTaskDone, nextUpFor, type GameState } from "./gameCore";
-import { stepById } from "../data/path";
+import { stepById, type RoomId } from "../data/path";
 
 /** One-liner truncation for idea summary cards (handoff: 42 chars, else placeholder). */
 export const IDEA_NAME_MAX = 42;
@@ -78,6 +78,33 @@ export function ideaProgressLabel(state: GameState, ideaIndex: number): string {
   const total = playableTaskTotal();
   const next = nextTaskId(state, ideaIndex);
   return `${done}/${total} tasks ${next ? `· next ${next}` : "· ready for Build"}`;
+}
+
+/** Where the bottom-docked Next Step coach should send the player, or null to hide. */
+export type CoachTarget =
+  | { kind: "create" }
+  | { kind: "criterion"; stepId: string; room: RoomId };
+
+/**
+ * The Next Step coach's destination: with no ideas yet, creating the first idea
+ * (the Idea Room); otherwise the next incomplete playable criterion — for the
+ * ACTIVE idea when it still has work, else the first idea that does. Null once
+ * every idea has finished the playable criteria (the coach hides rather than
+ * pointing at a locked phase).
+ */
+export function nextCoachTarget(state: GameState): CoachTarget | null {
+  if (state.ideas.length === 0) return { kind: "create" };
+  const order = [state.activeIdea, ...state.ideas.map((_, i) => i)];
+  const seen = new Set<number>();
+  for (const ideaIndex of order) {
+    if (seen.has(ideaIndex)) continue;
+    seen.add(ideaIndex);
+    const stepId = nextUpFor(state, ideaIndex);
+    if (!stepId) continue;
+    const room = stepById(stepId)?.room;
+    if (room) return { kind: "criterion", stepId, room };
+  }
+  return null;
 }
 
 export type RoomEntry =

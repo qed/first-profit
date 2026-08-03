@@ -4,6 +4,7 @@ import { stepById } from "../../data/path";
 import {
   ideaProgressLabel,
   ideaSummaryName,
+  nextCoachTarget,
   nextTaskId,
   playableTaskTotal,
   roomEntryFor,
@@ -96,5 +97,40 @@ describe("floorSelectors — room-entry routing (core multi-idea mechanic)", () 
     expect(roomEntryFor(s, "1.1")).toEqual({ action: "enter", ideaIndex: 1, index: 0 });
     // For 1.2: only idea 0 is eligible (unlocked, not done).
     expect(roomEntryFor(s, "1.2")).toEqual({ action: "enter", ideaIndex: 0, index: 0 });
+  });
+});
+
+describe("floorSelectors — Next Step coach target", () => {
+  it("sends a founder with no ideas to create one (the Idea Room)", () => {
+    expect(nextCoachTarget(initialState())).toEqual({ kind: "create" });
+  });
+
+  it("points a fresh idea at 1.1 in the Idea Room", () => {
+    expect(nextCoachTarget(withIdeas(1))).toEqual({ kind: "criterion", stepId: "1.1", room: "idea" });
+  });
+
+  it("advances to 1.2 (the market) once 1.1 is done", () => {
+    const s = completeStep(withIdeas(1), 0, "1.1");
+    expect(nextCoachTarget(s)).toEqual({ kind: "criterion", stepId: "1.2", room: "market" });
+  });
+
+  it("prefers the ACTIVE idea's next criterion over other ideas", () => {
+    // Two ideas: idea 0 has finished 1.1; idea 1 (active after CREATE_IDEA) has not.
+    let s = withIdeas(2);
+    s = completeStep(s, 0, "1.1");
+    expect(s.activeIdea).toBe(1);
+    expect(nextCoachTarget(s)).toEqual({ kind: "criterion", stepId: "1.1", room: "idea" });
+  });
+
+  it("falls back to another idea with work when the active idea is done", () => {
+    let s = withIdeas(2);
+    s = completeStep(completeStep(s, 1, "1.1"), 1, "1.2"); // active idea 1 fully done
+    expect(nextCoachTarget(s)).toEqual({ kind: "criterion", stepId: "1.1", room: "idea" });
+  });
+
+  it("hides (null) once every idea has finished the playable criteria", () => {
+    let s = withIdeas(1);
+    s = completeStep(completeStep(s, 0, "1.1"), 0, "1.2");
+    expect(nextCoachTarget(s)).toBeNull();
   });
 });

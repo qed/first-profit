@@ -20,8 +20,8 @@
  */
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useGame } from "../state/GameContext";
-import { firstIncompleteTaskIndex, ideaOneLiner, roomEntryFor } from "../state/floorSelectors";
-import type { RoomId } from "../data/path";
+import { firstIncompleteTaskIndex, ideaOneLiner, nextCoachTarget, roomEntryFor } from "../state/floorSelectors";
+import { stepById, type RoomId } from "../data/path";
 import { FactoryFloor, type FloorView, type WalkIntent } from "../components/FactoryFloor";
 import { Hud } from "../components/Hud";
 import { StepRunner } from "../components/StepRunner";
@@ -167,6 +167,48 @@ function PickerDialog() {
   );
 }
 
+/**
+ * The bottom-docked Next Step coach: one green button that walks the founder to
+ * whatever comes next (first idea → the Idea Room; otherwise the room of the next
+ * incomplete criterion). Routes through onWalk so the walk animation and the
+ * breakpoint-swap survival contract apply exactly as for a card tap. Hidden while
+ * any overlay is open (it would sit behind the scrim but still catch tab focus)
+ * and once the playable criteria are all done.
+ */
+function NextStepCoach({ onWalk }: { onWalk: (intent: WalkIntent) => void }) {
+  const game = useGame();
+  if (game.runnerOpen || game.room || game.celebrate || game.pickFor) return null;
+  const target = nextCoachTarget(game);
+  if (!target) return null;
+
+  const name =
+    target.kind === "create"
+      ? ROOM_META.idea?.name ?? "The Idea Room"
+      : ROOM_META[target.room]?.name ?? stepById(target.stepId)?.title ?? "your next room";
+  const intent: WalkIntent =
+    target.kind === "create" ? { kind: "createIdea" } : { kind: "enterCriterion", stepId: target.stepId };
+
+  return (
+    <div className="pointer-events-none absolute inset-x-0 bottom-7 z-40 flex justify-center px-4 lg:bottom-11">
+      <button
+        type="button"
+        onClick={() => onWalk(intent)}
+        className="pointer-events-auto flex min-h-[52px] items-center gap-3 rounded-2xl bg-verified px-5 py-3 text-left text-white shadow-[0_6px_0_hsl(150_52%_26%)] transition hover:-translate-y-0.5 active:translate-y-0.5 active:shadow-[0_3px_0_hsl(150_52%_26%)] focus:outline-none focus-visible:ring-4 focus-visible:ring-verified/40"
+      >
+        <span>
+          <span className="block font-display text-lg font-black leading-none">Next Step</span>
+          <span className="mt-1 block font-mono text-[10px] uppercase tracking-wider text-white/85">
+            Take me to {name}
+          </span>
+        </span>
+        <span aria-hidden className="text-xl">
+          →
+        </span>
+      </button>
+    </div>
+  );
+}
+
 export function Factory() {
   const game = useGame();
   const { dispatch } = game;
@@ -217,7 +259,7 @@ export function Factory() {
   return (
     <main className="flex h-[100dvh] w-full flex-col gap-3 overflow-hidden bg-[hsl(38_46%_95%)] p-3 text-ink sm:gap-4 sm:p-5">
       <Hud />
-      <div className="min-h-0 flex-1">
+      <div className="relative min-h-0 flex-1">
         <FactoryFloor
           walkTo={walkTo}
           onArrived={onArrived}
@@ -225,6 +267,7 @@ export function Factory() {
           floorView={floorView}
           onBack={() => setFloorView("phases")}
         />
+        <NextStepCoach onWalk={setWalkTo} />
       </div>
 
       <StepRunner />
