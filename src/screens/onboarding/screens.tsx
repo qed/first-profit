@@ -141,10 +141,6 @@ export function FounderProfile({ firstName, handle, onFirstNameChange, onNext }:
       <h1 className="mt-2 font-display text-[28px] font-extrabold leading-[1.15] text-[hsl(25_34%_20%)]">
         This page is yours now.
       </h1>
-      <p className="mt-2 text-sm leading-[1.6] text-[hsl(25_20%_38%)]">
-        Founder: just a first name. That is all we ever put on the internet.
-      </p>
-
       <label className="mt-6 block">
         <span className="mb-1.5 block font-mono text-[11px] uppercase tracking-[0.08em] text-[hsl(25_20%_38%)]">
           First name
