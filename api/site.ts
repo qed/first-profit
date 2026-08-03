@@ -15,7 +15,7 @@
  *      308 to lowercase instead of silently landing on the SPA landing page
  *      (`source` matching is case-sensitive). The negative lookahead is
  *      wrapped inside the param's capture group (a Vercel requirement) and
- *      lists EXACTLY the 46 reserved handles the120 seeds — the repo copy is
+ *      lists EXACTLY the 48 reserved handles the120 seeds — the repo copy is
  *      `api/_lib/reservedHandles.ts` (cross-referenced there to the120
  *      `app/fp/lib/fp-public-site-rules.ts` RESERVED_HANDLES and migration
  *      `supabase/migrations/20260907120000_fp_public_sites.sql`); the pin is
@@ -55,6 +55,9 @@
  *       ~390px and desktop (the local HTML render during implementation was
  *       a design check, not this deployment verification)
  *   [ ] link pasted into a real messaging app shows the learner's headline
+ *   [ ] confirm which client-IP header the platform sets on live requests
+ *       (WAF rate-limit keying + the120 extractClientIp assumption — the
+ *       prior-plan caution says verify on a live preview, never assume)
  */
 
 import type { VercelRequest, VercelResponse } from "@vercel/node";

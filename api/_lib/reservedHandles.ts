@@ -1,5 +1,5 @@
 /**
- * The 46 reserved handles — the ONE first-profit copy (Unit 3 review, fix 6b).
+ * The 48 reserved handles — the ONE first-profit copy (Unit 3 review, fix 6b).
  *
  * Source of truth is the120: RESERVED_HANDLES in
  * `app/fp/lib/fp-public-site-rules.ts`, seeded as `fp_reserved_handles` by
@@ -64,6 +64,12 @@ export const RESERVED_HANDLES = [
   "news",
   "shop",
   "store",
+  // marketing placeholder URLs: src/screens/Landing.tsx renders the literal
+  // URLs firstprofit.school/your-name (hero mockup) and
+  // firstprofit.school/their-name (steps copy) — neither may ever become a
+  // real child's page (Unit 7; reserved before claiming is enabled anywhere).
+  "your-name",
+  "their-name",
 ] as const;
 
 export const RESERVED_HANDLE_SET: ReadonlySet<string> = new Set(RESERVED_HANDLES);

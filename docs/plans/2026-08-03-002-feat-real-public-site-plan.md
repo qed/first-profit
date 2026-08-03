@@ -330,9 +330,11 @@ Publish lifecycle: `unclaimed → claimed (not published) → published ⇄ unpu
 
 **Verification:** suite green; manual at 390px: room states (live/offline/unclaimed), link opens the real page.
 
-- [ ] **Unit 7: Hardening, ops, and launch checklist**
+- [x] **Unit 7: Hardening, ops, and launch checklist** — code/docs complete (R20 amended, your-name + their-name reserved everywhere, env docs, the120 ops runbook, launch runbook at docs/plans/2026-08-03-003-launch-checklist.md); reviewed (runbook actor-asymmetry corrected + test-pinned). OPERATOR-ACTION steps in the checklist are the live launch gate
 
 **Goal:** rate limiting, config hygiene, exposure-record updates, and the gated rollout.
+
+**Launch runbook:** the ordered operator checklist this unit produces lives at [docs/plans/2026-08-03-003-launch-checklist.md](2026-08-03-003-launch-checklist.md) (companion the120-side detail: the120 `docs/runbooks/2026-08-03-fp-public-site-operations.md`).
 
 **Requirements:** R4 (list governance), R17 (verify), R18, launch gate.
 

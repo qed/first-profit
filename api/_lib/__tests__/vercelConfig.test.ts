@@ -3,7 +3,7 @@
  * JSON (no comments), so this test IS its enforced documentation:
  *
  * - the handle rewrite's negative-lookahead exclusions must list EXACTLY the
- *   46 reserved handles in `api/_lib/reservedHandles.ts` (the one first-profit
+ *   48 reserved handles in `api/_lib/reservedHandles.ts` (the one first-profit
  *   copy, itself cross-referenced to the120's RESERVED_HANDLES source of
  *   truth and the `fp_reserved_handles` migration seed — see that module).
  * - rewrite ORDER is load-bearing: handle rule first, SPA catchall second
@@ -50,14 +50,14 @@ describe("vercel.json", () => {
     expect(config.rewrites[1]).toEqual({ source: "/(.*)", destination: "/index.html" });
   });
 
-  it("excludes exactly the 46-handle reserved seed (the120 fp-public-site-rules.ts)", () => {
-    expect(RESERVED_HANDLES).toHaveLength(46);
+  it("excludes exactly the 48-handle reserved seed (the120 fp-public-site-rules.ts)", () => {
+    expect(RESERVED_HANDLES).toHaveLength(48);
     const source = config.rewrites[0].source;
     const match = /\(\?!\(\?:([^)]+)\)\$\)/.exec(source);
     expect(match).not.toBeNull();
     const excluded = (match as RegExpExecArray)[1].split("|");
     expect(new Set(excluded)).toEqual(new Set(RESERVED_HANDLES));
-    expect(excluded).toHaveLength(46);
+    expect(excluded).toHaveLength(48);
   });
 
   it("routes handles (including mixed case) to the function and reserved/multi-segment paths past it", () => {

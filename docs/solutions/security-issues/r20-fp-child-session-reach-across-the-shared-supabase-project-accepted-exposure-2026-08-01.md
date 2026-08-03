@@ -133,6 +133,75 @@ the project-level value only governs the blocked-in-Slice-A email-signup path.
   The companion The120 trigger (`fp_player_saves` BEFORE UPDATE monotonic-key
   guard, branch feat/fp-save-doc-guard) runs as table owner on the same row the
   child could already update — it narrows data-loss risk and adds no reach.
+- **2026-08-03 (real public site, Units 1–6; branches first-profit
+  feat/real-public-site + the120 feat/fp-public-site):** the branch pair adds
+  ONE new anon-callable surface and one new server-side anon-key consumer, and
+  CLOSES residual #2. Details:
+  - **`fp_public_site(handle)` is a new anon-callable SECURITY DEFINER RPC**
+    (the120 migration `20260907120000_fp_public_sites.sql`; companion grants in
+    `20260908120000_fp_public_sites_ops.sql` — both AUTHORED, NOT YET APPLIED
+    at this re-check). Like `seats_claimed()`, it is reachable DIRECTLY at the
+    shared project's Supabase URL with only the anon key — **outside
+    firstprofit.school's WAF rate limits, and outside the serving function's
+    noindex headers**, so the page-level mitigations do not cover it. What it
+    reveals, per state (verified against the migration source + its parity
+    test):
+    - published AND NOT operator_locked → the sanitized triple only
+      (`first_name`, `headline`, `one_liner`) plus the `'published'`
+      discriminator. `headline`/`one_liner` are clamped (120/140) AND
+      blocklist-screened at the shared extraction
+      (`fp_public_site_content`/`fp_clamp_public_text`). `first_name` is
+      DIFFERENT: a verbatim copy of `children.first_name` (roster data),
+      validated only at signup as a trimmed 1–80-char string (zod
+      `childFirstName`, no charset or blocklist pass) and bounded by the
+      table's 80-char CHECK — which REJECTS an over-long service-role write
+      (falls to the endpoint's outage branch) rather than truncating. It is
+      HTML-escaped at render, but published unscreened.
+    - ever-published but currently hidden (parent-unpublished or
+      operator-locked) → the `'offline'` discriminator with NULL content — an
+      attacker learns a page existed, never what it said.
+    - never-published claim OR unknown handle → **zero rows, byte-identical**.
+      This is the enumeration-resistance core: `first_published_at` (stamped
+      only by the first publish, structurally implied by a CHECK when
+      `published=true`) gates row visibility, so the anon RPC can never be a
+      registry oracle for children who claimed but never went public. The
+      tables themselves have RLS with zero policies and full anon/authenticated
+      revokes — the RPC is the ONLY public read.
+  - **`api/site.ts` (first-profit) is a new SERVER-SIDE anon-key consumer** —
+    the repo's first serverless code. It reads `SUPABASE_URL`/
+    `SUPABASE_ANON_KEY` from Vercel server env (never the `VITE_` bundle vars)
+    and calls only `fp_public_site(handle)`; it holds no service key and no
+    session, so its compromise ceiling is exactly the anon surface above.
+  - **Residual #2 (deleter gap) is now CLOSED for the FP graph.** The new
+    `fp_public_sites.profile_id` FK is `ON DELETE RESTRICT` (matching the
+    documented posture) and JOINS the documented service-role deletion ordering
+    as its FIRST step: `sites → ledger → saves → profile → child`. The erase
+    path itself was amended in the120 in Unit 2 (`app/lib/funnel/
+    erase-family-core.ts` + `scripts/erase-fp-family.ts`): the site row is
+    deleted first, handle disposition is an explicit recorded decision (never a
+    CASCADE side effect), and an operator-locked handle release is logged
+    loudly (`site-locked-released`). The deletion round-trip is covered by a
+    Unit 2 test; a live page can no longer outlast its child's erasure, and
+    the previously-flagged 23503 fall-through can no longer strand FP data
+    behind a live public page.
+  - **Accepted residuals (recorded, bounded):** (a) PUBLISHED pages are
+    scrapable via the anon RPC at whatever rate the Supabase project allows —
+    accepted because the exposed set is exactly the sanitized triple the
+    public page serves anyway, publishing is an explicit parent-notified act,
+    and takedown (parent unpublish / operator lock) removes content from the
+    very next RPC call; (b) the serving layer's SWR cache
+    (`s-maxage=5, stale-while-revalidate=55`) can serve taken-down content for
+    up to ~60s per region after an unpublish/lock — the Unit 7
+    `Vercel-Cache-Tag` purge decision covers shrinking this. Content-safety
+    enforcement lives at the lowest shared writer (the SQL extraction), per
+    the120 `docs/solutions/security-issues/content-safety-must-live-at-the-
+    lowest-shared-writer-not-the-api-endpoints-2026-08-03.md`.
+  - Child-session reach is otherwise unchanged: the new `/api/fp/site/*`
+    endpoints are service-role-mediated, require a session resolving to an
+    existing `fp_player_profiles` row (not merely any anon-key-minted
+    `authenticated` principal), and are fail-closed gated
+    (`FP_SITE_TEST_ONLY`); no new table grants, policies, or client-reachable
+    columns were added.
 
 ## Prevention / how to reuse this
 
