@@ -1,7 +1,7 @@
 ---
 title: "feat: Full path to Scale + cohort feedback readiness"
 type: feat
-status: active
+status: completed
 date: 2026-08-03
 origin: docs/brainstorms/2026-08-03-full-path-cohort-readiness-requirements.md
 ---
@@ -248,7 +248,7 @@ verified at ~390px and desktop per CLAUDE.md before it is complete.
 
 ### Phase A — the feedback instrument (ships first)
 
-- [ ] **Unit 1: `fp_task_feedback` table + policies `[T120]`**
+- [x] **Unit 1: `fp_task_feedback` table + policies `[T120]`**
 
 **Goal:** A child-writable, append-only feedback table the SPA can insert into
 under RLS, readable by the owner via service credentials.
@@ -297,7 +297,7 @@ WITH-CHECK/column-grant learning; migration authoring ritual (query
 **Verification:** RLS probes pass against a real (staging or prod) schema; the
 owner can run the one query from the origin's success criterion.
 
-- [ ] **Unit 2: StuckBox in the Step Runner + durable submission + completion timestamps**
+- [x] **Unit 2: StuckBox in the Step Runner + durable submission + completion timestamps**
 
 **Goal:** Every task screen carries the "Stuck? Tell us" affordance; submissions
 survive offline/tab-death; per-task completion timestamps make silent stalls queryable.
@@ -365,7 +365,7 @@ in-flight guard learning; breakpoint/lifted-intent conventions.
 stuck report that lands queryable with correct task id and band; airplane-mode
 submit lands after reconnect.
 
-- [ ] **Unit 3: Grade to the client — login field, ask-once capture, band plumbing**
+- [x] **Unit 3: Grade to the client — login field, ask-once capture, band plumbing**
 
 **Goal:** The app knows each child's grade band; unknown resolves to `g6_8`;
 the ask-once answer persists to the roster.
@@ -436,7 +436,7 @@ once per the rules above.
 
 ### Phase B — the content engine
 
-- [ ] **Unit 4: Brief parser + generated content module + hooks registry**
+- [x] **Unit 4: Brief parser + generated content module + hooks registry**
 
 **Goal:** `path.ts`'s hand-written 85-task content is replaced by a
 brief-generated 125-task module with band variants and stable ids, plus a
@@ -486,7 +486,7 @@ same hooks/fields behavior, same done-state mapping. Surface wording changes
 to the brief's canonical text and that is INTENDED (path.ts's current strings
 paraphrase the brief); the drift test pins brief ↔ module.
 
-- [ ] **Unit 5: Stable-key progress — `doneByTask` migration + remap machinery**
+- [x] **Unit 5: Stable-key progress — `doneByTask` migration + remap machinery**
 
 **Goal:** Progress keys move from `${stepId}#${index}` to task ids with a
 one-time migrate-on-load, preserving every existing completion; the same
@@ -558,7 +558,7 @@ Phase 2 — per-idea engine, Build/Validate floors, idea switcher. Tier C2
 any kid finishes Validate. If gameCore coupling makes the Unit 8 split
 impractical, the implementer documents why and collapses to one release.
 
-- [ ] **Unit 6: Generic phase engine in gameCore + selectors**
+- [x] **Unit 6: Generic phase engine in gameCore + selectors**
 
 **Goal:** Retire `PLAYABLE_STEPS`; unlock/progress/next-up logic runs over the
 full 25-criterion sequence, per idea for phases 1-3.
@@ -592,7 +592,7 @@ full 25-criterion sequence, per idea for phases 1-3.
 **Verification:** A scripted fresh save can be driven 1.1→3.5 in tests with no
 dead end.
 
-- [ ] **Unit 7: Idea ids, business list, explicit promotion**
+- [x] **Unit 7: Idea ids, business list, explicit promotion**
 
 **Goal:** Ideas carry stable ids; a validated idea can be explicitly promoted
 to the (single active, archivable) business; Grow/Scale progress hangs off the
@@ -632,7 +632,7 @@ business.
 **Verification:** Reducer test drive 1.1→5.5 including promotion; archive +
 re-promote leaves both business records intact.
 
-- [ ] **Unit 8: UI generalization — floors, runner chrome, celebration, promotion screen, idea context**
+- [x] **Unit 8: UI generalization — floors, runner chrome, celebration, promotion screen, idea context**
 
 **Goal:** The floor, HUD, Step Runner, and Celebration speak all five phases;
 the child always sees which idea/business they're working on and can switch;
@@ -686,7 +686,7 @@ promotion is a real moment.
 **Verification:** Origin criterion — a tester account driven 1.1→5.5 through
 the real UI on production with no dead end, verified at 390px and desktop.
 
-- [ ] **Unit 9: Rollout, R20 update, and field verification**
+- [x] **Unit 9: Rollout, R20 update, and field verification**
 
 **Goal:** Ship-order discipline holds, security records stay true, and the
 origin's field-facing success criteria are demonstrated.
@@ -765,3 +765,24 @@ production; R20 record reflects the new surfaces.
   `app/fp/content/parse-curriculum.ts`, `app/fp/content/generated/program-2026-27.ts`
 - Child-table template: `[T120] supabase/migrations/20260827120000_fp_player_tables.sql`
 - Outbox/sync: `src/lib/sync.ts`; save doc: `src/state/gameCore.ts`
+
+## Completion Record (2026-08-03)
+
+Shipped to production. Order: fp_save_doc_guard migration (20260906120000)
+applied via the Management API and verified by the live child-JWT probe (all 7
+graft assertions passed; owner restore confirmed the JWT-less exemption) →
+the120#134 merged → first-profit#9 merged and deployed (Vercel READY, aliased
+to firstprofit.school).
+
+Field verification on production (Cedric, real roster child):
+- Save intact + migrated: legacy doc rekeyed to task ids (9/25 tasks, next
+  1.2.5); post-session row carries doneByTask and idea ids (revision 14).
+- Grade chain: GradeAsk fired for the null-grade child; birth-year 2017 landed
+  via the fill-only route; band resolved g3_5.
+- Banded text live: 1.1.1 renders the g3_5 variant ("Parent scribes; ...");
+  1.2.5 renders per-task done-when + all-bands note.
+- Stuck report landed: fp_task_feedback row with task_id 1.2.5, band g3_5
+  (probe row marked "please ignore").
+- Full floor: 5 phases, criterion floor with sequential locks, idea switcher,
+  Start Idea #2 exercised (idea #2 left on the account, unnamed, 0/5).
+- Completed criteria correctly no-op on re-entry (roomEntryFor design).
