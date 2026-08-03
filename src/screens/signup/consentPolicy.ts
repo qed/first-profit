@@ -38,7 +38,7 @@ export const CONSENT_METHOD = "email_plus_attestation";
  * FP_CONSENT_POLICY.version VERBATIM (consent-rules.ts). Unit 9 injects the
  * fetched version instead of relying on this constant.
  */
-export const CONSENT_POLICY_VERSION = "2026-08-01.1";
+export const CONSENT_POLICY_VERSION = "2026-08-03.1";
 
 export const CONSENT_POLICY_TITLE = "Parental consent to create your child's account";
 
@@ -55,7 +55,10 @@ export const CONSENT_POLICY_TEXT =
   "signup, and I am at least 18 years old. I consent to First Profit creating " +
   "an account for my child so they can play and learn, and to First Profit " +
   "collecting and storing the limited information needed to run that account " +
-  "(my child's first name, age band, and their saved game progress). I " +
+  "(my child's first name, age band, birth year - used only to show " +
+  "age-appropriate wording - their saved game progress, and short notes my " +
+  "child may choose to send about where they get stuck, which are used only " +
+  "to improve First Profit and kept for up to twelve months). I " +
   "understand this is a game-like business simulator for learners, that I can " +
   "review or delete my child's account by contacting First Profit, and that my " +
   "consent is recorded with the version of this notice shown above.";
@@ -69,7 +72,7 @@ export const CONSENT_POLICY_TEXT =
  * `sha256(CONSENT_POLICY_TEXT)` if the text ever changes (validation test guards).
  */
 export const CONSENT_POLICY_HASH =
-  "f1e59c9c88b69213ead54edb7506e0a52ae4260cb8c764a9e734674e396c3727";
+  "ce9366e98872183e570c02ea52d35fbbff6b3fcf1e044615cf34d58f98ac5ff1";
 
 /**
  * Extra copy shown for the under-13 band: COPPA verifiable-parental-consent

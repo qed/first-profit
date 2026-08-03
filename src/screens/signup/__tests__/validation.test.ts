@@ -107,8 +107,8 @@ describe("per-step gates", () => {
 describe("consent policy is backend-echoable (version + hash)", () => {
   // Mirrors the backend's currentPolicyHash() = sha256(FP_CONSENT_POLICY.text).
   it("carries the exact backend consent version string", () => {
-    expect(CONSENT_POLICY_VERSION).toBe("2026-08-01.1");
-    expect(CONSENT_META.policyVersion).toBe("2026-08-01.1");
+    expect(CONSENT_POLICY_VERSION).toBe("2026-08-03.1");
+    expect(CONSENT_META.policyVersion).toBe("2026-08-03.1");
   });
 
   it("hash is the sha256 hex of the rendered text (== backend currentPolicyHash())", () => {
@@ -118,7 +118,7 @@ describe("consent policy is backend-echoable (version + hash)", () => {
     expect(CONSENT_META.policyHash).toBe(CONSENT_POLICY_HASH);
     // The exact value the backend's sha256(FP_CONSENT_POLICY.text) produces.
     expect(CONSENT_POLICY_HASH).toBe(
-      "f1e59c9c88b69213ead54edb7506e0a52ae4260cb8c764a9e734674e396c3727",
+      "ce9366e98872183e570c02ea52d35fbbff6b3fcf1e044615cf34d58f98ac5ff1",
     );
   });
 });
