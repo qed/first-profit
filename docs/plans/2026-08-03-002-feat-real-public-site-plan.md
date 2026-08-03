@@ -166,7 +166,7 @@ Publish lifecycle: `unclaimed → claimed (not published) → published ⇄ unpu
 
 **Verification:** migration applies cleanly on a shadow DB; PostgREST schema reload verified; function callable with anon key returning only sanitized fields; grants and pinned `search_path` asserted in the migration test, not just the sanitized-fields check.
 
-- [ ] **Unit 2: Claim / availability / publish / unpublish endpoints** — *target repo: the120*
+- [x] **Unit 2: Claim / availability / publish / unpublish endpoints** — shipped as the120 c9226bb (endpoints + /fp/family FamilySites + fp:site-lock CLI + erase-order amendment; blocklist moved into shared SQL extraction, publish CAS; 12-persona review + round-2 verify, all fixed; compounded) — *target repo: the120*
 
 **Goal:** authenticated `/api/fp/*` endpoints govern the registry: **site self-read**, availability, atomic claim, publish (with parent email), parent unpublish/republish; operator lock via admin surface.
 
