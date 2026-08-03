@@ -28,7 +28,9 @@ Every UI change MUST look good and work well on mobile before it is considered d
   all mounted at `src/screens/Factory.tsx` above the floor) are full-screen takeovers on
   mobile and floating dialogs from `sm` up. Their open-state lives in the `gameCore`
   reducer, which is above the breakpoint mount, so they survive the swap too.
-- The fpv2 floor uses click-to-walk plus a bottom hint pill and the HUD for guidance, and a
+- The fpv2 floor uses click-to-walk plus a bottom hint pill and the single sticky GlobalNav
+  (the ONE bar; in the app stage it carries the idea/business chip, Sales/Profit stats, and
+  the save indicator) for guidance, and a
   `NextStepCoach` component (added 2026-08-03, defined in `src/screens/Factory.tsx`): one
   green button docked at the bottom of the floor (absolute, bottom-7 / lg:bottom-11) that
   targets whatever comes next via `nextCoachTarget` — create-idea, the next criterion's

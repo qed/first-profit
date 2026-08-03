@@ -8,16 +8,107 @@
  * landing stage only (same signup-flag cutover as the landing page CTAs).
  * Logged in (`onboard`/`app`): the wordmark is inert
  * (a kid cannot accidentally leave the game) and the right side shows the
- * founder chip + Log out (moved here from the HUD).
+ * founder chip + Log out.
+ *
+ * In the `app` stage this is the ONE bar (the old parchment Hud is gone): the
+ * right side also carries the game section — the active idea/business chip
+ * (the only place the idea identity renders; taps open the switcher when
+ * there is more than one idea), the Sales / Profit stats, and the save
+ * indicator. The row wraps at narrow widths so nothing overflows at 390px.
  *
  * Full-screen mobile overlays (`fixed inset-0`, higher z) cover this bar by
  * design; desktop floating dialogs leave it visible. No em dashes in copy.
  */
 import { isLoggedInStage, useGame } from "../state/GameContext";
+import { activeBusiness } from "../state/gameCore";
+import { ideaSummaryName } from "../state/floorSelectors";
 import { isSignupEnabled } from "../config";
 import { LogoMark } from "./LogoMark";
+import type { SyncStatus } from "../lib/sync";
 
-export function GlobalNav() {
+function dollars(cents: number): string {
+  return Math.floor(cents / 100).toLocaleString("en-US");
+}
+
+/** Maps sync status to a short, kid-legible line (empty for idle). */
+function SaveIndicator({ status }: { status: SyncStatus }) {
+  const map: Record<SyncStatus, { text: string; className: string } | null> = {
+    idle: null,
+    pending: { text: "Saving…", className: "text-[hsl(25_20%_38%)]" },
+    saving: { text: "Saving…", className: "text-[hsl(25_20%_38%)]" },
+    saved: { text: "Saved", className: "text-verified" },
+    error: { text: "Couldn't save", className: "text-wax" },
+  };
+  const entry = map[status];
+  if (!entry) return null;
+  return (
+    <span className={`font-mono text-[9.5px] uppercase tracking-[0.08em] ${entry.className}`} role="status">
+      {entry.text}
+    </span>
+  );
+}
+
+/** One right-aligned money stat (label over value), compact below sm. */
+function MoneyStat({ label, cents }: { label: string; cents: number }) {
+  return (
+    <span className="text-right">
+      <span className="block font-mono text-[8.5px] uppercase tracking-[0.08em] text-[hsl(25_20%_38%)] sm:text-[9.5px]">
+        {label}
+      </span>
+      <span className="block font-mono text-[13px] font-bold leading-tight sm:text-[15px]">
+        ${dollars(cents)}
+      </span>
+    </span>
+  );
+}
+
+/**
+ * The app-stage game section (idea/business chip + stats + save indicator).
+ * Mounted ONLY when stage === "app", so the other stages never touch the game
+ * fields on the context. The chip shows the ACTIVE idea's display name
+ * (productName preferred via ideaSummaryName) and, when the active idea IS
+ * the promoted business, the building emoji. It is a button that opens the
+ * switcher only when there is another idea to switch to.
+ */
+function AppNavSection({ onOpenSwitcher }: { onOpenSwitcher?: () => void }) {
+  const game = useGame();
+  const { ideas, activeIdea, grossSalesSumCents, salesSumCents, syncStatus } = game;
+  const name = ideaSummaryName(game, activeIdea);
+  const business = activeBusiness(game);
+  const isBusiness = Boolean(business && ideas[activeIdea] && business.ideaId === ideas[activeIdea].id);
+  const chipInner = (
+    <>
+      {isBusiness ? <span aria-hidden>🏢</span> : null}
+      <span className="max-w-[6rem] truncate sm:max-w-[13rem]">{name}</span>
+    </>
+  );
+  const chipClass =
+    "inline-flex items-center gap-1.5 rounded-full border-2 border-[hsl(14_78%_54%/0.35)] bg-[hsl(14_78%_54%/0.08)] px-3 font-mono text-[10px] font-semibold uppercase tracking-[0.06em] text-[hsl(14_78%_44%)]";
+  return (
+    <>
+      {ideas.length > 1 ? (
+        <button
+          type="button"
+          onClick={onOpenSwitcher}
+          aria-label="Switch idea"
+          className={`${chipClass} min-h-[44px] transition-colors hover:border-[hsl(14_78%_54%)]`}
+        >
+          {chipInner}
+          <span aria-hidden className="text-[8px]">
+            ▾
+          </span>
+        </button>
+      ) : ideas.length === 1 ? (
+        <span className={`${chipClass} py-1.5`}>{chipInner}</span>
+      ) : null}
+      <MoneyStat label="Sales" cents={grossSalesSumCents()} />
+      <MoneyStat label="Profit" cents={salesSumCents()} />
+      <SaveIndicator status={syncStatus} />
+    </>
+  );
+}
+
+export function GlobalNav({ onOpenSwitcher }: { onOpenSwitcher?: () => void } = {}) {
   const { stage, dispatch, logout, profile } = useGame();
   const loggedIn = isLoggedInStage(stage);
   const founder = profile.firstName || profile.handle || "Founder";
@@ -34,7 +125,7 @@ export function GlobalNav() {
       aria-label="First Profit"
       className="sticky top-0 z-40 border-b border-[hsl(40_14%_89%)] bg-[hsl(40_30%_99%)] text-ink"
     >
-      <div className="mx-auto flex min-h-[52px] max-w-[1120px] items-center justify-between px-4 sm:px-8">
+      <div className="mx-auto flex min-h-[52px] max-w-[1120px] flex-wrap items-center justify-between gap-y-1 px-4 py-1 sm:px-8">
         {loggedIn ? (
           wordmark
         ) : (
@@ -49,7 +140,8 @@ export function GlobalNav() {
         )}
 
         {loggedIn ? (
-          <span className="flex items-center gap-2.5">
+          <span className="flex flex-wrap items-center justify-end gap-x-2 gap-y-1 sm:gap-x-2.5">
+            {stage === "app" ? <AppNavSection onOpenSwitcher={onOpenSwitcher} /> : null}
             <span className="inline-block max-w-[5.5rem] truncate rounded-full bg-[hsl(14_78%_54%/0.12)] px-3 py-1.5 font-mono text-[10.5px] font-semibold uppercase tracking-[0.06em] text-[hsl(14_78%_44%)] sm:max-w-[12rem]">
               {founder}
             </span>

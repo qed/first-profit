@@ -48,12 +48,6 @@ export interface FloorProps {
   /** Immediate (no-walk) return to the phases view; a parent-level setter
    *  (which ALSO cancels any in-flight walk — unit review FIX 1b). */
   onBack: () => void;
-  /** Open the idea-switcher dialog (state lives in Factory, above the mount). */
-  onOpenSwitcher: () => void;
-  /** True while ANY overlay is open (Factory's lifted anyOverlayOpen, unit
-   *  review FIX 5): the floors hide their floating chip on it. The container
-   *  is also `inert` then, so nothing here can catch focus. */
-  overlayOpen?: boolean;
 }
 
 function useIsDesktop() {
@@ -73,7 +67,7 @@ export function FactoryFloor(props: FloorProps) {
 
 const HINT = "Click the floor to walk · click a room to enter it";
 
-function DesktopFloor({ walkTo, onArrived, onWalk, floorView, onBack, onOpenSwitcher, overlayOpen }: FloorProps) {
+function DesktopFloor({ walkTo, onArrived, onWalk, floorView, onBack }: FloorProps) {
   const { profile } = useGame();
   const [pos, setPos] = useState({ x: 50, y: 94 });
   const timer = useRef<number | null>(null);
@@ -113,9 +107,9 @@ function DesktopFloor({ walkTo, onArrived, onWalk, floorView, onBack, onOpenSwit
           onFloorClick (cosmetic avatar walk); card buttons handle their own tap. */}
       <div className="absolute inset-0 overflow-y-auto p-7 pb-14">
         {floorView === "phases" ? (
-          <PhasesFloor onWalk={onWalk} onOpenSwitcher={onOpenSwitcher} overlayOpen={overlayOpen} />
+          <PhasesFloor onWalk={onWalk} />
         ) : (
-          <CriterionFloor phase={floorView} onWalk={onWalk} onBack={onBack} onOpenSwitcher={onOpenSwitcher} overlayOpen={overlayOpen} />
+          <CriterionFloor phase={floorView} onWalk={onWalk} onBack={onBack} />
         )}
       </div>
 

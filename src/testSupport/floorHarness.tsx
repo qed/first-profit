@@ -104,7 +104,7 @@ export function FloorHarness({ seed, Ctx, children, onAction, promoteIdea }: Har
     isStepUnlocked: (i: number, s: string) => isStepUnlockedFn(state, i, s),
     ideasEligibleFor: (s: string) => ideasEligibleForFn(state, s),
     nextUpFor: (i: number) => nextUpForFn(state, i),
-    // Extras the full-screen surfaces (Hud, screens/Factory) consume; harmless
+    // Extras the full-screen surfaces (GlobalNav, screens/Factory) consume; harmless
     // for the floor components that ignore them.
     grossSalesSumCents: () => grossSalesSumCentsFn(state),
     salesSumCents: () => salesSumCentsFn(state),

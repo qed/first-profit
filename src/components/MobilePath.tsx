@@ -5,8 +5,8 @@
  * (see FactoryFloor.tsx) — taps route up to the parent's intent so an in-flight
  * walk survives the lg breakpoint swap; the parent clears walkTo in onArrived.
  *
- * Bottom padding (pb-80) is preserved so a future bottom-docked Next Step coach /
- * HUD never covers the last card (the repo convention from CLAUDE.md).
+ * Bottom padding (pb-80) is preserved so the bottom-docked Next Step coach
+ * never covers the last card (the repo convention from CLAUDE.md).
  */
 import { useEffect, useRef } from "react";
 import { useGame } from "../state/GameContext";
@@ -15,7 +15,7 @@ import { PhasesFloor } from "./PhasesFloor";
 import { CriterionFloor } from "./CriterionFloor";
 import type { FloorProps } from "./FactoryFloor";
 
-export function MobilePath({ walkTo, onArrived, onWalk, floorView, onBack, onOpenSwitcher, overlayOpen }: FloorProps) {
+export function MobilePath({ walkTo, onArrived, onWalk, floorView, onBack }: FloorProps) {
   const { profile } = useGame();
   const timer = useRef<number | null>(null);
 
@@ -42,9 +42,9 @@ export function MobilePath({ walkTo, onArrived, onWalk, floorView, onBack, onOpe
           (repo convention from CLAUDE.md — preserve this padding). */}
       <div className="px-4 pb-80 pt-2">
         {floorView === "phases" ? (
-          <PhasesFloor onWalk={onWalk} onOpenSwitcher={onOpenSwitcher} overlayOpen={overlayOpen} />
+          <PhasesFloor onWalk={onWalk} />
         ) : (
-          <CriterionFloor phase={floorView} onWalk={onWalk} onBack={onBack} onOpenSwitcher={onOpenSwitcher} overlayOpen={overlayOpen} />
+          <CriterionFloor phase={floorView} onWalk={onWalk} onBack={onBack} />
         )}
       </div>
     </div>

@@ -32,7 +32,6 @@ function mount(seed = withIdeas(1), phase: Parameters<typeof phaseById>[0] = "bu
         phase={phase}
         onWalk={(i) => walks.push(i)}
         onBack={() => opened.push("back")}
-        onOpenSwitcher={() => opened.push("switcher")}
       />
     </FloorHarness>,
   );
@@ -92,17 +91,13 @@ describe("CriterionFloor — phase parameterization", () => {
     expect(walks).toEqual([{ kind: "enterCriterion", stepId: "2.1" }]);
   });
 
-  it("shows the idea-switcher chip on phases 1-3 and routes its tap up", () => {
+  it("renders no idea-switcher chip (idea identity lives in the GlobalNav)", () => {
     const seed = apply(
       completePhase(withIdeas(1), 0, "sell"),
       { type: "SET_FIELD", ideaIndex: 0, key: "oneLiner", value: "Slime kits" },
     );
-    const { opened } = mount(seed, "build");
-    const chip = screen.getByLabelText("Switch idea");
-    expect(chip.textContent).toContain("Idea #1");
-    expect(chip.textContent).toContain("Slime kits");
-    fireEvent.click(chip);
-    expect(opened).toEqual(["switcher"]);
+    mount(seed, "build");
+    expect(screen.queryByLabelText("Switch idea")).toBeNull();
   });
 });
 
@@ -119,11 +114,12 @@ describe("CriterionFloor — Grow/Scale business context (Tier C2)", () => {
     return s;
   }
 
-  it("renders the business chip (promoted idea's one-liner) instead of the idea switcher", () => {
+  it("carries the business name (promoted idea's one-liner) in the card meta; no header pill or switcher chip", () => {
     mount(promotedSeed(), "grow");
-    expect(screen.getByText(/Your business · Slime kits/)).toBeTruthy();
+    // The business identity pill moved to the GlobalNav; the floor keeps the
+    // business name only in the card meta lines.
+    expect(screen.queryByText(/Your business ·/)).toBeNull();
     expect(screen.queryByLabelText("Switch idea")).toBeNull();
-    // Card meta carries the business name too.
     expect(screen.getAllByText(/unit tasks · Slime kits/).length).toBeGreaterThan(0);
   });
 

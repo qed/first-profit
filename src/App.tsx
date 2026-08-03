@@ -62,6 +62,11 @@ function Boot() {
 function StageRouter() {
   const { stage, dispatch, login } = useGame();
 
+  // The idea-switcher open-state lives HERE (above the stage render) because
+  // its opener is the GlobalNav's idea chip while the dialog itself stays
+  // mounted inside Factory (it must cancel an in-flight walk on a switch).
+  const [switcherOpen, setSwitcherOpen] = useState(false);
+
   // The verify-return token, read ONCE from the boot URL and then stripped from
   // the address bar so a refresh never re-triggers it and the one-time token
   // does not linger in history.
@@ -161,7 +166,7 @@ function StageRouter() {
       case "onboard":
         return <Onboarding />;
       case "app":
-        return <Factory />;
+        return <Factory switcherOpen={switcherOpen} onSwitcherOpenChange={setSwitcherOpen} />;
       default:
         return <Boot />;
     }
@@ -172,7 +177,7 @@ function StageRouter() {
   // docs/superpowers/specs/2026-08-02-global-nav-design.md
   return (
     <>
-      {stage !== "boot" ? <GlobalNav /> : null}
+      {stage !== "boot" ? <GlobalNav onOpenSwitcher={() => setSwitcherOpen(true)} /> : null}
       {content}
     </>
   );

@@ -28,8 +28,8 @@
  * (in the provider, above everything), so those already survive the swap; we just
  * render them here. While ANY overlay is open (reducer overlays + the two
  * Factory-owned ones) the floor container is `inert` and the floating helpers
- * (coach, switcher chip, GradeAsk) hide, so nothing behind a modal scrim can
- * catch taps or tab focus.
+ * (coach, GradeAsk) hide, so nothing behind a modal scrim can catch taps or
+ * tab focus. Idea identity lives in the GlobalNav's chip (App-level), not here.
  */
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useGame } from "../state/GameContext";
@@ -37,7 +37,6 @@ import { isPublicSiteEnabled } from "../config";
 import { firstIncompleteTaskIndex, ideaOneLiner, ideaProgressLabel, ideaSummaryName, nextCoachTarget, roomEntryFor } from "../state/floorSelectors";
 import { stepById, type RoomId } from "../data/path";
 import { FactoryFloor, type FloorView, type WalkIntent } from "../components/FactoryFloor";
-import { Hud } from "../components/Hud";
 import { StepRunner } from "../components/StepRunner";
 import { Celebration } from "../components/Celebration";
 import { GradeAsk } from "../components/GradeAsk";
@@ -368,7 +367,17 @@ export function SwitcherDialog({
   );
 }
 
-export function Factory() {
+export function Factory({
+  switcherOpen: controlledSwitcherOpen,
+  onSwitcherOpenChange,
+}: {
+  /** When provided (App threads these), the SwitcherDialog is CONTROLLED by
+   *  App-level state — the GlobalNav's idea chip is the opener, and the
+   *  open-state lives above the stage render. When absent (test mounts), the
+   *  internal useState below keeps the dialog fully self-contained. */
+  switcherOpen?: boolean;
+  onSwitcherOpenChange?: (open: boolean) => void;
+} = {}) {
   const game = useGame();
   const { dispatch } = game;
   const [walkTo, setWalkTo] = useState<WalkIntent | null>(null);
@@ -377,7 +386,9 @@ export function Factory() {
   // reducer action ever needs to drive, held above the breakpoint conditional
   // mount so both survive the lg swap (see PromoteBusiness's doc comment).
   const [promoteOpen, setPromoteOpen] = useState(false);
-  const [switcherOpen, setSwitcherOpen] = useState(false);
+  const [internalSwitcherOpen, setInternalSwitcherOpen] = useState(false);
+  const switcherOpen = controlledSwitcherOpen ?? internalSwitcherOpen;
+  const setSwitcherOpen = onSwitcherOpenChange ?? setInternalSwitcherOpen;
 
   // Race-proof arrival (unit review FIX 1a): the floor variants fire their
   // arrival timer ~550ms after the tap, during which the game state may have
@@ -450,7 +461,6 @@ export function Factory() {
 
   return (
     <main className="flex h-[100dvh] w-full flex-col gap-3 overflow-hidden bg-[hsl(38_46%_95%)] p-3 text-ink sm:gap-4 sm:p-5">
-      <Hud />
       <div className="relative min-h-0 flex-1" {...inertProps}>
         <FactoryFloor
           walkTo={walkTo}
@@ -463,8 +473,6 @@ export function Factory() {
             cancelWalk();
             setFloorView("phases");
           }}
-          onOpenSwitcher={() => setSwitcherOpen(true)}
-          overlayOpen={anyOverlayOpen}
         />
         <NextStepCoach onWalk={setWalkTo} overlayOpen={anyOverlayOpen} />
         {/* Ask-once birth-year card (Unit 3): non-modal, above the breakpoint
