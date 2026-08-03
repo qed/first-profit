@@ -9,8 +9,15 @@
  * rewiring is Unit 5's job. The existing app keeps compiling; this module only
  * adds new code.
  */
-import { parseTask, stepById, type RoomId } from "../data/path";
+import { stepById, type RoomId } from "../data/path";
 import { PROVIDER_IDS, computeFee, providerById, type ProviderId } from "../data/providers";
+import {
+  LEGACY_KEY_REMAP,
+  TASK_REMAP,
+  resolveTaskId,
+  taskIdAt,
+  type RemapTarget,
+} from "../data/taskRemap";
 
 /** Schema version stored inside every serialized save doc. Bump on shape change. */
 export const DOC_VERSION = 1;
@@ -80,6 +87,19 @@ export interface Idea {
    * no DOC_VERSION bump. Makes silent stalls queryable for the cohort (R13).
    */
   doneAt?: Record<string, number>;
+  /**
+   * Task completion keyed by STABLE task id ("1.1.3") — the forward shape
+   * (Unit 5). ADDITIVE OPTIONAL (no DOC_VERSION bump): fromSaveDoc UNIONS the
+   * legacy `done` keys into this map through taskRemap's explicit table on
+   * every load (merge-on-load: completions are monotonic, so the union only
+   * ever adds — this is what makes a stale old tab, which strips these fields
+   * on save, unable to lose any legacy-representable completion). The legacy
+   * maps are retained untouched beside it during the transition.
+   */
+  doneByTask?: Record<string, boolean>;
+  /** Completion timestamps keyed by stable task id, migrated/dual-written
+   *  alongside `doneByTask` exactly as `doneAt` is beside `done`. */
+  doneAtByTask?: Record<string, number>;
 }
 
 export interface Profile {
@@ -172,6 +192,10 @@ export function toSaveDoc(state: GameState): SaveDoc {
       done: { ...idea.done },
       // Emit doneAt only when it exists so an untimestamped doc stays byte-stable.
       ...(idea.doneAt ? { doneAt: { ...idea.doneAt } } : {}),
+      // Emit BOTH shapes during the transition (dual-write): the new stable-id
+      // maps ride beside the legacy index maps, absent-stays-absent.
+      ...(idea.doneByTask ? { doneByTask: { ...idea.doneByTask } } : {}),
+      ...(idea.doneAtByTask ? { doneAtByTask: { ...idea.doneAtByTask } } : {}),
     })),
     activeIdea: state.activeIdea,
     siteHeadline: state.profile.siteHeadline,
@@ -206,6 +230,7 @@ function coerceIdea(value: unknown): Idea {
       if (typeof leaf === "boolean") done[key] = leaf;
     }
   }
+  const idea: Idea = { fields, done };
   // Additive-optional doneAt: absent on old docs -> stays absent (never invented).
   // Only finite, non-negative numeric leaves survive (NaN would JSON.stringify to
   // null and poison the next load, mirroring the chosenAt discipline).
@@ -214,9 +239,94 @@ function coerceIdea(value: unknown): Idea {
     for (const [key, leaf] of Object.entries(value.doneAt)) {
       if (typeof leaf === "number" && Number.isFinite(leaf) && leaf >= 0) doneAt[key] = leaf;
     }
-    return { fields, done, doneAt };
+    idea.doneAt = doneAt;
   }
-  return { fields, done };
+  // The stable-id maps (Unit 5), same leaf discipline: malformed leaves are
+  // dropped by coercion — a bad key/value never fails the load.
+  if (isRecord(value.doneByTask)) {
+    const doneByTask: Record<string, boolean> = {};
+    for (const [key, leaf] of Object.entries(value.doneByTask)) {
+      if (typeof leaf === "boolean") doneByTask[key] = leaf;
+    }
+    idea.doneByTask = doneByTask;
+  }
+  if (isRecord(value.doneAtByTask)) {
+    const doneAtByTask: Record<string, number> = {};
+    for (const [key, leaf] of Object.entries(value.doneAtByTask)) {
+      if (typeof leaf === "number" && Number.isFinite(leaf) && leaf >= 0) doneAtByTask[key] = leaf;
+    }
+    idea.doneAtByTask = doneAtByTask;
+  }
+  return idea;
+}
+
+/**
+ * MERGE-on-load migration (Unit 5): union an idea's legacy `${stepId}#${index}`
+ * completions into the stable-id maps, and carry stable-id keys through the
+ * (future-edit) remap table. Pure doc transform — it only MARKS state; it never
+ * dispatches actions, so loading can never fire a celebration or the sale
+ * auto-complete (the remap table is behavior; see taskRemap.ts).
+ *
+ * Properties the tests pin:
+ * - UNION: completions are monotonic, so migration only ever ADDS to the new
+ *   maps (an old tab that stripped them on save is fully recovered next load);
+ *   on a timestamp conflict the already-present new-shape value wins.
+ * - Idempotent / re-runnable: a second pass over its own output is byte-stable.
+ * - Legacy fields are retained untouched (old tabs keep working).
+ * - Unmappable legacy keys (anything outside the explicit ten-entry table) are
+ *   preserved raw in the legacy map — never invented into the new shape, never
+ *   dropped.
+ * - A remap entry old→new moves a stable-id completion exactly once; a retired
+ *   entry (null) leaves it preserved in place.
+ */
+function migrateIdeaProgress(
+  idea: Idea,
+  remap: Readonly<Record<string, RemapTarget>>,
+): Idea {
+  const doneByTask: Record<string, boolean> = { ...(idea.doneByTask ?? {}) };
+  const doneAtByTask: Record<string, number> = { ...(idea.doneAtByTask ?? {}) };
+
+  // 1) Move existing stable-id keys through the remap table (exactly once:
+  //    after the move the old key is gone, so a re-run is a no-op).
+  for (const key of Object.keys(doneByTask)) {
+    const target = resolveTaskId(key, remap);
+    if (target === key) continue;
+    const value = doneByTask[key];
+    delete doneByTask[key];
+    if (value) doneByTask[target] = true; // union: never un-complete the target
+    else if (!(target in doneByTask)) doneByTask[target] = value;
+  }
+  for (const key of Object.keys(doneAtByTask)) {
+    const target = resolveTaskId(key, remap);
+    if (target === key) continue;
+    const at = doneAtByTask[key];
+    delete doneAtByTask[key];
+    if (!(target in doneAtByTask)) doneAtByTask[target] = at;
+  }
+
+  // 2) Union legacy index keys through the explicit legacy table (and onward
+  //    through the remap chain, so a later-remapped target is landed directly).
+  for (const [key, value] of Object.entries(idea.done)) {
+    if (value !== true) continue;
+    const mapped = LEGACY_KEY_REMAP[key];
+    if (!mapped) continue; // unmappable: preserved raw in the legacy map
+    const target = resolveTaskId(mapped, remap);
+    if (!doneByTask[target]) doneByTask[target] = true;
+  }
+  for (const [key, at] of Object.entries(idea.doneAt ?? {})) {
+    const mapped = LEGACY_KEY_REMAP[key];
+    if (!mapped) continue;
+    const target = resolveTaskId(mapped, remap);
+    if (!(target in doneAtByTask)) doneAtByTask[target] = at; // new shape wins
+  }
+
+  return {
+    ...idea, // legacy fields retained untouched
+    // Absent-stays-absent: a doc that never had (or never needed) the new maps
+    // keeps its exact shape, so fresh docs load clean and byte-stable.
+    ...(idea.doneByTask || Object.keys(doneByTask).length ? { doneByTask } : {}),
+    ...(idea.doneAtByTask || Object.keys(doneAtByTask).length ? { doneAtByTask } : {}),
+  };
 }
 
 // Coerce a persisted chosenProvider leaf. ADDITIVE OPTIONAL: an existing v1 doc
@@ -246,11 +356,20 @@ function coerceChosenProvider(value: unknown): ChosenProvider | null {
  * Parse a loaded save doc into a validated `SaveDoc`, or signal that the caller
  * should DISCARD it. An unknown/absent docVersion is signaled for discard so a
  * newer reducer is never fed a stale (or future) shape.
+ *
+ * Runs the Unit 5 MERGE-on-load migration on every idea (see
+ * `migrateIdeaProgress`). `remap` is injectable for tests of future remap
+ * entries; production always uses the committed TASK_REMAP table.
  */
-export function fromSaveDoc(raw: unknown): FromSaveResult {
+export function fromSaveDoc(
+  raw: unknown,
+  remap: Readonly<Record<string, RemapTarget>> = TASK_REMAP,
+): FromSaveResult {
   if (!isRecord(raw)) return { ok: false, reason: "malformed" };
   if (raw.docVersion !== DOC_VERSION) return { ok: false, reason: "unknown-version" };
-  const ideas = Array.isArray(raw.ideas) ? raw.ideas.map(coerceIdea) : [];
+  const ideas = Array.isArray(raw.ideas)
+    ? raw.ideas.map(coerceIdea).map((idea) => migrateIdeaProgress(idea, remap))
+    : [];
   const activeIdea = typeof raw.activeIdea === "number" ? raw.activeIdea : 0;
   const siteHeadline = typeof raw.siteHeadline === "string" ? raw.siteHeadline : "";
   const onboardingComplete = raw.onboardingComplete === true;
@@ -288,17 +407,16 @@ export function isTaskDone(
   index: number,
 ): boolean {
   if (!hasIdea(state, ideaIndex)) return false;
-  const step = stepById(stepId);
-  const raw = step?.tasks[index];
-  if (raw) {
-    const { auto } = parseTask(raw);
-    // fpv2 core carries no artifact map yet; an @artifact task is only ever
-    // complete via the explicit done map until artifact state exists.
-    if (auto) {
-      return Boolean(state.ideas[ideaIndex].done[taskKey(stepId, index)]);
-    }
-  }
-  return Boolean(state.ideas[ideaIndex].done[taskKey(stepId, index)]);
+  const idea = state.ideas[ideaIndex];
+  // fpv2 core carries no artifact map yet; an @artifact task (parseTask's
+  // `auto` hook) is only ever complete via the explicit done maps until
+  // artifact state exists — the hook is preserved for later phases.
+  // Stable-id map first (Unit 5), resolved through the remap table; then fall
+  // back to the legacy `${stepId}#${index}` map (belt and braces — a stale tab
+  // or pre-migration in-memory state may carry only the legacy key).
+  const taskId = taskIdAt(stepId, index);
+  if (taskId && idea.doneByTask?.[resolveTaskId(taskId)]) return true;
+  return Boolean(idea.done[taskKey(stepId, index)]);
 }
 
 /** Whether every task of a criterion is complete for an idea. */
@@ -437,12 +555,29 @@ function markTaskDone(
   // a missing/malformed stamp completes the task with no doneAt entry.
   const stampValid = typeof at === "number" && Number.isFinite(at) && at >= 0;
   const wasCriterionDone = isCriterionDone(state, ideaIndex, stepId);
+  // DUAL-WRITE (Unit 5 transition): the stable-id maps are the forward shape;
+  // the legacy `${stepId}#${index}` key is ALSO written when the task maps back
+  // through the explicit legacy table, so an old tab that hydrates this doc and
+  // strips the new fields still carries every completion in its legacy map and
+  // the next new-code load re-unions losslessly (stale-tab risk row).
+  const legacyKey = taskKey(stepId, index);
+  const rawTaskId = taskIdAt(stepId, index);
+  const stableId = rawTaskId ? resolveTaskId(rawTaskId) : undefined;
+  const writeLegacy = legacyKey in LEGACY_KEY_REMAP || !stableId;
   const ideas = state.ideas.map((idea, i) =>
     i === ideaIndex
       ? {
           ...idea,
-          done: { ...idea.done, [taskKey(stepId, index)]: true },
-          ...(stampValid ? { doneAt: { ...(idea.doneAt ?? {}), [taskKey(stepId, index)]: at } } : {}),
+          done: writeLegacy ? { ...idea.done, [legacyKey]: true } : idea.done,
+          ...(stableId
+            ? { doneByTask: { ...(idea.doneByTask ?? {}), [stableId]: true } }
+            : {}),
+          ...(stampValid && writeLegacy
+            ? { doneAt: { ...(idea.doneAt ?? {}), [legacyKey]: at } }
+            : {}),
+          ...(stampValid && stableId
+            ? { doneAtByTask: { ...(idea.doneAtByTask ?? {}), [stableId]: at } }
+            : {}),
         }
       : idea,
   );
@@ -694,6 +829,9 @@ export function reducer(state: GameState, action: Action): GameState {
           // Split-storage learning: HYDRATE must source every persisted slice it
           // resets — copying doneAt here keeps timestamps from being wiped on load.
           ...(idea.doneAt ? { doneAt: { ...idea.doneAt } } : {}),
+          // The stable-id maps (Unit 5) are sourced the same way, never wiped.
+          ...(idea.doneByTask ? { doneByTask: { ...idea.doneByTask } } : {}),
+          ...(idea.doneAtByTask ? { doneAtByTask: { ...idea.doneAtByTask } } : {}),
         })),
         // The ledger lives append-only in fp_ledger, never the save doc. Reset
         // it here so a hydrate can never carry a prior session's rows forward.
