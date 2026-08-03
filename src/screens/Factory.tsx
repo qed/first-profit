@@ -282,7 +282,7 @@ export function NextStepCoach({
  *  target and the Unit 6 one-shot claim hint (identical markup either way). */
 function CoachButton({ label, onClick }: { label: string; onClick: () => void }) {
   return (
-    <div className="pointer-events-none absolute inset-x-0 bottom-7 z-40 flex justify-center px-4 lg:bottom-11">
+    <div className="pointer-events-none absolute inset-x-0 bottom-7 z-40 flex justify-end px-4 lg:bottom-11 lg:px-6">
       <button
         type="button"
         onClick={onClick}
