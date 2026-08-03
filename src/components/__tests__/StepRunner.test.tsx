@@ -55,7 +55,8 @@ import * as GameContext from "../../state/GameContext";
 import { StepRunner } from "../StepRunner";
 import { Celebration } from "../Celebration";
 import { taskIdFor } from "../StuckBox";
-import { phaseById, STEPS } from "../../data/path";
+import { phaseById, STEPS, taskById } from "../../data/path";
+import type { Band } from "../../data/path";
 
 const Ctx = (GameContext as unknown as { __ctx: React.Context<unknown> }).__ctx;
 
@@ -71,7 +72,16 @@ function cssColor(value: string): string {
   return el.style.color;
 }
 
-function Harness({ seed, onAction }: { seed: GameState; onAction?: (a: unknown) => void }) {
+function Harness({
+  seed,
+  onAction,
+  band = "g6_8",
+}: {
+  seed: GameState;
+  onAction?: (a: unknown) => void;
+  /** The session band GameContext derives from the grade (displayBand). */
+  band?: Band;
+}) {
   const [state, rawDispatch] = React.useReducer(reducer, seed);
   const dispatch: typeof rawDispatch = (action) => {
     onAction?.(action);
@@ -80,6 +90,7 @@ function Harness({ seed, onAction }: { seed: GameState; onAction?: (a: unknown) 
   const value = {
     ...state,
     dispatch,
+    band,
     isTaskDone: (ideaIndex: number, stepId: string, index: number) =>
       isTaskDoneFn(state, ideaIndex, stepId, index),
   };
@@ -262,6 +273,73 @@ describe("StepRunner", () => {
     const cta = screen.getByText("✓ I did it") as HTMLElement;
     expect(cta.className).toContain("bg-verified");
     expect(cta.style.background).toBe("");
+  });
+
+  it("renders BAND-RESOLVED copy: the same task shows different words for g3_5 vs g9_12", () => {
+    // 1.1.1 carries authored variants for all three bands (generated content).
+    const task = taskById("1.1.1")!;
+    const g35 = task.bandVariants.g3_5!;
+    const g912 = task.bandVariants.g9_12!;
+    expect(g35).toBe(
+      "Parent scribes; child chooses the product and says the sentence unprompted.",
+    );
+    expect(g912).toBe(
+      "Child also writes one sentence on who the *wrong* customer is and why.",
+    );
+    const seed: GameState = {
+      ...seedAtLastTaskOf11(),
+      runnerIndex: 0,
+      ideas: [{ fields: {}, done: {} }],
+    };
+
+    const younger = render(<Harness seed={seed} band="g3_5" />);
+    // Shared body + the g3_5 variant line; never the g9_12 line.
+    expect(document.body.textContent).toContain(task.body);
+    expect(document.body.textContent).toContain(g35);
+    expect(document.body.textContent).not.toContain("wrong customer");
+    // The per-TASK done-when (generated), not the criterion-level STEP_META line.
+    expect(document.body.textContent).toContain(task.doneWhen);
+    younger.unmount();
+
+    render(<Harness seed={seed} band="g9_12" />);
+    // Same task, different visible copy: emphasis markers render stripped.
+    expect(document.body.textContent).toContain(
+      "Child also writes one sentence on who the wrong customer is and why.",
+    );
+    expect(document.body.textContent).not.toContain(g35);
+    expect(document.body.textContent).toContain(task.doneWhen);
+  });
+
+  it("renders the per-task done-when and banded title on a band WITHOUT a variant (fallback = shared body)", () => {
+    // 1.1.3 has g3_5 and g9_12 variants but NO g6_8 one: the middle band
+    // (also the unknown-grade display default) reads the shared body alone.
+    const task = taskById("1.1.3")!;
+    expect(task.bandVariants.g6_8).toBeUndefined();
+    const seed: GameState = {
+      ...seedAtLastTaskOf11(),
+      runnerIndex: 2,
+      ideas: [{ fields: {}, done: {} }],
+    };
+    render(<Harness seed={seed} band="g6_8" />);
+    // The banded title renders twice by design: the rail segment AND the h3.
+    expect(screen.getAllByText("Rehearse to camera until note-free").length).toBe(2);
+    expect(document.body.textContent).toContain(task.body);
+    expect(document.body.textContent).toContain(task.doneWhen);
+    expect(document.body.textContent).not.toContain(task.bandVariants.g3_5!);
+    expect(document.body.textContent).not.toContain(task.bandVariants.g9_12!);
+  });
+
+  it("shows a substantive All bands note (emphasis stripped) on 1.2.5", () => {
+    const seed: GameState = {
+      ...seedAtLastTaskOf11(),
+      runnerStep: "1.2",
+      runnerIndex: 4,
+      ideas: [{ fields: {}, done: {} }],
+    };
+    render(<Harness seed={seed} />);
+    expect(document.body.textContent).toContain(
+      "All bands: as written; 9–12 adds one sentence on what they'd change about the sale process.",
+    );
   });
 
   it("completing the last task swaps the runner for the celebration listing 1.2", () => {

@@ -35,6 +35,10 @@ this plan fixes the how.
 
 From the origin document (ids preserved):
 - R1/R2: 125 tasks with per-task done-when, grade-banded (Grades 3-5/6-8/9-12) — Units 4, 5
+  (content + accessors) and the Unit 9 seam-review fix that wires them into the
+  rendered Step Runner (banded title/body/done-when per task; the whole-branch
+  review found the plan had never scheduled a consuming unit — see
+  docs/solutions/best-practices/infrastructure-complete-is-not-requirement-complete-name-the-consuming-unit-and-test-the-rendered-surface-2026-08-03.md)
 - R3: stable task ids + behavior hooks survive resync — Units 4, 5
 - R4: DB-ready content shape (row-like, liftable to a table) — Unit 4
 - R5/R6/R7: full-path progression; per-idea phases 1-3; promoted archivable business — Units 6, 7, 8
@@ -741,7 +745,7 @@ production; R20 record reflects the new surfaces.
 | Behavior hooks dropped in the content swap | Low | High | Hooks registry keyed by task id with build-time existence assertion; explicit tests for 1.2.5 auto-complete and @artifact tasks |
 | Feedback writes bypass rate limiting (direct PostgREST) | Med | Low | DB daily-cap trigger + length CHECK + append-only + RLS; 15-20 known kids |
 | The120 work slips and blocks the cohort | Med | High | Phase A is small and independent; feedback client parks rows until the table exists (retryable classification) |
-| Stale tab strips new save fields and overwrites | High | Med | Merge-on-load UNION recovers all legacy-representable completions; residual exposure is only new-key-only completions during one tab cycle; re-run field checks after tabs cycle (split-phase learning) |
+| Stale tab strips new save fields and overwrites | High | **High** (re-rated at seam review: businesses + phases 2-5 progress have NO legacy shadow, so an old-bundle full-doc replace that lands as the last write is a permanent loss, not one tab cycle) | Merge-on-load UNION recovers legacy-representable completions; the client rebase union protects CAS-losers only — so a server-side BEFORE UPDATE guard on `fp_player_saves` (The120 branch feat/fp-save-doc-guard) grafts back monotonic keys an incoming doc omits at the key level; apply BEFORE the SPA deploy |
 | 25-criterion floor overwhelms 390px layout | Med | Med | Unit 8's density screenshots are a completion gate; two-tier breakpoint rule preserved |
 
 ## Documentation / Operational Notes

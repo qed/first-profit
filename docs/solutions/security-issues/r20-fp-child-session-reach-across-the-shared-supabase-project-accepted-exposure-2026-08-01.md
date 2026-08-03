@@ -119,6 +119,21 @@ the project-level value only governs the blocked-in-Slice-A email-signup path.
    from the child's first name and is published at `firstprofit.school/<handle>`;
    bounded/validated but flagged in-migration for pre-launch product review.
 
+## Re-checks
+
+- **2026-08-02 (Phase A, cohort instrument):** added `fp_task_feedback` —
+  child-INSERT-only under RLS with a column-scoped grant and an ownership-gated
+  daily cap trigger (FP429), plus fill-only `/api/fp/grade`. Both audited in
+  their own units; posture unchanged otherwise.
+- **2026-08-03 (Phase B/C, path content engine + business model):** re-audited
+  the whole branch diff for new child-reachable surface. NONE added: no new
+  tables, policies, grants, RPCs, or endpoints; every PostgREST target in
+  `src/lib/sync.ts` predates the branch. The only DB-visible change is a larger
+  `fp_player_saves.doc` (recomputed worst case ~58KiB, within the 256KiB CHECK).
+  The companion The120 trigger (`fp_player_saves` BEFORE UPDATE monotonic-key
+  guard, branch feat/fp-save-doc-guard) runs as table owner on the same row the
+  child could already update — it narrows data-loss risk and adds no reach.
+
 ## Prevention / how to reuse this
 
 - **When an app adds a session to a SHARED database, the threat surface is every

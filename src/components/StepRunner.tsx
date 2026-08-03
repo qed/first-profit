@@ -26,7 +26,15 @@
  */
 import { useEffect, useRef } from "react";
 import { useGame } from "../state/GameContext";
-import { parseTask, phaseById, stepById } from "../data/path";
+import {
+  allBandsNoteFor,
+  doneWhenForBand,
+  parseTask,
+  phaseById,
+  stepById,
+  taskBodyForBand,
+  taskTitleForBand,
+} from "../data/path";
 import { activeBusiness, criterionIdsForPhase, phaseOfCriterion } from "../state/gameCore";
 import { ideaOneLiner, ideaSummaryName } from "../state/floorSelectors";
 import { getDraft, setDraft, getLastUserId } from "../lib/draftCache";
@@ -38,10 +46,41 @@ function fieldDraftName(ideaIndex: number, key: string): string {
   return `runner:idea${ideaIndex}:${key}`;
 }
 
+/**
+ * The brief's markdown emphasis (`*wrong*`, `**9–12**`) rendered as plain
+ * text: the runner shows generated task copy verbatim except these markers,
+ * which would otherwise read as literal asterisks to the child.
+ */
+function stripEmphasis(text: string): string {
+  return text.replace(/\*\*([^*]+)\*\*/g, "$1").replace(/\*([^*]+)\*/g, "$1");
+}
+
+/**
+ * The `All bands:` note to display for a task, or undefined. The bare
+ * "as written." sentinel means "no extra guidance" (the parser keeps it raw
+ * because notes often carry inline band addenda) — showing it would read as
+ * noise, so only substantive notes render.
+ */
+function displayAllBandsNote(taskId: string): string | undefined {
+  const note = allBandsNoteFor(taskId);
+  if (!note) return undefined;
+  if (/^as written\.?$/i.test(note.trim())) return undefined;
+  return stripEmphasis(note);
+}
+
 export function StepRunner() {
   const game = useGame();
-  const { runnerOpen, runnerStep, runnerIndex, activeIdea, ideas, isTaskDone, celebrate, dispatch } =
-    game;
+  const {
+    runnerOpen,
+    runnerStep,
+    runnerIndex,
+    activeIdea,
+    ideas,
+    isTaskDone,
+    celebrate,
+    dispatch,
+    band,
+  } = game;
 
   const panelRef = useRef<HTMLDivElement>(null);
 
@@ -113,7 +152,22 @@ export function StepRunner() {
   const phaseCriteria = phaseId ? criterionIdsForPhase(phaseId) : [];
   const critNum = phaseCriteria.indexOf(runnerStep) + 1 || 1;
   const critTotal = phaseCriteria.length || 1;
-  const taskLabel = parseTask(step.tasks[idx]).label;
+
+  // Band-resolved task content (P0: the words the child reads must come from
+  // the generated content at the session's band, per task — never the
+  // per-criterion STEP_META chrome). The stable task id is positional,
+  // `${criterionId}.${index+1}` (taskIdFor, pinned by StuckBox.test against
+  // every generated id). The accessors fall back safely: titles and done-when
+  // lines are band-invariant, and a band without an authored variant reads the
+  // shared body alone — so the `?? step.*` fallbacks below can only fire if a
+  // task id ever failed to resolve, keeping the screen non-empty even then.
+  const currentTaskId = taskIdFor(runnerStep, idx);
+  const taskLabel =
+    taskTitleForBand(currentTaskId, band) ?? parseTask(step.tasks[idx]).label;
+  const taskBody = taskBodyForBand(currentTaskId, band);
+  const taskBodyText = taskBody ? stripEmphasis(taskBody) : step.brief;
+  const taskDoneWhen = doneWhenForBand(currentTaskId, band) ?? step.doneWhen;
+  const allBandsNote = displayAllBandsNote(currentTaskId);
 
   // Idea/business context for the header (Unit 8; origin IA decision): phases
   // 1-3 name the idea being worked (one-liner when authored); phases 4-5 name
@@ -197,6 +251,11 @@ export function StepRunner() {
             >
               {step.title}
             </h2>
+            {/* Criterion intro chrome (STEP_META brief) — the per-TASK words
+                below come from the banded content accessors. */}
+            <p className="mt-1 text-[12.5px] leading-[1.5] text-[hsl(25_20%_38%)]">
+              {step.brief}
+            </p>
           </div>
           <button
             type="button"
@@ -227,7 +286,7 @@ export function StepRunner() {
                   className="mt-1.5 text-[9.5px] leading-[1.3] text-[hsl(25_20%_38%)]"
                   style={{ fontWeight: i === idx ? 700 : 400 }}
                 >
-                  {parseTask(raw).label}
+                  {taskTitleForBand(taskIdFor(runnerStep, i), band) ?? parseTask(raw).label}
                 </p>
               </div>
             );
@@ -251,7 +310,18 @@ export function StepRunner() {
           <h3 className="mt-3 font-display text-[26px] font-black leading-[1.15] text-[hsl(25_34%_20%)]">
             {taskLabel}
           </h3>
-          <p className="mt-2.5 text-[14.5px] leading-[1.65] text-[hsl(25_20%_38%)]">{step.brief}</p>
+          {/* Banded instruction body: the shared body plus the session band's
+              variant line (taskBodyForBand joins them with \n; pre-line keeps
+              the variant on its own line). break-words guards a long token at
+              390px. */}
+          <p className="mt-2.5 whitespace-pre-line break-words text-[14.5px] leading-[1.65] text-[hsl(25_20%_38%)]">
+            {taskBodyText}
+          </p>
+          {allBandsNote ? (
+            <p className="mt-2 break-words text-[13px] italic leading-[1.55] text-[hsl(25_20%_38%)]">
+              All bands: {allBandsNote}
+            </p>
+          ) : null}
 
           {/* maxLength caps (2000 single-line / 4000 textarea) keep the aggregate
               save doc well under the server's 256KiB cap even at MAX_IDEAS=5, so a
@@ -300,7 +370,7 @@ export function StepRunner() {
             <p className="font-mono text-[9.5px] font-semibold uppercase tracking-[0.06em] text-[hsl(25_20%_38%)]">
               Done when
             </p>
-            <p className="mt-0.5 text-[13.5px] leading-[1.55] text-[hsl(25_34%_20%)]">{step.doneWhen}</p>
+            <p className="mt-0.5 break-words text-[13.5px] leading-[1.55] text-[hsl(25_34%_20%)]">{taskDoneWhen}</p>
           </div>
 
           {/* Actions */}
