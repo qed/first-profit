@@ -274,11 +274,6 @@ export function MoneyBooth({ onNext, onBack }: MoneyBoothProps) {
       <h2 className="mt-2 font-display text-[30px] font-black leading-[1.1] text-[hsl(25_34%_20%)]">
         You can take real money today.
       </h2>
-      <p className="mt-2 text-sm leading-[1.6] text-[hsl(25_20%_38%)]">
-        Every founder starts with one offer already switched on: people who believe in you can back
-        you, and they get double their money as credit in your store.
-      </p>
-
       <div className="mt-4 rounded-2xl border-2 border-[hsl(25_34%_20%/0.15)] bg-white p-5 text-center">
         <p className="font-mono text-[10px] uppercase tracking-[0.1em] text-[hsl(25_20%_38%)]">
           Your first offer
@@ -357,11 +352,6 @@ export function ThePath({ onComplete, onBack }: ThePathProps) {
       <h2 className="mt-2 font-display text-[30px] font-black leading-[1.1] text-[hsl(25_34%_20%)]">
         One room. One task at a time.
       </h2>
-      <p className="mt-2 text-sm leading-[1.6] text-[hsl(25_20%_38%)]">
-        First Profit is five phases and 25 criteria, but you do not meet them all today. You start in
-        the Idea Room. Everything else on the factory floor stays shut until you have earned it.
-      </p>
-
       <div className="mt-[18px] flex flex-col gap-2">
         {PATH_PHASES.map((ph, i) => {
           const isSell = i === 0;
