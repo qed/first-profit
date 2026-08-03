@@ -1,0 +1,3 @@
+# The generated content module is written with LF by scripts/build-path-content.ts
+# and must stay LF in every working tree so the committed bytes are stable.
+src/data/pathContent.generated.ts text eol=lf
