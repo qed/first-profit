@@ -87,7 +87,14 @@ import {
   flushFeedbackViaKeepalive,
   feedbackCountForDay,
   bumpFeedbackCountForDay,
+  utcDayToday,
+  flushOutboxForPriorUser,
   FEEDBACK_BODY_MAX,
+  FEEDBACK_DAILY_CAP,
+  FEEDBACK_CAP_ERRCODE,
+  FEEDBACK_TASK_ID_RE,
+  FEEDBACK_TASK_ID_MAX,
+  FEEDBACK_BANDS,
   type LedgerInsertRow,
   type FeedbackInsertRow,
 } from "../sync";
@@ -1113,6 +1120,60 @@ describe("createSyncEngine", () => {
     engine.stop();
   });
 
+  it("notifyFeedback FP429 resolves 'capped': entry RESOLVED out of the outbox (never parked, never silent) and the local day counter pinned to the cap", async () => {
+    const engine = makeEngine();
+    handlers.insert = () => ({
+      error: { code: FEEDBACK_CAP_ERRCODE, message: "fp_task_feedback: daily feedback cap reached" },
+    });
+    await engine.start();
+
+    const outcome = await engine.notifyFeedback({
+      id: "fb-cap",
+      taskId: "1.1.1",
+      band: "unknown",
+      body: "",
+    });
+    expect(outcome).toBe("capped"); // the child SEES the capped copy — not "sent", not silence
+    expect(readOutbox(USER, engineStorage).feedback).toHaveLength(0); // removed, not parked
+    // Server cap adopted locally: the next tap short-circuits to 'capped'
+    // without another doomed insert.
+    expect(feedbackCountForDay(USER, utcDayToday(), engineStorage)).toBe(FEEDBACK_DAILY_CAP);
+    engine.stop();
+  });
+
+  it("notifyFeedback whose outbox write is REFUSED (storage quota) resolves 'dropped' without throwing or inserting undurably", async () => {
+    const engine = makeEngine();
+    await engine.start();
+    let inserts = 0;
+    handlers.insert = () => {
+      inserts += 1;
+      return { error: null };
+    };
+    // Every subsequent write to the engine's storage now fails (quota).
+    engineStorage.setItem = () => {
+      throw new Error("QuotaExceededError");
+    };
+
+    const outcome = await engine.notifyFeedback({
+      id: "fb-q",
+      taskId: "1.1.2",
+      band: "unknown",
+      body: "full disk",
+    });
+    expect(outcome).toBe("dropped"); // honest: the row is not durable anywhere
+    expect(inserts).toBe(0); // no network attempt for an undurable row
+    // The day counter was not corrupted by the failed write path.
+    expect(feedbackCountForDay(USER, utcDayToday(), engineStorage)).toBe(0);
+    engine.stop();
+  });
+
+  it("start() records the resolved profile id under fp:<uid>:profileId (for the pre-wipe prior-user flush)", async () => {
+    const engine = makeEngine();
+    await engine.start();
+    expect(JSON.parse(engineStorage.getItem(`fp:${USER}:profileId`) as string)).toBe(PROFILE);
+    engine.stop();
+  });
+
   it("GENERATION GUARD: a feedback insert resolving after stop() never touches the live session's reauth path", async () => {
     const engine = makeEngine();
     let release: (v: unknown) => void = () => undefined;
@@ -1217,6 +1278,30 @@ describe("insertFeedback + classification", () => {
     expect(classifyFeedbackOutcome(result)).toEqual({ decision: "keep", needsReauth: false });
   });
 
+  it("FP429 (daily-cap trigger) classifies as the DISTINCT 'capped' outcome, end to end", async () => {
+    expect(classifyFeedbackWriteError({ code: FEEDBACK_CAP_ERRCODE })).toEqual(
+      expect.objectContaining({ ok: false, reason: "capped" }),
+    );
+    handlers.insert = () => ({
+      error: { code: "FP429", message: "fp_task_feedback: daily feedback cap reached" },
+    });
+    const result = await insertFeedback(PROFILE, row);
+    expect(classifyFeedbackOutcome(result)).toEqual({ decision: "capped", needsReauth: false });
+  });
+
+  it("23503 (profile provisioning race) is retryable for FEEDBACK ONLY; the ledger keeps it terminal", () => {
+    // A brand-new child's first tap can race the service-role profile
+    // provisioning: park + replay once the profile exists.
+    expect(classifyFeedbackWriteError({ code: "23503" })).toEqual(
+      expect.objectContaining({ reason: "retryable", needsReauth: false }),
+    );
+    // The ledger's classification is deliberately UNCHANGED (pre-existing
+    // terminal posture; out of this unit's scope).
+    expect(classifyWriteError({ code: "23503" })).toEqual(
+      expect.objectContaining({ reason: "terminal" }),
+    );
+  });
+
   it("keeps the ledger rules otherwise: terminal drops, auth parks with reauth, unknown code terminal", async () => {
     // The daily-cap trigger raise (P0001) and CHECK violations (23514) recur
     // identically forever -> drop.
@@ -1263,6 +1348,18 @@ describe("feedback outbox (CHECK mirror + queue)", () => {
     // The happy shapes all pass.
     expect(isValidFeedbackRow({ id: "a", taskId: "1.2.5", band: "unknown", body: "" })).toBe(true);
     expect(isValidFeedbackRow({ id: "a", taskId: "5.5.5", band: "g9_12", body: "x".repeat(1000) })).toBe(true);
+  });
+
+  it("a REFUSED storage write (quota) makes enqueueFeedback report false — never throws, never claims durability", () => {
+    const s = fakeStorage();
+    s.setItem = () => {
+      throw new Error("QuotaExceededError");
+    };
+    expect(() => enqueueFeedback(USER, row, s)).not.toThrow();
+    expect(enqueueFeedback(USER, row, s)).toBe(false);
+    // The day counter tolerates the same failure without throwing or corrupting.
+    expect(() => bumpFeedbackCountForDay(USER, "2026-08-03", s)).not.toThrow();
+    expect(feedbackCountForDay(USER, "2026-08-03", s)).toBe(0);
   });
 
   it("readOutbox drops unknown-version and malformed feedback entries, keeps valid ones", () => {
@@ -1359,6 +1456,57 @@ describe("replayOutbox with feedback entries", () => {
     expect(readOutbox(USER, s).feedback).toHaveLength(0);
   });
 
+  it("FP429 on replay REMOVES the entry without wedging the queue and pins the local counter to the cap", async () => {
+    const s = fakeStorage();
+    enqueueFeedback(USER, fb("fb-c1"), s);
+    enqueueFeedback(USER, fb("fb-c2", "1.2.2"), s);
+    handlers.insert = () => ({ error: { code: FEEDBACK_CAP_ERRCODE, message: "cap reached" } });
+
+    const result = await replayOutbox(USER, PROFILE, s);
+    // Capped never stops the drain (both entries were attempted and removed) —
+    // the queue can NEVER wedge behind a capped report.
+    expect(result.feedbackCapped).toBe(2);
+    expect(result.feedbackSent).toBe(0);
+    expect(result.feedbackDroppedTerminal).toBe(0);
+    expect(readOutbox(USER, s).feedback).toHaveLength(0);
+    expect(feedbackCountForDay(USER, utcDayToday(), s)).toBe(FEEDBACK_DAILY_CAP);
+  });
+
+  it("23503 (provisioning race) PARKS the entry, then drains clean once the profile exists", async () => {
+    const s = fakeStorage();
+    enqueueFeedback(USER, fb("fb-fk"), s);
+    handlers.insert = () => ({ error: { code: "23503", message: "fk violation on profile_id" } });
+
+    let result = await replayOutbox(USER, PROFILE, s);
+    expect(result.feedbackSent).toBe(0);
+    expect(result.feedbackDroppedTerminal).toBe(0);
+    expect(readOutbox(USER, s).feedback.map((e) => e.row.id)).toEqual(["fb-fk"]); // retained
+
+    // The profile lands (service-role provisioning completed): drains clean.
+    handlers.insert = () => ({ error: null });
+    result = await replayOutbox(USER, PROFILE, s);
+    expect(result.feedbackSent).toBe(1);
+    expect(readOutbox(USER, s).feedback).toHaveLength(0);
+  });
+
+  it("SYMMETRIC drain: a ledger retryable STOP does not block the feedback drain", async () => {
+    const s = fakeStorage();
+    enqueueLedger(USER, led("led-a"), s);
+    enqueueFeedback(USER, fb("fb-a"), s);
+    handlers.insert = (r) => {
+      const row = r as { task_id?: string };
+      // The ledger insert fails retryable (codeless network error); the
+      // feedback insert lands.
+      return row.task_id ? { error: null } : { error: new Error("offline") };
+    };
+
+    const result = await replayOutbox(USER, PROFILE, s);
+    expect(result.ledgerSent).toBe(0);
+    expect(readOutbox(USER, s).ledger.map((e) => e.row.id)).toEqual(["led-a"]); // ledger kept
+    expect(result.feedbackSent).toBe(1); // feedback drained anyway
+    expect(readOutbox(USER, s).feedback).toHaveLength(0);
+  });
+
   it("a retryable feedback stop preserves order and does NOT block the ledger/snapshot drains", async () => {
     const s = fakeStorage();
     enqueueLedger(USER, led("led-a"), s);
@@ -1402,6 +1550,92 @@ describe("flushFeedbackViaKeepalive", () => {
     expect(init.headers.Prefer).toBe("return=minimal");
     const body = JSON.parse(init.body) as Record<string, unknown>;
     expect(body).toEqual({ id: "fb-k", profile_id: PROFILE, task_id: "1.1.4", band: "unknown", body: "hi" });
+    // created_at is server-managed (excluded from the INSERT grant): sending it
+    // would fail the whole insert. It must NEVER ride the keepalive body.
+    expect("created_at" in body).toBe(false);
+  });
+});
+
+// ── flushOutboxForPriorUser (pre-wipe best-effort flush, FIX 5) ──────────────
+describe("flushOutboxForPriorUser", () => {
+  beforeEach(() => {
+    global.fetch = vi.fn().mockResolvedValue({ ok: true }) as unknown as typeof fetch;
+    getSession.mockResolvedValue({ data: { session: { access_token: "prior-tok" } } });
+  });
+
+  function feedbackPosts() {
+    return (global.fetch as ReturnType<typeof vi.fn>).mock.calls.filter(
+      ([url]) => typeof url === "string" && url.includes("/rest/v1/fp_task_feedback"),
+    );
+  }
+
+  it("fires keepalive POSTs for the prior user's queued feedback rows, addressed by their stored profile id", async () => {
+    const s = fakeStorage();
+    s.setItem(`fp:${USER}:profileId`, JSON.stringify(PROFILE)); // persisted by engine.start
+    enqueueFeedback(
+      USER,
+      { id: "fb-prior", taskId: "1.1.2", band: "unknown", body: "left behind" },
+      s,
+    );
+
+    await flushOutboxForPriorUser(USER, s);
+
+    const posts = feedbackPosts();
+    expect(posts).toHaveLength(1);
+    const [, init] = posts[0] as [string, { keepalive: boolean; body: string }];
+    expect(init.keepalive).toBe(true);
+    expect(JSON.parse(init.body)).toEqual({
+      id: "fb-prior",
+      profile_id: PROFILE,
+      task_id: "1.1.2",
+      band: "unknown",
+      body: "left behind",
+    });
+  });
+
+  it("captures the outbox SYNCHRONOUSLY, so the caller's immediate wipe cannot race it", async () => {
+    const s = fakeStorage();
+    s.setItem(`fp:${USER}:profileId`, JSON.stringify(PROFILE));
+    enqueueFeedback(USER, { id: "fb-race", taskId: "1.2.4", band: "unknown", body: "" }, s);
+
+    // The login path fires the flush unawaited and wipes fp:* immediately after.
+    const pending = flushOutboxForPriorUser(USER, s);
+    s.clear();
+    await pending;
+
+    const posts = feedbackPosts();
+    expect(posts).toHaveLength(1);
+    expect((JSON.parse((posts[0][1] as { body: string }).body) as { id: string }).id).toBe(
+      "fb-race",
+    );
+  });
+
+  it("is inert (never throws, sends nothing) without a stored profile id or a session token", async () => {
+    const s = fakeStorage();
+    enqueueFeedback(USER, { id: "fb-x", taskId: "1.1.1", band: "unknown", body: "" }, s);
+    await flushOutboxForPriorUser(USER, s); // no profileId stored
+
+    s.setItem(`fp:${USER}:profileId`, JSON.stringify(PROFILE));
+    getSession.mockResolvedValue({ data: { session: null } });
+    await flushOutboxForPriorUser(USER, s); // no token
+
+    expect(global.fetch).not.toHaveBeenCalled();
+  });
+});
+
+// ── Cross-repo mirror parity (The120 app/fp/lib/fp-task-feedback-rules.ts) ───
+describe("feedback contract parity pins", () => {
+  it("pins the mirrored constants as LITERALS, byte-for-byte", () => {
+    // These literals mirror The120's app/fp/lib/fp-task-feedback-rules.ts (the
+    // counterpart contract module for the fp_task_feedback migration). Any byte
+    // drift here is a DELIBERATE test failure: change both repos (and the DB
+    // CHECKs/trigger they mirror) together, or not at all.
+    expect(FEEDBACK_TASK_ID_RE.source).toBe("^[0-9]+(\\.[0-9]+){2}$");
+    expect(FEEDBACK_TASK_ID_MAX).toBe(16);
+    expect(FEEDBACK_BODY_MAX).toBe(1000);
+    expect(FEEDBACK_DAILY_CAP).toBe(50);
+    expect(FEEDBACK_CAP_ERRCODE).toBe("FP429");
+    expect([...FEEDBACK_BANDS]).toEqual(["g3_5", "g6_8", "g9_12", "unknown"]);
   });
 });
 

@@ -87,6 +87,16 @@ export const FEEDBACK_BODY_MAX = 1000;
 export const FEEDBACK_DAILY_CAP = 50;
 
 /**
+ * The custom SQLSTATE the DB's daily-cap trigger raises (mirrors The120's
+ * fp-task-feedback-rules.ts FEEDBACK_CAP_ERRCODE, byte-for-byte). Client
+ * contract (migration "CLIENT CONTRACT NOTES"): FP429 = capped → the child sees
+ * the honest capped message; the entry is REMOVED from the outbox (replaying it
+ * would raise identically for the rest of the UTC day) — never parked, never
+ * silently dropped, never claimed as saved.
+ */
+export const FEEDBACK_CAP_ERRCODE = "FP429";
+
+/**
  * The columns a child may insert into fp_task_feedback. `created_at` is
  * DELIBERATELY absent: the column-scoped INSERT grant excludes it (server-set
  * default), so sending it would fail the entire insert.
@@ -99,7 +109,17 @@ export interface FeedbackInsertRow {
   body: string;
 }
 
-export type FeedbackResult = { ok: true } | WriteFailure;
+/**
+ * A failed FEEDBACK write. The ledger's WriteFailure plus the distinct 'capped'
+ * outcome for the daily-cap trigger's FP429 raise — capped is neither terminal
+ * (the child must SEE it, not have it silently dropped) nor retryable (a replay
+ * raises identically for the rest of the UTC day).
+ */
+export type FeedbackWriteFailure =
+  | WriteFailure
+  | { ok: false; reason: "capped"; error: unknown };
+
+export type FeedbackResult = { ok: true } | FeedbackWriteFailure;
 
 /** Minimal shape of a PostgREST / supabase-js error. */
 interface PgError {
@@ -206,11 +226,29 @@ export function classifyWriteError(error: unknown): WriteFailure {
 }
 
 /**
- * Feedback-kind classification: the ledger rules PLUS the missing-table codes
- * as retryable (the table ships in a separate deploy lane; see MISSING_TABLE_CODES).
+ * Feedback-kind classification: the ledger rules PLUS
+ *  - FP429 (the daily-cap trigger) as the distinct 'capped' outcome, and
+ *  - 23503 (FK violation on profile_id) as retryable, and
+ *  - the missing-table codes as retryable (separate deploy lane; see
+ *    MISSING_TABLE_CODES).
  */
-export function classifyFeedbackWriteError(error: unknown): WriteFailure {
+export function classifyFeedbackWriteError(error: unknown): FeedbackWriteFailure {
   const code = pgCode(error);
+  // The DB's daily-cap trigger refused (server contract: FP429 = capped). A
+  // distinct outcome so it can neither park (it recurs all day) nor fall into
+  // the terminal silent-drop path — the child must see the capped message.
+  if (code === FEEDBACK_CAP_ERRCODE) {
+    return { ok: false, reason: "capped", error };
+  }
+  // 23503: the profile row does not exist YET — a brand-new child's first tap
+  // can race the service-role profile provisioning (migration CLIENT CONTRACT
+  // NOTES). That timing gap is transient, so PARK + replay once the profile
+  // exists. FEEDBACK ONLY: the ledger's classifier keeps 23503 terminal
+  // (pre-existing behavior, out of this unit's scope) — do not move this into
+  // classifyWriteError.
+  if (code === "23503") {
+    return { ok: false, reason: "retryable", needsReauth: false, error };
+  }
   if (MISSING_TABLE_CODES.has(code)) {
     return { ok: false, reason: "retryable", needsReauth: false, error };
   }
@@ -234,11 +272,18 @@ export function classifyLedgerOutcome(
   return { decision: "keep", needsReauth: result.needsReauth };
 }
 
-/** Same decision collapse for a feedback insert (sent / drop / keep). */
+/**
+ * Decision collapse for a feedback insert: the ledger's sent / drop / keep
+ * plus 'capped' — remove from the queue AND show the child the capped copy
+ * (never a silent drop, never a park).
+ */
+export type FeedbackDecision = LedgerDecision | "capped";
+
 export function classifyFeedbackOutcome(
   result: FeedbackResult,
-): { decision: LedgerDecision; needsReauth: boolean } {
+): { decision: FeedbackDecision; needsReauth: boolean } {
   if (result.ok) return { decision: "sent", needsReauth: false };
+  if (result.reason === "capped") return { decision: "capped", needsReauth: false };
   if (result.reason === "terminal") return { decision: "drop", needsReauth: false };
   return { decision: "keep", needsReauth: result.needsReauth };
 }
@@ -517,6 +562,14 @@ export const OUTBOX_VERSION = DOC_VERSION;
 
 const OUTBOX_NAME = "outbox";
 
+/**
+ * Where a user's resolved profile id is remembered (inside their `fp:<uid>:*`
+ * namespace, so it is wiped with everything else). Written by the engine on
+ * start; read by flushOutboxForPriorUser, which must address a PRIOR user's
+ * rows after that user's session (and profile-id cache) are gone.
+ */
+const PROFILE_ID_NAME = "profileId";
+
 interface OutboxLedgerEntry {
   v: number;
   row: LedgerInsertRow;
@@ -624,8 +677,9 @@ export function readOutbox(userId: string, storage?: Storage): Outbox {
   return { ledger, feedback, snapshot };
 }
 
-function writeOutbox(userId: string, outbox: Outbox, storage?: Storage): void {
-  setDraft(userId, OUTBOX_NAME, outbox, storage);
+/** Write the outbox; `false` when storage refused the write (quota/lockdown). */
+function writeOutbox(userId: string, outbox: Outbox, storage?: Storage): boolean {
+  return setDraft(userId, OUTBOX_NAME, outbox, storage);
 }
 
 /** Queue a ledger insert durably (idempotent by id). */
@@ -648,7 +702,10 @@ export function resolveLedger(userId: string, id: string, storage?: Storage): vo
 
 /**
  * Queue a stuck report durably (idempotent by id). A row failing the client-side
- * CHECK mirror is REFUSED (returns false) — never queued, never sent.
+ * CHECK mirror is REFUSED (returns false) — never queued, never sent. A storage
+ * write that fails (quota exceeded, locked-down Storage) ALSO returns false:
+ * the row is not durable, so the caller must resolve 'dropped' honestly rather
+ * than pretend it is queued (setDraft is non-throwing, so this never throws).
  */
 export function enqueueFeedback(
   userId: string,
@@ -657,11 +714,9 @@ export function enqueueFeedback(
 ): boolean {
   if (!isValidFeedbackRow(row)) return false;
   const outbox = readOutbox(userId, storage);
-  if (!outbox.feedback.some((e) => e.row.id === row.id)) {
-    outbox.feedback.push({ v: OUTBOX_VERSION, row });
-    writeOutbox(userId, outbox, storage);
-  }
-  return true;
+  if (outbox.feedback.some((e) => e.row.id === row.id)) return true;
+  outbox.feedback.push({ v: OUTBOX_VERSION, row });
+  return writeOutbox(userId, outbox, storage);
 }
 
 /** Remove a resolved stuck report from the queue. */
@@ -696,6 +751,8 @@ export interface ReplayResult {
   ledgerDroppedTerminal: number;
   feedbackSent: number;
   feedbackDroppedTerminal: number;
+  /** Entries the server refused with FP429 (daily cap): removed, never wedged. */
+  feedbackCapped: number;
   snapshot: SaveResult | null;
   reauthNeeded: boolean;
 }
@@ -745,6 +802,7 @@ export async function replayOutbox(
   const feedbackRemaining: OutboxFeedbackEntry[] = [];
   let feedbackSent = 0;
   let feedbackDroppedTerminal = 0;
+  let feedbackCapped = 0;
   let feedbackStopped = false;
   for (const entry of outbox.feedback) {
     if (feedbackStopped) {
@@ -758,6 +816,12 @@ export async function replayOutbox(
       feedbackSent += 1;
     } else if (decision === "drop") {
       feedbackDroppedTerminal += 1;
+    } else if (decision === "capped") {
+      // FP429 on replay: remove the entry (it recurs identically for the rest
+      // of the UTC day, so keeping it would wedge the queue) and adopt the
+      // server's cap locally so the next tap short-circuits to 'capped'.
+      feedbackCapped += 1;
+      adoptServerFeedbackCap(userId, storage);
     } else {
       if (needsReauth) reauthNeeded = true;
       feedbackRemaining.push(entry);
@@ -791,6 +855,7 @@ export async function replayOutbox(
     ledgerDroppedTerminal,
     feedbackSent,
     feedbackDroppedTerminal,
+    feedbackCapped,
     snapshot,
     reauthNeeded,
   };
@@ -909,6 +974,47 @@ export function flushFeedbackViaKeepalive(
   return { sent: true };
 }
 
+/**
+ * Best-effort flush of a PRIOR user's outbox, fired by the different-user login
+ * path right BEFORE wipeAllFpKeys destroys it (a queued stuck report / sale
+ * would otherwise die silently when a sibling logs in on a shared device).
+ *
+ * Same fire-and-forget keepalive shape as flushOnHide, addressed with the prior
+ * user's stored profile id (PROFILE_ID_NAME) and whatever session token is
+ * still resolvable. Bounded (the outbox is bounded), never awaited by login,
+ * never throws. All storage reads happen SYNCHRONOUSLY before the first await,
+ * so the caller's wipe (which runs right after the call) cannot race them.
+ *
+ * This NARROWS the loss window but cannot eliminate it: an offline switch, no
+ * resolvable token, an expired token, or an RLS refusal of the prior user's
+ * rows under a successor token still loses the queued rows. That residual is
+ * ACCEPTED — feedback is telemetry and the flushed writes are idempotent by id
+ * (23505 = already landed), so the flush can only help, never corrupt.
+ */
+export async function flushOutboxForPriorUser(userId: string, storage?: Storage): Promise<void> {
+  try {
+    // Synchronous captures — must complete before the caller wipes fp:* keys.
+    const outbox = readOutbox(userId, storage);
+    if (outbox.ledger.length === 0 && outbox.feedback.length === 0 && !outbox.snapshot) return;
+    const profileId = getDraft<string>(userId, PROFILE_ID_NAME, storage);
+    if (typeof profileId !== "string" || profileId === "") return;
+
+    const { data } = await getSupabase().auth.getSession();
+    const token = data.session?.access_token;
+    if (!token) return;
+    const { supabaseUrl, supabaseAnonKey } = getConfig();
+    const auth: KeepaliveAuth = { supabaseUrl, apikey: supabaseAnonKey, accessToken: token };
+
+    for (const entry of outbox.ledger) flushLedgerViaKeepalive(auth, profileId, entry.row);
+    for (const entry of outbox.feedback) flushFeedbackViaKeepalive(auth, profileId, entry.row);
+    if (outbox.snapshot) {
+      flushSnapshotViaKeepalive(auth, profileId, outbox.snapshot.baseRevision, outbox.snapshot.doc);
+    }
+  } catch {
+    // Best-effort only: nothing here may ever block or fail a login.
+  }
+}
+
 // ── Feedback daily counter (local mirror of the DB cap) ──────────────────────
 
 const FEEDBACK_DAY_NAME = "feedbackDay";
@@ -942,10 +1048,48 @@ export function feedbackCountForDay(userId: string, day: string, storage?: Stora
   return rec && rec.day === day ? rec.count : 0;
 }
 
-/** Count one more report against `day` (resets automatically on a new day). */
+/**
+ * Count one more report against `day` (resets automatically on a new day).
+ * Tolerates a refused storage write (setDraft is non-throwing): the counter is
+ * a best-effort local mirror — the DB trigger stays authoritative.
+ */
 export function bumpFeedbackCountForDay(userId: string, day: string, storage?: Storage): void {
   const next = feedbackCountForDay(userId, day, storage) + 1;
   setDraft(userId, FEEDBACK_DAY_NAME, { day, count: next }, storage);
+}
+
+/**
+ * Overwrite the counter for `day` outright — used to adopt the server's FP429
+ * refusal (the authoritative cap) into the local mirror. Best-effort write.
+ */
+export function setFeedbackCountForDay(
+  userId: string,
+  day: string,
+  count: number,
+  storage?: Storage,
+): void {
+  setDraft(userId, FEEDBACK_DAY_NAME, { day, count }, storage);
+}
+
+/**
+ * Today's UTC day (`YYYY-MM-DD`), matching the DB trigger's
+ * `date_trunc('day', now() at time zone 'utc')`. The one shared derivation for
+ * the daily-cap mirror — callers and the FP429 adoption below must agree on it.
+ */
+export function utcDayToday(): string {
+  return new Date().toISOString().slice(0, 10);
+}
+
+/**
+ * The server refused with FP429: today's budget is spent (possibly partly from
+ * another device — the local mirror can be desynced). Pin the local counter to
+ * the cap so the very next tap takes the local capped path immediately instead
+ * of sending another doomed insert. Deliberate clock read (this module is
+ * otherwise clock-free): FP429 is inherently "today, per the server's clock",
+ * so the adoption must stamp today's UTC day itself.
+ */
+function adoptServerFeedbackCap(userId: string, storage?: Storage): void {
+  setFeedbackCountForDay(userId, utcDayToday(), FEEDBACK_DAILY_CAP, storage);
 }
 
 // ── Sync engine ──────────────────────────────────────────────────────────────
@@ -955,8 +1099,12 @@ export const DEBOUNCE_MS = 3_000;
 /** Hard ceiling — a stream of changes still flushes at least this often. */
 export const MAX_INTERVAL_MS = 30_000;
 
-/** The honest fate of one submitted stuck report. */
-export type FeedbackSendOutcome = "sent" | "queued" | "dropped";
+/**
+ * The honest fate of one submitted stuck report: "sent" (landed), "queued"
+ * (parked retryable), "dropped" (terminal/invalid/undurable), or "capped" (the
+ * server's FP429 daily-cap refusal — shown honestly, removed from the queue).
+ */
+export type FeedbackSendOutcome = "sent" | "queued" | "dropped" | "capped";
 
 export interface SyncEngineDeps {
   userId: string;
@@ -1154,6 +1302,16 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine {
       resolveFeedback(userId, row.id, storage);
       return "sent";
     }
+    if (decision === "capped") {
+      // FP429: the DB's daily-cap trigger refused (the local mirror can lag a
+      // second device). Honest 'capped' end-to-end — the entry is REMOVED from
+      // the outbox (replaying it recurs identically all day: never park) and
+      // the caller shows the capped copy (never silent). Adopt the server cap
+      // into the local day mirror so subsequent taps short-circuit locally.
+      resolveFeedback(userId, row.id, storage);
+      adoptServerFeedbackCap(userId, storage);
+      return "capped";
+    }
     if (decision === "drop") {
       // Terminal (should be unreachable: rows are validated pre-enqueue and the
       // local daily counter mirrors the DB cap). Drop honestly — never storm,
@@ -1227,6 +1385,11 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine {
     const gen = generation;
     profileId = await resolveProfileId();
     if (!isCurrent(gen)) return;
+    // Remember the resolved profile id inside the user's own namespace so a
+    // later different-user login can still address THIS user's queued rows in
+    // its pre-wipe best-effort flush (flushOutboxForPriorUser). Best-effort
+    // write; wiped with the namespace.
+    if (profileId) setDraft(userId, PROFILE_ID_NAME, profileId, storage);
 
     const supabase = getSupabase();
     try {

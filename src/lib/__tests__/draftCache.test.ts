@@ -118,6 +118,21 @@ describe("draftCache", () => {
     expect(listDraftNames(USER_A, s).sort()).toEqual(["oneLiner", "outbox"]);
   });
 
+  it("setDraft NEVER throws on a refused write (quota/lockdown) — it reports false", () => {
+    const s = fakeStorage();
+    s.setItem = () => {
+      throw new Error("QuotaExceededError");
+    };
+    expect(() => setDraft(USER_A, "oneLiner", "big", s)).not.toThrow();
+    expect(setDraft(USER_A, "oneLiner", "big", s)).toBe(false);
+  });
+
+  it("setDraft reports true when the write lands", () => {
+    const s = fakeStorage();
+    expect(setDraft(USER_A, "oneLiner", "ok", s)).toBe(true);
+    expect(getDraft(USER_A, "oneLiner", s)).toBe("ok");
+  });
+
   it("corrupted JSON in a draft key is discarded, not thrown", () => {
     const s = fakeStorage();
     s.setItem(`${FP_PREFIX}${USER_A}:oneLiner`, "{not valid json");

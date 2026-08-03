@@ -60,13 +60,36 @@ export function StuckBox({ taskId }: { taskId: string }) {
   // double-click in one event-loop burst yields exactly one row.
   const submittingRef = useRef(false);
   const revertTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Unmount guard: the .then/.catch resolution handlers below no-op after
+  // unmount and never (re)schedule the revert timer post-unmount (the runner
+  // unmounts/remounts the box per task via its key).
+  const mountedRef = useRef(true);
+  // Per-submission token: only the LATEST submission's resolution may write
+  // the message or arm the timer — a slow first submit resolving after a
+  // re-open + second submit is stale and must be ignored.
+  const submitSeqRef = useRef(0);
+  // The collapsed "Stuck? Tell us" link, refocused after a collapse so the
+  // runner's focus trap never loses focus to <body> (the Send/Never mind
+  // buttons the user just clicked cease to exist on collapse).
+  const linkRef = useRef<HTMLButtonElement>(null);
+  const restoreFocusRef = useRef(false);
 
-  useEffect(
-    () => () => {
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
       if (revertTimer.current) clearTimeout(revertTimer.current);
-    },
-    [],
-  );
+    };
+  }, []);
+
+  // After a collapse initiated by Send or Never mind, move focus onto the link
+  // (it only exists after the collapsed view renders, hence an effect).
+  useEffect(() => {
+    if (!expanded && restoreFocusRef.current) {
+      restoreFocusRef.current = false;
+      linkRef.current?.focus();
+    }
+  }, [expanded]);
 
   const openBox = () => {
     // Re-arm the guard on the deliberate re-open boundary (a prior attempt may
@@ -77,24 +100,52 @@ export function StuckBox({ taskId }: { taskId: string }) {
     setExpanded(true);
   };
 
+  const armRevert = () => {
+    // Only reached through the guarded resolution handlers, so never scheduled
+    // after unmount (the unmount cleanup above also clears any live timer).
+    if (revertTimer.current) clearTimeout(revertTimer.current);
+    revertTimer.current = setTimeout(() => setMessage(null), 6000);
+  };
+
   const submit = () => {
     if (submittingRef.current) return;
     submittingRef.current = true;
-    // submitFeedback enqueues durably (synchronously) before its network
-    // attempt, so collapsing behind the confirmation now is honest; the copy
-    // refines below if the attempt parks offline or the row is refused.
+    const token = ++submitSeqRef.current;
+    // Honest-optimism flow (the simplest honest one): submitFeedback enqueues
+    // DURABLY and synchronously before its network attempt, so the immediate
+    // confirmation below is truthful the moment it renders — while the promise
+    // resolves only after the network insert attempt, so gating the message on
+    // it would stall the confirmation on a slow network. The copy refines when
+    // the outcome resolves queued/dropped/capped.
     const outcome = submitFeedback(taskId, text);
     setExpanded(false);
+    restoreFocusRef.current = true;
     setText("");
     setMessage(STUCK_COPY.sent);
-    void outcome.then((result) => {
-      submittingRef.current = false;
-      if (result === "queued") setMessage(STUCK_COPY.queued);
-      else if (result === "dropped") setMessage(STUCK_COPY.dropped);
-      else if (result === "capped") setMessage(STUCK_COPY.capped);
-      if (revertTimer.current) clearTimeout(revertTimer.current);
-      revertTimer.current = setTimeout(() => setMessage(null), 6000);
-    });
+    outcome
+      .then((result) => {
+        if (!mountedRef.current || token !== submitSeqRef.current) return; // unmounted/stale
+        submittingRef.current = false;
+        if (result === "queued") setMessage(STUCK_COPY.queued);
+        else if (result === "dropped") setMessage(STUCK_COPY.dropped);
+        else if (result === "capped") setMessage(STUCK_COPY.capped);
+        armRevert();
+      })
+      .catch(() => {
+        // submitFeedback resolves outcomes rather than throwing, but a defect
+        // (or a throwing storage shim) must still revert the optimistic
+        // message honestly, re-arm the guard, and never surface an unhandled
+        // rejection.
+        if (!mountedRef.current || token !== submitSeqRef.current) return;
+        submittingRef.current = false;
+        setMessage(STUCK_COPY.dropped);
+        armRevert();
+      });
+  };
+
+  const cancel = () => {
+    restoreFocusRef.current = true;
+    setExpanded(false);
   };
 
   if (!expanded) {
@@ -106,6 +157,7 @@ export function StuckBox({ taskId }: { taskId: string }) {
           </p>
         ) : null}
         <button
+          ref={linkRef}
           type="button"
           onClick={openBox}
           className="flex min-h-[44px] w-full items-center justify-center text-[12px] text-[hsl(25_20%_38%)] underline decoration-[hsl(25_20%_38%/0.4)] underline-offset-2 hover:text-[hsl(25_34%_20%)]"
@@ -152,7 +204,7 @@ export function StuckBox({ taskId }: { taskId: string }) {
         </button>
         <button
           type="button"
-          onClick={() => setExpanded(false)}
+          onClick={cancel}
           className="inline-flex min-h-[44px] items-center justify-center rounded-xl border-2 border-[hsl(25_34%_20%/0.2)] px-4 font-display text-sm font-bold text-[hsl(25_34%_20%)] hover:border-[hsl(25_34%_20%/0.5)]"
         >
           {STUCK_COPY.cancel}

@@ -55,8 +55,11 @@ import {
   loadLedger,
   createSyncEngine,
   enqueueFeedback,
+  isValidFeedbackRow,
   feedbackCountForDay,
   bumpFeedbackCountForDay,
+  utcDayToday,
+  flushOutboxForPriorUser,
   FEEDBACK_DAILY_CAP,
   FEEDBACK_BODY_MAX,
   type FeedbackBand,
@@ -70,8 +73,9 @@ const IDLE_TIMEOUT_MS = 45 * 60 * 1000;
 
 /**
  * The honest fate of a "Stuck? Tell us" submission, for the StuckBox UI:
- * `sent`/`queued`/`dropped` from the sync engine, plus `capped` when the local
- * mirror of the DB's 50-per-day cap refuses before anything is enqueued.
+ * `sent`/`queued`/`dropped`/`capped` from the sync engine (`capped` = the
+ * server's FP429 daily-cap refusal), with `capped` also produced locally when
+ * the mirror of the DB's 50-per-day cap refuses before anything is enqueued.
  */
 export type FeedbackSubmitOutcome = FeedbackSendOutcome | "capped";
 
@@ -318,6 +322,15 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
         if (userId) {
           const last = getLastUserId();
           if (last && last !== userId) {
+            // Best-effort keepalive flush of the PRIOR child's queued outbox
+            // (unsent stuck reports / sales) BEFORE the wipe destroys it. Its
+            // storage reads are synchronous (complete before wipeAllFpKeys
+            // below); the network part is fire-and-forget and never blocks or
+            // fails this login. This narrows — but cannot eliminate — the
+            // cross-child loss window: an offline switch or an unusable token
+            // still loses the queue; that residual is accepted (documented on
+            // flushOutboxForPriorUser).
+            void flushOutboxForPriorUser(last);
             wipeAllFpKeys();
           }
           setLastUserId(userId);
@@ -388,8 +401,8 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
     ): Promise<FeedbackSubmitOutcome> => {
       const userId = getLastUserId();
       if (!userId) return "dropped";
-      // UTC day, matching the DB trigger's date_trunc('day', now()).
-      const day = new Date().toISOString().slice(0, 10);
+      // UTC day via the shared derivation (mirrors the DB trigger's date_trunc).
+      const day = utcDayToday();
       if (feedbackCountForDay(userId, day) >= FEEDBACK_DAILY_CAP) return "capped";
       const row = {
         id: crypto.randomUUID(),
@@ -397,12 +410,25 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
         band,
         body: body.slice(0, FEEDBACK_BODY_MAX),
       };
-      bumpFeedbackCountForDay(userId, day);
+      // Validate BEFORE the day-counter bump so a row that would be refused at
+      // enqueue (bad task id / band through the seam) never consumes any of the
+      // day budget. The counter bump then happens only after the row is
+      // accepted for enqueue, BEFORE the network attempt — the counter is a
+      // best-effort local mirror; the DB trigger stays authoritative.
+      if (!isValidFeedbackRow(row)) return "dropped";
       const engine = engineRef.current;
-      if (engine) return engine.notifyFeedback(row);
+      if (engine) {
+        bumpFeedbackCountForDay(userId, day);
+        // The engine resolves the honest outcome, including the server's FP429
+        // 'capped' (which also re-pins the local counter to the cap).
+        return engine.notifyFeedback(row);
+      }
       // No live engine (should not happen while the runner is open): enqueue
-      // durably; the next session's replay drains it. Honest copy: queued.
-      return enqueueFeedback(userId, row) ? "queued" : "dropped";
+      // durably; the next session's replay drains it. Honest copy: queued. A
+      // refused outbox write (storage quota) is 'dropped' and does NOT bump.
+      if (!enqueueFeedback(userId, row)) return "dropped";
+      bumpFeedbackCountForDay(userId, day);
+      return "queued";
     },
     [],
   );

@@ -50,16 +50,20 @@ const syncMock = {
   resolveProfileId: vi.fn(),
   loadSave: vi.fn(),
   loadLedger: vi.fn(),
+  flushOutboxForPriorUser: vi.fn(),
 };
 vi.mock("../../lib/sync", () => ({
   resolveProfileId: (...a: unknown[]) => syncMock.resolveProfileId(...a),
   resetProfileIdCache: vi.fn(),
   loadSave: (...a: unknown[]) => syncMock.loadSave(...a),
   loadLedger: (...a: unknown[]) => syncMock.loadLedger(...a),
+  flushOutboxForPriorUser: (...a: unknown[]) => syncMock.flushOutboxForPriorUser(...a),
   // Feedback plumbing (Unit 2): real constants, inert queue/counter fns.
   enqueueFeedback: vi.fn().mockReturnValue(true),
+  isValidFeedbackRow: vi.fn().mockReturnValue(true),
   feedbackCountForDay: vi.fn().mockReturnValue(0),
   bumpFeedbackCountForDay: vi.fn(),
+  utcDayToday: () => new Date().toISOString().slice(0, 10),
   FEEDBACK_DAILY_CAP: 50,
   FEEDBACK_BODY_MAX: 1000,
   createSyncEngine: () => {
@@ -107,6 +111,7 @@ beforeEach(() => {
   syncMock.resolveProfileId.mockReset().mockResolvedValue("profile-1");
   syncMock.loadSave.mockReset().mockResolvedValue({ doc: null, revision: 0 });
   syncMock.loadLedger.mockReset().mockResolvedValue([]);
+  syncMock.flushOutboxForPriorUser.mockReset().mockResolvedValue(undefined);
 });
 
 afterEach(() => {
@@ -304,6 +309,12 @@ describe("GameProvider login (draft wipe + session boundary)", () => {
 
     expect(draftMock.wipeAllFpKeys).toHaveBeenCalledTimes(1);
     expect(draftMock.setLastUserId).toHaveBeenCalledWith("user-B");
+    // FIX 5: the prior child's queued outbox gets a best-effort flush attempt
+    // for THEIR user id, initiated BEFORE the wipe destroys the queue.
+    expect(syncMock.flushOutboxForPriorUser).toHaveBeenCalledWith("user-A");
+    expect(syncMock.flushOutboxForPriorUser.mock.invocationCallOrder[0]).toBeLessThan(
+      draftMock.wipeAllFpKeys.mock.invocationCallOrder[0],
+    );
     await waitFor(() => expect(api?.stage).toBe("onboard"));
   });
 
@@ -321,6 +332,7 @@ describe("GameProvider login (draft wipe + session boundary)", () => {
     });
 
     expect(draftMock.wipeAllFpKeys).not.toHaveBeenCalled();
+    expect(syncMock.flushOutboxForPriorUser).not.toHaveBeenCalled(); // same user: no pre-wipe flush
     await waitFor(() => expect(api?.stage).toBe("onboard"));
   });
 
