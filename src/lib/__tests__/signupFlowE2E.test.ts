@@ -105,7 +105,7 @@ async function walk(childPassword: string) {
 
   const consent = await recordSignupConsent({
     attemptId: "attempt-1",
-    echoedVersion: "2026-08-01.1",
+    echoedVersion: "2026-08-03.1",
     echoedHash: "a".repeat(64),
     method: "email_plus_attestation",
     childAgeBand: baseStart.childAgeBand,

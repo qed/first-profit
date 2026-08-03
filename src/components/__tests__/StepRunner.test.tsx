@@ -39,14 +39,31 @@ vi.mock("../../lib/draftCache", () => {
   };
 });
 
+// Replace StuckBox with a prop-probe stub (its own behavior has its own suite);
+// taskIdFor stays REAL so StepRunner's synthesized task id is pinned here.
+vi.mock("../StuckBox", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../StuckBox")>();
+  return {
+    ...actual,
+    StuckBox: ({ taskId }: { taskId: string }) => (
+      <div data-testid="fp-stuckbox" data-taskid={taskId} />
+    ),
+  };
+});
+
 import * as GameContext from "../../state/GameContext";
 import { StepRunner } from "../StepRunner";
 import { Celebration } from "../Celebration";
+import { taskIdFor } from "../StuckBox";
 
 const Ctx = (GameContext as unknown as { __ctx: React.Context<unknown> }).__ctx;
 
-function Harness({ seed }: { seed: GameState }) {
-  const [state, dispatch] = React.useReducer(reducer, seed);
+function Harness({ seed, onAction }: { seed: GameState; onAction?: (a: unknown) => void }) {
+  const [state, rawDispatch] = React.useReducer(reducer, seed);
+  const dispatch: typeof rawDispatch = (action) => {
+    onAction?.(action);
+    rawDispatch(action);
+  };
   const value = {
     ...state,
     dispatch,
@@ -98,6 +115,37 @@ describe("StepRunner", () => {
     fireEvent.change(linerInput, { target: { value: "My idea" } });
     expect((screen.getByLabelText("Product name") as HTMLInputElement).value).toBe("Bracelets");
     expect((screen.getByLabelText("Your one-liner") as HTMLInputElement).value).toBe("My idea");
+  });
+
+  it("doIt dispatches COMPLETE_TASK with a NUMERIC caller-stamped `at` (R13 stall queryability)", () => {
+    const actions: unknown[] = [];
+    render(<Harness seed={seedAtLastTaskOf11()} onAction={(a) => actions.push(a)} />);
+    fireEvent.click(screen.getByText("✓ I did it"));
+    const complete = actions.find(
+      (a): a is { type: string; ideaIndex: number; stepId: string; index: number; at: unknown } =>
+        (a as { type?: string }).type === "COMPLETE_TASK",
+    );
+    expect(complete).toBeDefined();
+    if (!complete) throw new Error("COMPLETE_TASK was not dispatched");
+    expect(complete).toMatchObject({ ideaIndex: 0, stepId: "1.1", index: 4 });
+    expect(typeof complete.at).toBe("number");
+    expect(Number.isFinite(complete.at as number)).toBe(true);
+  });
+
+  it("renders StuckBox with taskId = taskIdFor(runnerStep, idx)", () => {
+    // 1.1 at task index 4 -> "1.1.5".
+    const first = render(<Harness seed={seedAtLastTaskOf11()} />);
+    expect(screen.getByTestId("fp-stuckbox").getAttribute("data-taskid")).toBe(
+      taskIdFor("1.1", 4),
+    );
+    first.unmount();
+
+    // 1.2 at task index 2 -> "1.2.3".
+    const s = seedAtLastTaskOf11();
+    render(<Harness seed={{ ...s, runnerStep: "1.2", runnerIndex: 2 }} />);
+    expect(screen.getByTestId("fp-stuckbox").getAttribute("data-taskid")).toBe(
+      taskIdFor("1.2", 2),
+    );
   });
 
   it("completing the last task swaps the runner for the celebration listing 1.2", () => {

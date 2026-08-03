@@ -27,6 +27,7 @@ import { useGame } from "../state/GameContext";
 import { parseTask, stepById } from "../data/path";
 import { getDraft, setDraft, getLastUserId } from "../lib/draftCache";
 import { useFocusTrap } from "../lib/useFocusTrap";
+import { StuckBox, taskIdFor } from "./StuckBox";
 
 /** Draft-cache name (within the user namespace) for a criterion field on an idea. */
 function fieldDraftName(ideaIndex: number, key: string): string {
@@ -105,7 +106,15 @@ export function StepRunner() {
   const doIt = () => {
     // The reducer marks the task done; on the final task it fires the celebration
     // and closes the runner. On middle tasks it does not advance, so we do.
-    dispatch({ type: "COMPLETE_TASK", ideaIndex: activeIdea, stepId: runnerStep, index: idx });
+    // `at` is caller-stamped (gameCore stays Date.now()-free) so completion
+    // timestamps make silent stalls queryable for the cohort (R13).
+    dispatch({
+      type: "COMPLETE_TASK",
+      ideaIndex: activeIdea,
+      stepId: runnerStep,
+      index: idx,
+      at: Date.now(),
+    });
     advance();
   };
   const onFieldChange = (key: string, value: string) => {
@@ -281,6 +290,11 @@ export function StepRunner() {
               Everything you need for this task is inside {roomDialogName} →
             </button>
           ) : null}
+
+          {/* "Stuck? Tell us" (Unit 2): below the CTA row so it never competes
+              with the primary actions at 390px. Keyed per task so the box and
+              its draft text reset when the runner moves to another task. */}
+          <StuckBox key={taskIdFor(runnerStep, idx)} taskId={taskIdFor(runnerStep, idx)} />
         </div>
       </div>
     </div>

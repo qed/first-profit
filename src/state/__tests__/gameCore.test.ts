@@ -768,7 +768,7 @@ describe("field + misc reducer actions", () => {
     let s = initialState();
     s = reducer(s, { type: "SET_PROFILE", patch: { firstName: "Cedric" } });
     s = reducer(s, { type: "SET_PROFILE", patch: { handle: "cedric" } });
-    expect(s.profile).toEqual({ firstName: "Cedric", handle: "cedric", siteHeadline: "" });
+    expect(s.profile).toEqual({ firstName: "Cedric", handle: "cedric", siteHeadline: "", grade: null });
     s = reducer(s, { type: "SET_STAGE", stage: "app" });
     expect(s.stage).toBe("app");
     s = reducer(s, { type: "SET_OB", ob: 4 });
@@ -1027,13 +1027,44 @@ describe("RESET_SESSION (shared-device state clear)", () => {
     expect(reset.celebrate).toBeNull();
     expect(reset.room).toBeNull();
 
-    // Caller-controlled fields are preserved for the provider to overwrite.
+    // Caller-controlled fields are preserved for the provider to overwrite —
+    // EXCEPT grade, which is per-account child data (asserted separately below).
     expect(reset.stage).toBe("app");
-    expect(reset.profile).toEqual({ firstName: "Ada", handle: "ada", siteHeadline: "" });
+    expect(reset.profile).toEqual({ firstName: "Ada", handle: "ada", siteHeadline: "", grade: null });
 
     // The reducer remains usable afterwards.
     const revived = reducer(reset, { type: "CREATE_IDEA" });
     expect(revived.ideas).toHaveLength(1);
+  });
+});
+
+describe("profile.grade (Unit 3: roster-derived, session-scoped)", () => {
+  it("initialState carries grade null; SET_PROFILE adopts and clears it", () => {
+    let s = initialState();
+    expect(s.profile.grade).toBeNull();
+    s = reducer(s, { type: "SET_PROFILE", patch: { grade: 7 } });
+    expect(s.profile.grade).toBe(7);
+    s = reducer(s, { type: "SET_PROFILE", patch: { grade: null } });
+    expect(s.profile.grade).toBeNull();
+  });
+
+  it("RESET_SESSION nulls grade even though the rest of the profile survives", () => {
+    let s = initialState();
+    s = reducer(s, { type: "SET_PROFILE", patch: { firstName: "Ada", handle: "ada", grade: 4 } });
+    const reset = reducer(s, { type: "RESET_SESSION" });
+    expect(reset.profile.firstName).toBe("Ada");
+    expect(reset.profile.handle).toBe("ada");
+    expect(reset.profile.grade).toBeNull();
+  });
+
+  it("grade is NOT persisted: toSaveDoc has no grade field and HYDRATE leaves it alone", () => {
+    let s = initialState();
+    s = reducer(s, { type: "SET_PROFILE", patch: { grade: 9 } });
+    const doc = toSaveDoc(s);
+    expect(JSON.stringify(doc)).not.toContain("grade");
+    // HYDRATE (a save load) must not touch the session's adopted grade.
+    const hydrated = reducer(s, { type: "HYDRATE", doc });
+    expect(hydrated.profile.grade).toBe(9);
   });
 });
 
@@ -1262,5 +1293,141 @@ describe("path.ts sanity (handoff copy rules)", () => {
 
   it("STEPS export is intact", () => {
     expect(STEPS.length).toBeGreaterThan(0);
+  });
+});
+
+describe("doneAt completion timestamps (additive-optional, NO DOC_VERSION bump)", () => {
+  it("COMPLETE_TASK with a caller-stamped `at` records doneAt under the legacy taskKey", () => {
+    const s = reducer(withOneIdea(), {
+      type: "COMPLETE_TASK",
+      ideaIndex: 0,
+      stepId: "1.1",
+      index: 0,
+      at: 1_754_000_000_000,
+    });
+    expect(s.ideas[0].done[taskKey("1.1", 0)]).toBe(true);
+    expect(s.ideas[0].doneAt?.[taskKey("1.1", 0)]).toBe(1_754_000_000_000);
+  });
+
+  it("COMPLETE_TASK without `at` (legacy caller) completes with NO doneAt entry", () => {
+    const s = reducer(withOneIdea(), { type: "COMPLETE_TASK", ideaIndex: 0, stepId: "1.1", index: 0 });
+    expect(s.ideas[0].done[taskKey("1.1", 0)]).toBe(true);
+    expect(s.ideas[0].doneAt?.[taskKey("1.1", 0)]).toBeUndefined();
+  });
+
+  it("a malformed stamp (NaN / negative) is rejected, never persisted to poison the next load", () => {
+    let s = reducer(withOneIdea(), {
+      type: "COMPLETE_TASK",
+      ideaIndex: 0,
+      stepId: "1.1",
+      index: 0,
+      at: Number.NaN,
+    });
+    s = reducer(s, { type: "COMPLETE_TASK", ideaIndex: 0, stepId: "1.1", index: 1, at: -5 });
+    expect(s.ideas[0].done[taskKey("1.1", 0)]).toBe(true);
+    expect(s.ideas[0].doneAt?.[taskKey("1.1", 0)]).toBeUndefined();
+    expect(s.ideas[0].doneAt?.[taskKey("1.1", 1)]).toBeUndefined();
+  });
+
+  it("re-completing an already-done task keeps the ORIGINAL timestamp (idempotent)", () => {
+    const first = reducer(withOneIdea(), {
+      type: "COMPLETE_TASK",
+      ideaIndex: 0,
+      stepId: "1.1",
+      index: 0,
+      at: 1000,
+    });
+    const again = reducer(first, {
+      type: "COMPLETE_TASK",
+      ideaIndex: 0,
+      stepId: "1.1",
+      index: 0,
+      at: 9999,
+    });
+    expect(again).toBe(first); // referential no-op
+    expect(again.ideas[0].doneAt?.[taskKey("1.1", 0)]).toBe(1000);
+  });
+
+  it("the 1.2 real-sale auto-complete stamps doneAt from the row's createdAt", () => {
+    let s = withOneIdea();
+    for (let i = 0; i < getStep("1.1").tasks.length; i++) {
+      s = reducer(s, { type: "COMPLETE_TASK", ideaIndex: 0, stepId: "1.1", index: i });
+    }
+    s = reducer(s, {
+      type: "ADD_LEDGER",
+      id: "sale-1",
+      kind: "sale",
+      payer: "Mom",
+      amountCents: 500,
+      createdAt: "2026-08-03T12:00:00.000Z",
+    });
+    const key = taskKey("1.2", LAST_1_2_INDEX);
+    expect(s.ideas[0].done[key]).toBe(true);
+    expect(s.ideas[0].doneAt?.[key]).toBe(Date.parse("2026-08-03T12:00:00.000Z"));
+  });
+
+  it("toSaveDoc -> fromSaveDoc -> HYDRATE round-trips doneAt (HYDRATE must not wipe it)", () => {
+    const s = reducer(withOneIdea(), {
+      type: "COMPLETE_TASK",
+      ideaIndex: 0,
+      stepId: "1.1",
+      index: 2,
+      at: 1_754_000_123_456,
+    });
+    const doc = toSaveDoc(s);
+    const parsed = fromSaveDoc(JSON.parse(JSON.stringify(doc)));
+    if (!parsed.ok) throw new Error("round-trip refused");
+    expect(parsed.doc.ideas[0].doneAt).toEqual({ [taskKey("1.1", 2)]: 1_754_000_123_456 });
+    // Split-storage learning: HYDRATE re-sources every persisted slice.
+    const hydrated = reducer(initialState(), { type: "HYDRATE", doc: parsed.doc });
+    expect(hydrated.ideas[0].doneAt).toEqual({ [taskKey("1.1", 2)]: 1_754_000_123_456 });
+  });
+
+  it("an OLD doc without doneAt loads clean (absent stays absent; still DOC_VERSION 1)", () => {
+    expect(DOC_VERSION).toBe(1); // additive change only — a bump would discard outboxes
+    const legacyDoc = {
+      docVersion: 1,
+      ideas: [{ fields: { oneLiner: "x" }, done: { [taskKey("1.1", 0)]: true } }],
+      activeIdea: 0,
+      siteHeadline: "",
+      onboardingComplete: true,
+    };
+    const parsed = fromSaveDoc(legacyDoc);
+    if (!parsed.ok) throw new Error("legacy doc refused");
+    expect(parsed.doc.ideas[0].doneAt).toBeUndefined();
+    expect(parsed.doc.ideas[0].done[taskKey("1.1", 0)]).toBe(true);
+    // And an untimestamped doc stays byte-stable through a save round-trip.
+    const hydrated = reducer(initialState(), { type: "HYDRATE", doc: parsed.doc });
+    expect(toSaveDoc(hydrated).ideas[0]).not.toHaveProperty("doneAt");
+  });
+
+  it("fromSaveDoc drops malformed doneAt leaves (non-number / NaN-shaped) but keeps good ones", () => {
+    const parsed = fromSaveDoc({
+      docVersion: 1,
+      ideas: [
+        {
+          fields: {},
+          done: {},
+          doneAt: { good: 123, str: "yesterday", neg: -1, nul: null },
+        },
+      ],
+      activeIdea: 0,
+      siteHeadline: "",
+      onboardingComplete: false,
+    });
+    if (!parsed.ok) throw new Error("doc refused");
+    expect(parsed.doc.ideas[0].doneAt).toEqual({ good: 123 });
+  });
+
+  it("RESET_SESSION clears doneAt with the rest of the ideas (shared-device safety)", () => {
+    const s = reducer(withOneIdea(), {
+      type: "COMPLETE_TASK",
+      ideaIndex: 0,
+      stepId: "1.1",
+      index: 0,
+      at: 1000,
+    });
+    const reset = reducer(s, { type: "RESET_SESSION" });
+    expect(reset.ideas).toEqual([]);
   });
 });

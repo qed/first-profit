@@ -242,7 +242,7 @@ describe("createSignupChild", () => {
 describe("recordSignupConsent", () => {
   const CONSENT_INPUT = {
     attemptId: "attempt-1",
-    echoedVersion: "2026-08-01.1",
+    echoedVersion: "2026-08-03.1",
     echoedHash: "f".repeat(64),
     method: "email_plus_attestation",
     childAgeBand: "under_13" as const,
@@ -263,7 +263,7 @@ describe("recordSignupConsent", () => {
     expect(init.headers.Authorization).toBe("Bearer parent-access");
     expect(JSON.parse(init.body as string)).toEqual({
       attemptId: "attempt-1",
-      echoedVersion: "2026-08-01.1",
+      echoedVersion: "2026-08-03.1",
       echoedHash: "f".repeat(64),
       method: "email_plus_attestation",
       childAgeBand: "under_13",
@@ -310,7 +310,7 @@ describe("fetchConsentPolicy", () => {
     fetchMock().mockResolvedValue(
       jsonResponse(200, {
         namespace: "fp_parental_consent",
-        version: "2026-08-01.1",
+        version: "2026-08-03.1",
         hash: "f".repeat(64),
         method: "email_plus_attestation",
         text: "I confirm ...",
@@ -319,7 +319,7 @@ describe("fetchConsentPolicy", () => {
     const policy = await fetchConsentPolicy();
     expect(policy).toEqual({
       namespace: "fp_parental_consent",
-      version: "2026-08-01.1",
+      version: "2026-08-03.1",
       hash: "f".repeat(64),
       method: "email_plus_attestation",
       text: "I confirm ...",
