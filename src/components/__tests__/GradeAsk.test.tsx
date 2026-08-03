@@ -160,6 +160,92 @@ describe("GradeAsk answer flow", () => {
   });
 });
 
+describe("GradeAsk save/skip race (unit review FIX 1)", () => {
+  it("Skip is disabled while a save is in flight (the two are mutually exclusive)", async () => {
+    let resolveAnswer: ((v: { ok: boolean }) => void) | null = null;
+    const submitGradeAnswer = vi.fn(
+      () =>
+        new Promise<{ ok: boolean }>((res) => {
+          resolveAnswer = res;
+        }),
+    );
+    renderCard({ submitGradeAnswer });
+    fireEvent.change(screen.getByLabelText(GRADE_ASK_COPY.yearLabel), { target: { value: "2015" } });
+    const skip = screen.getByText(GRADE_ASK_COPY.skip) as HTMLButtonElement;
+    expect(skip.disabled).toBe(false);
+    fireEvent.click(screen.getByText(GRADE_ASK_COPY.save));
+    expect(skip.disabled).toBe(true);
+    await act(async () => {
+      resolveAnswer?.({ ok: true });
+      await Promise.resolve();
+    });
+  });
+
+  it("a skip that lands during an in-flight save STAYS dismissed when the save resolves (no thanks flash)", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    let resolveAnswer: ((v: { ok: boolean }) => void) | null = null;
+    const submitGradeAnswer = vi.fn(
+      () =>
+        new Promise<{ ok: boolean }>((res) => {
+          resolveAnswer = res;
+        }),
+    );
+    const { value } = renderCard({ submitGradeAnswer });
+    fireEvent.change(screen.getByLabelText(GRADE_ASK_COPY.yearLabel), { target: { value: "2015" } });
+
+    // Defense-in-depth: the disable protects the common case, but a real
+    // browser can deliver a tap that was queued BEFORE the disable painted.
+    // Model that by landing both clicks in one batch — the skip handler runs
+    // before the `saving` render commits, exactly the ghost-tap interleaving —
+    // so the phase-machine guard must hold on its own.
+    await act(async () => {
+      fireEvent.click(screen.getByText(GRADE_ASK_COPY.save));
+      fireEvent.click(screen.getByText(GRADE_ASK_COPY.skip));
+    });
+    expect(value.skipGradeAsk).toHaveBeenCalledTimes(1);
+    expect(screen.queryByText(GRADE_ASK_COPY.title)).toBeNull();
+
+    // The in-flight save resolves LATE: the card must stay dismissed — no
+    // thanks flash, no resurrection timer. The answer itself still posted
+    // (the provider adopts the grade regardless; pinned in GameContextGrade).
+    await act(async () => {
+      resolveAnswer?.({ ok: true });
+      await Promise.resolve();
+    });
+    expect(submitGradeAnswer).toHaveBeenCalledTimes(1);
+    expect(screen.queryByText(GRADE_ASK_COPY.thanks)).toBeNull();
+    expect(screen.queryByText(GRADE_ASK_COPY.title)).toBeNull();
+    expect(vi.getTimerCount()).toBe(0);
+  });
+});
+
+describe("GradeAsk unmount mid-save (unit review FIX 2)", () => {
+  it("a save resolving after unmount sets no state and leaves NO timer armed", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    let resolveAnswer: ((v: { ok: boolean }) => void) | null = null;
+    const submitGradeAnswer = vi.fn(
+      () =>
+        new Promise<{ ok: boolean }>((res) => {
+          resolveAnswer = res;
+        }),
+    );
+    const { unmount } = renderCard({ submitGradeAnswer });
+    fireEvent.change(screen.getByLabelText(GRADE_ASK_COPY.yearLabel), { target: { value: "2014" } });
+    fireEvent.click(screen.getByText(GRADE_ASK_COPY.save));
+
+    // Logout unmounts the card while the save is still in flight.
+    unmount();
+
+    // The stale continuation must be inert: no THANKS_MS timer may be armed
+    // (an armed one would never be cleared — the cleanup already ran).
+    await act(async () => {
+      resolveAnswer?.({ ok: true });
+      await Promise.resolve();
+    });
+    expect(vi.getTimerCount()).toBe(0);
+  });
+});
+
 describe("GradeAsk skip flow", () => {
   it("Skip calls skipGradeAsk, never posts, and removes the card", async () => {
     const { value } = renderCard();

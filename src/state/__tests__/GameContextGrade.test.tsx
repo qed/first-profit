@@ -139,6 +139,28 @@ describe("submitGradeAnswer", () => {
     expect(getApi().gradeAskDone).toBe(true);
   });
 
+  it("SERVER-AUTHORITATIVE (fill-only route): a returned grade that DIFFERS from the birth-year derivation wins", async () => {
+    // Pin the clock: Oct 2026 -> school year 2026-27 -> born 2015 derives
+    // grade 6 locally. The120's grade route is FILL-ONLY: an already-set
+    // roster grade comes back as {ok:true, grade:<existing>} with NO write.
+    vi.useFakeTimers({ toFake: ["Date"], now: new Date("2026-10-01T12:00:00Z") });
+    await bootToLanding();
+    await loginAs("user-A", null);
+    authMock.submitBirthYear.mockResolvedValue({ ok: true, grade: 3 });
+
+    let outcome: { ok: boolean } | undefined;
+    await act(async () => {
+      outcome = await getApi().submitGradeAnswer(2015);
+    });
+
+    // State adopts the SERVER value (3), never the local derivation (6);
+    // the ask still resolves as answered so GradeAsk shows its thanks note.
+    expect(outcome).toEqual({ ok: true });
+    expect(getApi().grade).toBe(3);
+    expect(getApi().band).toBe("g3_5");
+    expect(getApi().gradeAskDone).toBe(true);
+  });
+
   it("generic failure adopts the CLIENT-derived grade for the session and retries ONCE on focus", async () => {
     // Pin the clock: Oct 2026 -> school year 2026-27 -> born 2015 = grade 6.
     vi.useFakeTimers({ toFake: ["Date"], now: new Date("2026-10-01T12:00:00Z") });
@@ -213,6 +235,39 @@ describe("submitGradeAnswer", () => {
     // Nothing from the stale session lands in the new one.
     expect(getApi().grade).toBeNull();
     expect(getApi().gradeAskDone).toBe(false);
+  });
+
+  it("GENERATION GUARD at the retry's RESOLUTION boundary: a focus retry resolving after logout is discarded", async () => {
+    await bootToLanding();
+    await loginAs("user-A", null);
+
+    // The first answer fails, arming the one-shot focus retry.
+    authMock.submitBirthYear.mockResolvedValue({ ok: false });
+    await act(async () => {
+      await getApi().submitGradeAnswer(2015);
+    });
+
+    // The retry fires on focus but its OWN submitBirthYear hangs in flight.
+    let resolveRetry: ((v: { ok: true; grade: number }) => void) | null = null;
+    authMock.submitBirthYear.mockImplementation(
+      () =>
+        new Promise((res) => {
+          resolveRetry = res as typeof resolveRetry;
+        }),
+    );
+    await fireFocus();
+    expect(authMock.submitBirthYear).toHaveBeenCalledTimes(2);
+
+    // The session generation changes while the retry is in flight...
+    await act(async () => {
+      await getApi().logout();
+    });
+    // ...so its late resolution must be discarded, not adopted.
+    await act(async () => {
+      resolveRetry?.({ ok: true, grade: 8 });
+      await Promise.resolve();
+    });
+    expect(getApi().grade).toBeNull();
   });
 });
 

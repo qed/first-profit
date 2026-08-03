@@ -112,6 +112,13 @@ export type SubmitBirthYearResult = { ok: true; grade: number } | { ok: false };
  * with `{ok:true, grade}` the server has written the roster and returns the
  * derived grade so the caller can adopt the band without a re-login.
  *
+ * SERVER-AUTHORITATIVE, FILL-ONLY (contract alignment with The120): when the
+ * roster grade is ALREADY set, the route performs NO write and returns the
+ * EXISTING roster grade — which may DIFFER from what this birth year derives.
+ * The returned grade is therefore authoritative in every case: the caller
+ * (GameContext.submitGradeAnswer) must adopt `grade` from the response as-is,
+ * never re-derive locally on an `ok:true`.
+ *
  * Flat-failure discipline like loginChild: the route answers ONE generic 401
  * for every refusal (bad token, implausible year, rate limited), so every
  * non-2xx / malformed body / missing session / network fault collapses to

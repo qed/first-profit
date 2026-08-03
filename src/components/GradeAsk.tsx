@@ -50,18 +50,32 @@ export function GradeAsk() {
   const [saving, setSaving] = useState(false);
   // `thanks` outlives the grade adoption (which would otherwise hide the card
   // instantly), then `done` removes the card for the rest of the session.
-  const [phase, setPhase] = useState<"ask" | "thanks" | "done">("ask");
+  const [phase, setPhaseState] = useState<"ask" | "thanks" | "done">("ask");
+  // Ref mirror of the phase so save()'s post-await continuation reads the LIVE
+  // machine, not the stale closure value (unit review FIX 1: a Skip that lands
+  // while a save is in flight must stay final — the late-resolving save must
+  // never resurrect a card the kid already dismissed).
+  const phaseRef = useRef<"ask" | "thanks" | "done">("ask");
+  const setPhase = (next: "ask" | "thanks" | "done") => {
+    phaseRef.current = next;
+    setPhaseState(next);
+  };
   const thanksTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   // One-shot guard: a double-tap on Save must post exactly one answer (the
   // route is rate limited; every attempt spends budget).
   const savingRef = useRef(false);
+  // Unmount guard (unit review FIX 2): a logout mid-save unmounts this card;
+  // the stale save() continuation must neither set state nor arm the thanks
+  // timer (which would otherwise NEVER be cleared).
+  const mountedRef = useRef(true);
 
-  useEffect(
-    () => () => {
+  useEffect(() => {
+    mountedRef.current = true; // re-mount safe (StrictMode double-invoke)
+    return () => {
+      mountedRef.current = false;
       if (thanksTimer.current) clearTimeout(thanksTimer.current);
-    },
-    [],
-  );
+    };
+  }, []);
 
   if (phase === "done") return null;
   if (phase === "ask") {
@@ -79,8 +93,17 @@ export function GradeAsk() {
     // adopted a band either way (server grade or the local derivation), and a
     // write-back hiccup is never the kid's problem.
     await submitGradeAnswer(birthYear);
+    // Post-await guards (unit review FIX 1 + FIX 2): after the await this
+    // continuation may be stale. Unmounted (logout mid-save) → do nothing, arm
+    // nothing. And only the saving state ("ask" + savingRef) may transition to
+    // "thanks" — never "done" (a Skip that slipped in already dismissed the
+    // card for good; the grade adoption above still landed in the provider).
+    if (!mountedRef.current) return;
+    if (phaseRef.current !== "ask") return;
     setPhase("thanks");
-    thanksTimer.current = setTimeout(() => setPhase("done"), THANKS_MS);
+    thanksTimer.current = setTimeout(() => {
+      if (mountedRef.current) setPhase("done");
+    }, THANKS_MS);
   };
 
   const skip = () => {
@@ -132,7 +155,11 @@ export function GradeAsk() {
               <button
                 type="button"
                 onClick={skip}
-                className="inline-flex min-h-[44px] items-center justify-center rounded-xl border-2 border-[hsl(25_34%_20%/0.2)] px-4 font-display text-sm font-bold text-[hsl(25_34%_20%)] hover:border-[hsl(25_34%_20%/0.5)]"
+                // Skip and a pending Save are mutually exclusive (unit review
+                // FIX 1): once a save is in flight the answer is committed, so
+                // the kid can no longer race a dismissal against it.
+                disabled={saving}
+                className="inline-flex min-h-[44px] items-center justify-center rounded-xl border-2 border-[hsl(25_34%_20%/0.2)] px-4 font-display text-sm font-bold text-[hsl(25_34%_20%)] hover:border-[hsl(25_34%_20%/0.5)] disabled:opacity-50"
               >
                 {GRADE_ASK_COPY.skip}
               </button>
