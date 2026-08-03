@@ -1137,6 +1137,30 @@ export const MAX_INTERVAL_MS = 30_000;
  */
 export type FeedbackSendOutcome = "sent" | "queued" | "dropped" | "capped";
 
+/**
+ * The honest outcome of a forced snapshot flush (real-public-site plan,
+ * Unit 4 — flushNow sequencing: the client may call publish only after a
+ * LANDED flush, so the page's authoritative content re-sync reads current
+ * data). Three values, per the plan's contract:
+ *  - "landed": the pending snapshot committed (or nothing was pending AND no
+ *    earlier failure left a snapshot parked in the outbox) — the server holds
+ *    current content; safe to publish.
+ *  - "parked": the content is NOT on the server — parked retryable, terminal-
+ *    dropped, unflushable (no profile), superseded mid-flight (session ended),
+ *    or a stale parked snapshot still sits in the outbox. The caller shows the
+ *    R19 not-live-yet state and retries flush+publish later; it must NOT
+ *    pretend the page is current. AFTER A TERMINAL DROP the engine keeps
+ *    answering "parked" — even with nothing newly pending — until content
+ *    actually lands again (the terminal branch clears the outbox by design, so
+ *    without this stickiness a later flushNow would read the quiet queue as
+ *    "landed" and a publish would go live over content that never reached the
+ *    server; Unit 5's not-live-yet state is the honest render instead).
+ *  - "cas-rescheduled": lost the CAS twice this round; the flush rescheduled
+ *    itself (debounce) rather than clobber — content will land shortly, but
+ *    it has not yet.
+ */
+export type FlushOutcome = "landed" | "parked" | "cas-rescheduled";
+
 export interface SyncEngineDeps {
   userId: string;
   /** Reads the current save doc + CAS base revision from live app state. */
@@ -1174,8 +1198,12 @@ export interface SyncEngine {
    * claim saved for a dropped row).
    */
   notifyFeedback: (row: FeedbackInsertRow) => Promise<FeedbackSendOutcome>;
-  /** Force the pending snapshot to flush now (async path). */
-  flushPending: () => Promise<void>;
+  /**
+   * Force the pending snapshot to flush now (async path) and surface the
+   * honest outcome (see FlushOutcome) so callers can sequence publish on a
+   * LANDED result. GameApi.flushNow delegates here.
+   */
+  flushPending: () => Promise<FlushOutcome>;
   /** Flush pending writes via keepalive on hide/unload. */
   flushOnHide: () => void;
 }
@@ -1199,6 +1227,24 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine {
   // stateRef/revisionRef across sessions on a shared device, so an old flush
   // must NEVER write the next child's doc under the previous child's profile_id.
   let generation = 0;
+  // REENTRANCY GUARD (Unit 4 review, P0): flushOnce sets `pending = false`
+  // synchronously BEFORE awaiting saveSnapshot, so a concurrent second
+  // flushPending (flushNow racing the 3s debounce / 30s max timer — the exact
+  // commit→flushNow→publish sequence) would otherwise see nothing-pending +
+  // an empty outbox and answer a FALSE "landed" while the first call's save is
+  // still unresolved. The in-flight promise is memoized; a concurrent caller
+  // awaits it, then runs its own flush pass (which honestly re-reads the
+  // pending/outbox/terminal state at that point).
+  let inFlight: Promise<FlushOutcome> | null = null;
+  // TERMINAL-DROP STICKINESS (Unit 4 review, P1): a terminal write error
+  // clears the parked snapshot by design (no poison retry), which would let a
+  // LATER flushPending with nothing newly pending read the quiet queue as
+  // "landed" even though the content never reached the server — and a publish
+  // would go live over stale server content. In-memory is sufficient (the
+  // flag guards same-session publish sequencing only; the engine is
+  // per-session). Set on the terminal branch, cleared by the next successful
+  // land; the nothing-pending branch answers "parked" while it is set.
+  let terminalDropped = false;
 
   /** True only while THIS flush's captured generation is still the live one. */
   function isCurrent(gen: number): boolean {
@@ -1220,9 +1266,38 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine {
     deps.onStatus(status);
   }
 
-  async function flushPending(): Promise<void> {
+  /** The guarded entry: serializes overlapping flushes (see `inFlight`). */
+  async function flushPending(): Promise<FlushOutcome> {
+    // Await any flush already in flight (looped: by the time we wake, another
+    // waiter may have started the next one). Only then run our own pass, which
+    // re-reads the live pending/outbox/terminal state — so a caller can never
+    // be answered "landed" while an unresolved save is still on the wire, and
+    // content that became pending during the wait still gets flushed.
+    while (inFlight) await inFlight;
+    const run = flushOnce();
+    inFlight = run;
+    try {
+      return await run;
+    } finally {
+      inFlight = null;
+    }
+  }
+
+  async function flushOnce(): Promise<FlushOutcome> {
     clearTimers();
-    if (stopped || !pending || !profileId) return;
+    // Outcome mapping (Unit 4): a stopped/superseded engine or an unresolved
+    // profile can flush nothing → "parked" (never claim landed for content
+    // that is not on the server). With nothing pending in memory, an EARLIER
+    // failure may still hold a parked snapshot in the outbox — or a terminal
+    // drop may have discarded content outright (terminalDropped) — neither of
+    // which has landed, so only a genuinely clean, un-dropped queue answers
+    // "landed".
+    if (stopped) return "parked";
+    if (!pending) {
+      if (terminalDropped) return "parked";
+      return readOutbox(userId, storage).snapshot ? "parked" : "landed";
+    }
+    if (!profileId) return "parked";
     const gen = generation;
     const pid = profileId;
     pending = false;
@@ -1248,7 +1323,7 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine {
     if (!result.ok && result.reason === "cas-rejected") {
       // P0: the session may have ended during the network round-trip. Never issue
       // the rebase write under a superseded session.
-      if (!isCurrent(gen)) return;
+      if (!isCurrent(gen)) return "parked";
       // Refetch + rebase: re-save against the fresh revision, but MERGE first —
       // the CAS loss means a concurrent session (another tab/device) committed
       // work we have not seen. Completions are monotonic, so the server doc's
@@ -1263,16 +1338,19 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine {
       saveRevision = fresh.revision;
       saveDoc = unionCompletionMaps(current.doc, fresh.doc);
       rebased = true;
-      if (!isCurrent(gen)) return;
+      if (!isCurrent(gen)) return "parked";
       result = await saveSnapshot(pid, saveRevision, saveDoc);
     }
 
     // P0: do not mutate the shared revision / outbox / status for a session that
     // has since been superseded — the new session owns persistence now.
-    if (!isCurrent(gen)) return;
+    if (!isCurrent(gen)) return "parked";
 
     if (result.ok) {
       deps.setRevision(result.revision);
+      // Content landed: any earlier terminal drop is superseded by real
+      // server-side content — flushNow may answer "landed" again.
+      terminalDropped = false;
       clearPendingSnapshot(userId, storage);
       // A rebased save COMMITTED: feed the merged doc back into live state
       // (UNION_REMOTE) so this tab converges on the union it just persisted.
@@ -1280,26 +1358,32 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine {
       // guarded by the isCurrent(gen) check above like every shared mutation.
       if (rebased) deps.onRebasedDoc?.(saveDoc);
       setStatus("saved");
-      return;
+      return "landed";
     }
     if (result.reason === "cas-rejected") {
       // Lost the CAS twice this round — reschedule rather than clobber.
       pending = true;
       setStatus("pending");
       scheduleDebounce();
-      return;
+      return "cas-rescheduled";
     }
     if (result.reason === "terminal") {
       // A doc past the size cap / a trigger raise would retry-storm forever.
+      // Outcome: "parked" — the three-value contract has no "dropped"; what a
+      // publish caller needs to know is only that this content did NOT land.
+      // STICKY (P1): the flag keeps later nothing-pending flushes answering
+      // "parked" until content actually lands (see terminalDropped).
+      terminalDropped = true;
       clearPendingSnapshot(userId, storage);
       setStatus("error");
-      return;
+      return "parked";
     }
     // Retryable (network / expired session): park the REBASED base/doc so replay
     // can actually succeed, then replay later.
     parkSnapshot(userId, saveRevision, saveDoc, storage);
     if (result.needsReauth) deps.onReauthNeeded();
     setStatus("pending");
+    return "parked";
   }
 
   function scheduleDebounce(): void {

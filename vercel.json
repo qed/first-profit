@@ -1,0 +1,13 @@
+{
+  "trailingSlash": false,
+  "rewrites": [
+    {
+      "source": "/:handle((?!(?:signup|login|logout|verify|app|parent|admin|account|settings|api|assets|static|public|index|home|site|sites|www|root|status|health|robots|sitemap|favicon|firstprofit|first-profit|the120|school|about|contact|help|support|staff|official|security|abuse|terms|privacy|legal|mail|email|blog|docs|news|shop|store|your-name|their-name)$)[A-Za-z0-9-]+)",
+      "destination": "/api/site"
+    },
+    {
+      "source": "/(.*)",
+      "destination": "/index.html"
+    }
+  ]
+}

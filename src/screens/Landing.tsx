@@ -206,8 +206,15 @@ export function Landing({ signupEnabled = isSignupEnabled() }: { signupEnabled?:
               <span className="h-[9px] w-[9px] rounded-full bg-sell" />
               <span className="h-[9px] w-[9px] rounded-full bg-scale" />
               <span className="h-[9px] w-[9px] rounded-full bg-grow" />
+              {/* Illustrative mockup URL (Unit 6 truth-alignment): with real
+                  public pages live, a REAL-looking handle here would point
+                  visitors at an actual child's page (or a 404) that cannot
+                  match this fictional mockup — "cedric" in particular is the
+                  live test family's likely handle. "your-name" reads as the
+                  placeholder it is; add it to the120's reserved list so it can
+                  never become someone's real page (Unit 7 checklist item). */}
               <span className="ml-2 rounded-md bg-white px-2.5 py-0.5 font-mono text-[11px] text-[hsl(30_6%_52%)]">
-                firstprofit.school/cedric
+                firstprofit.school/your-name
               </span>
             </div>
             <AzeapMockup />

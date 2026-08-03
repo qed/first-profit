@@ -36,7 +36,7 @@ import {
   isTaskDone as isTaskDoneFn,
   isCriterionDone as isCriterionDoneFn,
   isStepUnlocked as isStepUnlockedFn,
-  ideasEligibleFor as ideasEligibleForFn,
+  ideasEnterableFor as ideasEnterableForFn,
   activeBusiness as activeBusinessFn,
   isPhaseComplete as isPhaseCompleteFn,
   type GameState,
@@ -47,10 +47,15 @@ import {
   logout as authLogout,
   getCurrentUserId,
   submitBirthYear,
+  fetchSiteStatus,
+  claimHandle as claimHandleApi,
+  publishSite as publishSiteApi,
   type ChildProfile,
+  type ClaimHandleResult,
+  type PublishSiteResult,
 } from "../lib/auth";
 import { bandForFeedback, displayBand, gradeFromBirthYear, type Band } from "../lib/band";
-import { wipeAllForUser, wipeAllFpKeys, getLastUserId, setLastUserId } from "../lib/draftCache";
+import { getDraft, setDraft, wipeAllForUser, wipeAllFpKeys, getLastUserId, setLastUserId } from "../lib/draftCache";
 import {
   resolveProfileId,
   resetProfileIdCache,
@@ -67,12 +72,18 @@ import {
   FEEDBACK_BODY_MAX,
   type FeedbackBand,
   type FeedbackSendOutcome,
+  type FlushOutcome,
   type SyncEngine,
   type SyncStatus,
 } from "../lib/sync";
 
 /** ~45 minutes of no interaction triggers an idle logout. */
 const IDLE_TIMEOUT_MS = 45 * 60 * 1000;
+
+/** Draft-cache name for the login roster patch (firstName/handle/grade), so a
+ *  restored session's hydrate can re-adopt it (login is otherwise its only
+ *  writer and the profile never rides the save doc). */
+const PROFILE_CACHE_DRAFT = "profileCache";
 
 /**
  * The honest fate of a "Stuck? Tell us" submission, for the StuckBox UI:
@@ -93,6 +104,8 @@ export interface GameApi extends GameState {
   isTaskDone: (ideaIndex: number, stepId: string, index: number) => boolean;
   isCriterionDone: (ideaIndex: number, stepId: string) => boolean;
   isStepUnlocked: (ideaIndex: number, stepId: string) => boolean;
+  /** Room-enterable ideas for a criterion: in-progress first, else completed
+   *  ideas in review mode (one rule with roomEntryFor — see ideasEnterableFor). */
   ideasEligibleFor: (stepId: string) => number[];
   grossSalesSumCents: () => number;
   salesSumCents: () => number;
@@ -116,6 +129,56 @@ export interface GameApi extends GameState {
   /** Restore an archived business — refused while another business is active.
    *  Stamps archiveStateAt = Date.now() like archiveBusiness. */
   unarchiveBusiness: (businessId: string) => void;
+
+  // ── Public site (real-public-site plan, Unit 4) ─────────────────────────
+  // The site slice itself rides `...state` (GameState.site). Every handler
+  // below captures the session generation BEFORE its await and discards a
+  // stale-generation response without mutating state (the async-writer-
+  // generation-token learning: a claim/publish/read that resolves after a
+  // logout/login on a shared device must never write the next child's slice).
+  /**
+   * Re-read the account's site registry state (the split-storage read-back —
+   * The120's authenticated self-read). Called by hydrate; the Your Site room
+   * calls it on open (Unit 6) so a parent unpublish reaches a playing child
+   * with bounded staleness. A failed read adopts `unknown` (neutral render,
+   * never a fake handle, never a false "live").
+   */
+  refreshSiteStatus: () => Promise<void>;
+  /**
+   * Claim a handle for this account. On success the slice adopts the canonical
+   * handle + status; the designed refusals (invalid / taken+suggestions /
+   * already-claimed / outage) pass through for the claim UI. A stale-generation
+   * response is discarded and answered as outage (never another child's state).
+   */
+  claimSite: (handle: string) => Promise<ClaimHandleResult>;
+  /**
+   * The explicit go-live call. SEQUENCING (Key Technical Decision): callers
+   * must `await flushNow()` and see "landed" BEFORE calling this, so the
+   * server's authoritative content re-sync reads current data; on any other
+   * flush outcome show the R19 not-live-yet state instead. On success the
+   * slice flips to `published`; a `locked` refusal flips it to `offline`.
+   */
+  publishSite: () => Promise<PublishSiteResult>;
+  /**
+   * Force the pending snapshot flush NOW (no 3s debounce wait) and surface the
+   * engine's honest outcome — landed / parked / cas-rescheduled — by
+   * delegating to the sync engine's flushPending. With no live engine the
+   * answer is "parked" (nothing can land). Marks the current snapshot pending
+   * synchronously first (see the implementation) so a caller who dispatched in
+   * the same task can never be answered a false "landed" via the engine's
+   * nothing-pending fast path. Called on headline/one-liner commit and before
+   * publish (R11 / "edit→refresh within seconds").
+   */
+  flushNow: () => Promise<FlushOutcome>;
+  /**
+   * The live session generation (bumped by every login/logout). Long-running
+   * async UI flows (Unit 5's completion publish) capture it BEFORE their first
+   * await and compare after: a mismatch means the session ended mid-flight and
+   * NO further dispatch may run — the async-writer-generation-token learning
+   * applied at the screen layer (a completion that outlives a logout must not
+   * resurrect the app stage over the wiped session on a shared device).
+   */
+  getSessionGen: () => number;
 
   // Auth / session actions.
   login: (identifier: string, password: string) => Promise<boolean>;
@@ -256,6 +319,132 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
     [stopEngine],
   );
 
+  // ── Public site slice plumbing (Unit 4) ──────────────────────────────────
+  // All site handlers capture sessionGenRef BEFORE their await and bail without
+  // dispatching when the generation moved (login/logout bump it): a response
+  // that raced a session boundary is DISCARDED — never adopted into the next
+  // child's slice (async-writer-generation-token learning).
+  // Per-call monotonic sequence for refreshSiteStatus (Unit 4 review, P1):
+  // the session-generation guard alone cannot order two overlapping reads in
+  // ONE session (hydrate's fire-and-forget + a room-open refresh) — resolved
+  // out of order, a stale 'none'/'unknown' would overwrite a newer
+  // 'published'. Each call takes a sequence number; only the LATEST-started
+  // call may dispatch. claimSite/publishSite ALSO bump it when they adopt a
+  // newer status (Unit 6 review, P2): a refresh that was in flight when a
+  // claim/publish landed carries pre-claim state, and resolving late it would
+  // clobber 'claimed'/'published' — the bump makes it unconditionally stale.
+  const siteFetchSeqRef = useRef(0);
+  // In-flight memo for publish (Unit 6 review, P1): concurrent callers (a
+  // room-remount race, onboarding completion beside a room retry) share ONE
+  // request/outcome instead of double-POSTing — same shape as the sync
+  // engine's flushPending reentrancy guard. Publish is idempotent server-side
+  // via first_published_at; this just keeps the client honest too.
+  const publishInFlightRef = useRef<Promise<PublishSiteResult> | null>(null);
+
+  const refreshSiteStatus = useCallback(async (): Promise<void> => {
+    const gen = sessionGenRef.current;
+    const seq = ++siteFetchSeqRef.current;
+    // fetchSiteStatus never throws by contract, but this is a fire-and-forget
+    // seam (`void refreshSiteStatus()` in hydrate) — belt-and-braces so no
+    // build skew can ever turn it into an unhandled rejection.
+    const result = await fetchSiteStatus().catch(() => ({ ok: false }) as const);
+    if (gen !== sessionGenRef.current) return; // stale session: discard
+    if (seq !== siteFetchSeqRef.current) return; // a newer refresh started: drop
+    if (result.ok) {
+      // The refresh path is the ONE explicit projected writer (object or
+      // null); claim/publish omit the field and the reducer preserves.
+      dispatch({
+        type: "SET_SITE",
+        handle: result.handle,
+        status: result.status,
+        projected: result.projected,
+      });
+    } else {
+      // Failed read (outage/refusal/offline/flag off): the honest `unknown` —
+      // neutral render, never a fake handle, never a false "live". Also
+      // OVERWRITES a previously-good slice on a room-open refresh failure, so
+      // the room can never keep showing "live" on data it could not confirm.
+      dispatch({ type: "SET_SITE", handle: null, status: "unknown", projected: null });
+    }
+  }, []);
+
+  const claimSite = useCallback(async (handle: string): Promise<ClaimHandleResult> => {
+    const gen = sessionGenRef.current;
+    const result = await claimHandleApi(handle);
+    if (gen !== sessionGenRef.current) {
+      // Stale session: discard without mutating state, and never leak the
+      // prior session's claim outcome into whatever is mounted now — the
+      // caller that awaited this is gone; answer the neutral outage shape.
+      return { ok: false, reason: "outage" };
+    }
+    if (result.ok) {
+      // Invalidate any in-flight status read (Unit 6 review, P2): it was
+      // issued before this claim and would clobber the fresher slice.
+      siteFetchSeqRef.current++;
+      dispatch({ type: "SET_SITE", handle: result.handle, status: result.status });
+    }
+    return result;
+  }, []);
+
+  const publishSiteNow = useCallback((): Promise<PublishSiteResult> => {
+    // Reentrancy memo (Unit 6 review, P1): while a publish is in flight,
+    // every caller awaits the SAME promise — one network request, one shared
+    // outcome (see publishInFlightRef).
+    const inFlight = publishInFlightRef.current;
+    if (inFlight) return inFlight;
+    const run = (async (): Promise<PublishSiteResult> => {
+      const gen = sessionGenRef.current;
+      // Capture the handle BEFORE the await (Unit 4 review, P3): a slice
+      // rewrite mid-flight (a racing refresh/claim in the Unit 5/6 flows) must
+      // not be read back through stateRef after the network round-trip — the
+      // dispatch below stamps the handle this publish was issued for.
+      const handleAtCall = stateRef.current.site.handle;
+      const result = await publishSiteApi();
+      if (gen !== sessionGenRef.current) return { ok: false, reason: "outage" };
+      if (result.ok) {
+        // Invalidate any in-flight status read (Unit 6 review, P2), as in
+        // claimSite: a pre-publish refresh must not clobber 'published'.
+        siteFetchSeqRef.current++;
+        dispatch({ type: "SET_SITE", handle: handleAtCall, status: "published" });
+      } else if (result.reason === "locked") {
+        // Operator-locked: nothing became visible — the slice reflects offline
+        // so no surface can render "live" while locked (R19's never-mislead).
+        siteFetchSeqRef.current++;
+        dispatch({ type: "SET_SITE", handle: handleAtCall, status: "offline" });
+      }
+      return result;
+    })();
+    const memo = run.finally(() => {
+      publishInFlightRef.current = null;
+    });
+    publishInFlightRef.current = memo;
+    return memo;
+  }, []);
+
+  const flushNow = useCallback(async (): Promise<FlushOutcome> => {
+    const engine = engineRef.current;
+    // No live engine (logged out / torn down): nothing can land.
+    if (!engine) return "parked";
+    // Mark the current snapshot pending SYNCHRONOUSLY before flushing (Unit 5
+    // review, P1): callers may invoke flushNow in the same task as a dispatch,
+    // before the passive [state] subscription effect has notified the engine.
+    // Without this, flushOnce's nothing-pending fast path could answer
+    // "landed" for content the engine never read. notifySnapshotChange only
+    // marks pending + schedules; the flush below reads the doc LIVE via
+    // getSnapshot(stateRef), so the extra mark is at worst an idempotent save
+    // of unchanged content — never a wrong doc. (stateRef currency across a
+    // just-dispatched update remains the caller's job: yield to let React
+    // commit first — see Onboarding's completion sequence.)
+    engine.notifySnapshotChange();
+    // Deliberately NO sessionGenRef guard here: the engine owns its own
+    // generation internally (stop() supersedes it, and a superseded flush
+    // answers "parked") — a second guard would only shadow that contract.
+    return engine.flushPending();
+  }, []);
+
+  /** Live session generation for screen-layer async guards (see GameApi doc). */
+  const getSessionGen = useCallback((): number => sessionGenRef.current, []);
+
   /**
    * Shared post-auth hydration: resolve the caller's profile (RLS "own row"),
    * load the save, and route. An empty/new save (no ideas and onboarding not
@@ -265,6 +454,29 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
    */
   const hydrateAndRoute = useCallback(
     async (userId: string) => {
+      // Site slice read-back (Unit 4; split-storage learning): the registry
+      // state is fetched alongside the save load, fire-and-forget — a slow or
+      // failed read can neither delay routing nor crash hydrate (failure lands
+      // as `unknown`), and the generation guard inside discards a response
+      // that outlives this session.
+      void refreshSiteStatus();
+      // Profile restore (the roster patch is otherwise login-only, so a page
+      // reload with a RESTORED session used to degrade the founder chip and
+      // avatar label to "Founder"): re-adopt the account-scoped cache written
+      // at login. fp:-prefixed, so a different child's login wipes it; a
+      // roster rename stays stale only until that child's next real login.
+      const cachedProfile = getDraft<{ firstName?: unknown; handle?: unknown; grade?: unknown }>(
+        userId,
+        PROFILE_CACHE_DRAFT,
+      );
+      if (cachedProfile && typeof cachedProfile === "object") {
+        const firstName = typeof cachedProfile.firstName === "string" ? cachedProfile.firstName : "";
+        const handle = typeof cachedProfile.handle === "string" ? cachedProfile.handle : "";
+        const grade = typeof cachedProfile.grade === "number" ? cachedProfile.grade : null;
+        if (firstName || handle) {
+          dispatch({ type: "SET_PROFILE", patch: { firstName, handle, grade } });
+        }
+      }
       try {
         const profileId = await resolveProfileId();
         if (!profileId) {
@@ -303,7 +515,7 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
         startEngine(userId);
       }
     },
-    [startEngine],
+    [startEngine, refreshSiteStatus],
   );
 
   // ── Boot: resolve any persisted session, then route. ────────────────────
@@ -421,6 +633,16 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
           // card never shows; null arms the ask.
           patch: { firstName: profile.firstName, handle: profile.handle, grade: result.grade ?? null },
         });
+        // Cache the roster patch (account-scoped, fp:-prefixed) so a RESTORED
+        // session's hydrate can re-adopt it — without this, a page reload
+        // degrades the founder chip/avatar label to "Founder".
+        if (userId) {
+          setDraft(userId, PROFILE_CACHE_DRAFT, {
+            firstName: profile.firstName,
+            handle: profile.handle,
+            grade: result.grade ?? null,
+          });
+        }
 
         // Resolve the profile (RLS "own row"), load the save, HYDRATE or route to
         // onboard, and start the sync engine. Same-user re-login restores the
@@ -661,12 +883,17 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
       isTaskDone: (ideaIndex, stepId, index) => isTaskDoneFn(state, ideaIndex, stepId, index),
       isCriterionDone: (ideaIndex, stepId) => isCriterionDoneFn(state, ideaIndex, stepId),
       isStepUnlocked: (ideaIndex, stepId) => isStepUnlockedFn(state, ideaIndex, stepId),
-      ideasEligibleFor: (stepId) => ideasEligibleForFn(state, stepId),
+      ideasEligibleFor: (stepId) => ideasEnterableForFn(state, stepId),
       grossSalesSumCents: () => grossSalesSumCentsFn(state),
       salesSumCents: () => salesSumCentsFn(state),
       promoteIdea,
       archiveBusiness,
       unarchiveBusiness,
+      refreshSiteStatus,
+      claimSite,
+      publishSite: publishSiteNow,
+      flushNow,
+      getSessionGen,
       login,
       logout,
       submitFeedback,
@@ -682,6 +909,11 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
       promoteIdea,
       archiveBusiness,
       unarchiveBusiness,
+      refreshSiteStatus,
+      claimSite,
+      publishSiteNow,
+      flushNow,
+      getSessionGen,
       login,
       logout,
       submitFeedback,

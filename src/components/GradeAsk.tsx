@@ -25,7 +25,6 @@ import { birthYearBounds } from "../lib/band";
 export const GRADE_ASK_COPY = {
   title: "One quick thing: what year were you born?",
   yearLabel: "Birth year",
-  hint: "This helps us pick the right words for you. It never slows you down.",
   placeholder: "Pick a year",
   save: "Save",
   skip: "Skip for now",
@@ -132,7 +131,6 @@ export function GradeAsk({
             <h2 className="font-display text-[16px] font-black leading-snug text-[hsl(25_34%_20%)]">
               {GRADE_ASK_COPY.title}
             </h2>
-            <p className="mt-1 text-[12px] leading-[1.5] text-[hsl(25_20%_38%)]">{GRADE_ASK_COPY.hint}</p>
             <label htmlFor="fp-grade-year" className="sr-only">
               {GRADE_ASK_COPY.yearLabel}
             </label>

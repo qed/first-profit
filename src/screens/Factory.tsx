@@ -28,15 +28,15 @@
  * (in the provider, above everything), so those already survive the swap; we just
  * render them here. While ANY overlay is open (reducer overlays + the two
  * Factory-owned ones) the floor container is `inert` and the floating helpers
- * (coach, switcher chip, GradeAsk) hide, so nothing behind a modal scrim can
- * catch taps or tab focus.
+ * (coach, GradeAsk) hide, so nothing behind a modal scrim can catch taps or
+ * tab focus. Idea identity lives in the GlobalNav's chip (App-level), not here.
  */
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useGame } from "../state/GameContext";
+import { isPublicSiteEnabled } from "../config";
 import { firstIncompleteTaskIndex, ideaOneLiner, ideaProgressLabel, ideaSummaryName, nextCoachTarget, roomEntryFor } from "../state/floorSelectors";
 import { stepById, type RoomId } from "../data/path";
 import { FactoryFloor, type FloorView, type WalkIntent } from "../components/FactoryFloor";
-import { Hud } from "../components/Hud";
 import { StepRunner } from "../components/StepRunner";
 import { Celebration } from "../components/Celebration";
 import { GradeAsk } from "../components/GradeAsk";
@@ -103,7 +103,16 @@ function RoomDialog() {
   if (!room) return null;
   const meta = ROOM_META[room];
   if (!meta) return null;
-  const { sign, name, tagline, Body } = meta;
+  const { sign, name, Body } = meta;
+  // Truthful chrome (Unit 6, R19): the website room's static "Live already."
+  // tagline is only honest for the mock. With the real public site enabled the
+  // room body renders the actual state (live / going live / offline /
+  // unclaimed), so the tagline stays state-neutral. Flag off keeps the
+  // original string byte-for-byte.
+  const tagline =
+    room === "website" && isPublicSiteEnabled()
+      ? "Your real page on the internet."
+      : meta.tagline;
   const close = () => dispatch({ type: "CLOSE_ROOM" });
 
   return (
@@ -163,7 +172,11 @@ function PickerDialog() {
         <p className="mt-1 text-[13px] text-[hsl(25_20%_38%)]">Pick the product you are working on for {pickFor}.</p>
         <div className="mt-4 flex flex-col gap-2">
           {eligible.map((n) => {
-            const oneLiner = ideaOneLiner(game, n) || "Not named yet";
+            // Product name first and foremost (ideaSummaryName prefers it); the
+            // one-liner drops to a secondary line when a name exists.
+            const name = ideaSummaryName(game, n);
+            const oneLiner = ideaOneLiner(game, n);
+            const showLiner = oneLiner.length > 0 && oneLiner !== name;
             return (
               <button
                 key={n}
@@ -172,7 +185,8 @@ function PickerDialog() {
                 className="flex min-h-[48px] flex-col rounded-2xl border-2 border-[hsl(25_34%_20%/0.15)] bg-white px-4 py-3 text-left hover:border-sell"
               >
                 <span className="font-mono text-[11px] font-bold text-[hsl(14_78%_44%)]">Idea #{n + 1}</span>
-                <span className="text-[13px] text-[hsl(25_34%_20%)]">{oneLiner}</span>
+                <span className="text-[13px] font-bold text-[hsl(25_34%_20%)]">{name}</span>
+                {showLiner && <span className="text-[12px] text-[hsl(25_20%_38%)]">{oneLiner}</span>}
               </button>
             );
           })}
@@ -204,7 +218,49 @@ export function NextStepCoach({
   overlayOpen?: boolean;
 }) {
   const game = useGame();
+  // ── One-shot claim hint (real-public-site plan, Unit 6; R13/R16). With the
+  // public site enabled, a HANDLE-LESS established account (status "none" from
+  // the registry read-back, and at least one idea — a brand-new account's
+  // first-task guidance is never preempted) is pointed at the Your Site room
+  // ONCE: the coach button targets the room through the same onWalk intent
+  // channel as every other coach action (no new interstitial machinery). The
+  // hint is CONSUMED the moment the room opens by ANY route (this button, a
+  // pod tap), then the coach reverts to normal next-step guidance for the
+  // session — claiming stays an invitation, never a gate. In-memory only (the
+  // gradeAskDone precedent): it reappears next session while the account
+  // remains handle-less. `unknown` (failed read) deliberately shows NO hint —
+  // never nudge a claim on state we could not confirm.
+  const [siteHintUsed, setSiteHintUsed] = useState(false);
+  const roomOpen = game.room;
+  useEffect(() => {
+    if (roomOpen === "website") setSiteHintUsed(true);
+  }, [roomOpen]);
   if (overlayOpen || game.runnerOpen || game.room || game.celebrate || game.pickFor) return null;
+
+  // "none" → invite the claim; "claimed" → the go-live never landed (a parked
+  // completion flush, Unit 7 review P2: without a nudge back to the room —
+  // whose open retries flush→publish — a stuck-'claimed' account had no route
+  // to live, ever). Same one-shot mechanics, different copy per state.
+  const siteHintStatus = game.site?.status;
+  const siteHint =
+    isPublicSiteEnabled() &&
+    !siteHintUsed &&
+    (siteHintStatus === "none" || siteHintStatus === "claimed") &&
+    game.ideas.length > 0;
+  if (siteHint) {
+    const roomName = ROOM_META.website?.name ?? "Your Site";
+    return (
+      <CoachButton
+        label={
+          siteHintStatus === "claimed"
+            ? `Finish making your page live in ${roomName}`
+            : `Claim your page in ${roomName}`
+        }
+        onClick={() => onWalk({ kind: "openRoom", room: "website" })}
+      />
+    );
+  }
+
   const target = nextCoachTarget(game);
   if (!target) return null;
 
@@ -223,11 +279,17 @@ export function NextStepCoach({
         ? { kind: "createIdea" }
         : { kind: "enterCriterion", stepId: target.stepId };
 
+  return <CoachButton label={label} onClick={() => onWalk(intent)} />;
+}
+
+/** The coach's docked green button chrome, shared by the normal next-step
+ *  target and the Unit 6 one-shot claim hint (identical markup either way). */
+function CoachButton({ label, onClick }: { label: string; onClick: () => void }) {
   return (
-    <div className="pointer-events-none absolute inset-x-0 bottom-7 z-40 flex justify-center px-4 lg:bottom-11">
+    <div className="pointer-events-none absolute inset-x-0 bottom-7 z-40 flex justify-end px-4 lg:bottom-11 lg:px-6">
       <button
         type="button"
-        onClick={() => onWalk(intent)}
+        onClick={onClick}
         className="pointer-events-auto flex min-h-[52px] items-center gap-3 rounded-2xl bg-verified px-5 py-3 text-left text-white shadow-[0_6px_0_hsl(150_52%_26%)] transition hover:-translate-y-0.5 active:translate-y-0.5 active:shadow-[0_3px_0_hsl(150_52%_26%)] focus:outline-none focus-visible:ring-4 focus-visible:ring-verified/40"
       >
         <span>
@@ -305,7 +367,17 @@ export function SwitcherDialog({
   );
 }
 
-export function Factory() {
+export function Factory({
+  switcherOpen: controlledSwitcherOpen,
+  onSwitcherOpenChange,
+}: {
+  /** When provided (App threads these), the SwitcherDialog is CONTROLLED by
+   *  App-level state — the GlobalNav's idea chip is the opener, and the
+   *  open-state lives above the stage render. When absent (test mounts), the
+   *  internal useState below keeps the dialog fully self-contained. */
+  switcherOpen?: boolean;
+  onSwitcherOpenChange?: (open: boolean) => void;
+} = {}) {
   const game = useGame();
   const { dispatch } = game;
   const [walkTo, setWalkTo] = useState<WalkIntent | null>(null);
@@ -314,7 +386,9 @@ export function Factory() {
   // reducer action ever needs to drive, held above the breakpoint conditional
   // mount so both survive the lg swap (see PromoteBusiness's doc comment).
   const [promoteOpen, setPromoteOpen] = useState(false);
-  const [switcherOpen, setSwitcherOpen] = useState(false);
+  const [internalSwitcherOpen, setInternalSwitcherOpen] = useState(false);
+  const switcherOpen = controlledSwitcherOpen ?? internalSwitcherOpen;
+  const setSwitcherOpen = onSwitcherOpenChange ?? setInternalSwitcherOpen;
 
   // Race-proof arrival (unit review FIX 1a): the floor variants fire their
   // arrival timer ~550ms after the tap, during which the game state may have
@@ -387,7 +461,6 @@ export function Factory() {
 
   return (
     <main className="flex h-[100dvh] w-full flex-col gap-3 overflow-hidden bg-[hsl(38_46%_95%)] p-3 text-ink sm:gap-4 sm:p-5">
-      <Hud />
       <div className="relative min-h-0 flex-1" {...inertProps}>
         <FactoryFloor
           walkTo={walkTo}
@@ -400,8 +473,6 @@ export function Factory() {
             cancelWalk();
             setFloorView("phases");
           }}
-          onOpenSwitcher={() => setSwitcherOpen(true)}
-          overlayOpen={anyOverlayOpen}
         />
         <NextStepCoach onWalk={setWalkTo} overlayOpen={anyOverlayOpen} />
         {/* Ask-once birth-year card (Unit 3): non-modal, above the breakpoint

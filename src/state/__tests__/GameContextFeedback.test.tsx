@@ -30,6 +30,10 @@ vi.mock("../../lib/auth", () => ({
   logout: (...a: unknown[]) => authMock.logout(...a),
   getCurrentUserId: (...a: unknown[]) => authMock.getCurrentUserId(...a),
   submitBirthYear: (...a: unknown[]) => authMock.submitBirthYear(...a),
+  // Public-site client (Unit 4): hydrate fires fetchSiteStatus fire-and-forget.
+  fetchSiteStatus: vi.fn().mockResolvedValue({ ok: false }),
+  claimHandle: vi.fn().mockResolvedValue({ ok: false, reason: "outage" }),
+  publishSite: vi.fn().mockResolvedValue({ ok: false, reason: "outage" }),
 }));
 
 interface FakeEngine {

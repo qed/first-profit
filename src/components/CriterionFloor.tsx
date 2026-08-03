@@ -10,13 +10,14 @@
  * is decided in Factory via roomEntryFor — this file only emits the intent.
  *
  * Idea/business context:
- *  - Phases 1-3 floors show the ACTIVE idea's progress plus the compact
- *    idea-switcher chip (origin IA decision: active idea + switcher, no
- *    row-per-idea stacking). The Your Ideas row appears on the SELL floor only
- *    (its "Start Idea" slot stays the one place a new idea is created).
- *  - Phases 4-5 floors render the BUSINESS context: the business name is the
- *    promoted idea's one-liner, and progress reads from the business record
- *    (gameCore routes grow/scale isTaskDone through it).
+ *  - Phases 1-3 floors show the ACTIVE idea's progress; the idea identity and
+ *    the switcher entry point live in the GlobalNav's chip (origin IA
+ *    decision: active idea + switcher, no row-per-idea stacking). The Your
+ *    Ideas row appears on the SELL floor only (its "Start Idea" slot stays
+ *    the one place a new idea is created).
+ *  - Phases 4-5 floors carry the BUSINESS context in the card meta: the
+ *    business name is the promoted idea's one-liner, and progress reads from
+ *    the business record (gameCore routes grow/scale isTaskDone through it).
  * Room cards without a built dialog are still NAMED, inert cards — the Step
  * Runner is the playing surface for every phase (plan scope boundary).
  */
@@ -25,7 +26,6 @@ import { MAX_IDEAS, activeBusiness } from "../state/gameCore";
 import { BUILT_CRITERIA, STEPS, phaseById, type PhaseId } from "../data/path";
 import { ideaProgressLabel, ideaSummaryName } from "../state/floorSelectors";
 import { CriterionRoomCard, IdeaSlot, SectionTitle } from "./PodCardContent";
-import { IdeaSwitcherChip } from "./IdeaSwitcherChip";
 import type { WalkIntent } from "./FactoryFloor";
 
 const GRID = "mt-4 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5";
@@ -34,15 +34,10 @@ export function CriterionFloor({
   phase,
   onWalk,
   onBack,
-  onOpenSwitcher,
-  overlayOpen,
 }: {
   phase: PhaseId;
   onWalk: (intent: WalkIntent) => void;
   onBack: () => void;
-  onOpenSwitcher: () => void;
-  /** Factory's lifted anyOverlayOpen (unit review FIX 5) — hides the chip. */
-  overlayOpen?: boolean;
 }) {
   const game = useGame();
   const { ideas, activeIdea, isCriterionDone, isStepUnlocked, nextUpFor, isTaskDone } = game;
@@ -72,16 +67,7 @@ export function CriterionFloor({
           Phase {ph.index} · {ph.name}
         </p>
         <p className="font-display text-base font-bold text-[hsl(25_34%_20%)]">{ph.promise}</p>
-        {isBusinessPhase ? (
-          <p
-            className="flex min-h-[28px] items-center gap-1.5 rounded-full px-3 font-mono text-[10px] uppercase tracking-[0.06em]"
-            style={{ background: ph.wash, color: ph.text }}
-          >
-            <span aria-hidden>🏢</span> Your business · {businessName}
-          </p>
-        ) : (
-          <IdeaSwitcherChip onOpen={onOpenSwitcher} hidden={overlayOpen} />
-        )}
+        {/* Idea/business identity lives in the GlobalNav's chip (the one bar). */}
       </div>
 
       <div className={GRID}>

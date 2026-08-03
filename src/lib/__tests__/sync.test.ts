@@ -1700,6 +1700,181 @@ describe("createSyncEngine", () => {
     expect(statuses[statuses.length - 1]).toBe("error");
     engine.stop();
   });
+
+  // ── flushPending outcome surface (real-public-site plan, Unit 4) ────────────
+  // GameApi.flushNow delegates here; the publish sequencing (Key Technical
+  // Decision) may call publish ONLY on a "landed" result. All of these call
+  // flushPending() DIRECTLY — the immediate-flush path needs no 3s debounce
+  // wait even under fake timers.
+  describe("flushPending outcome (flushNow contract)", () => {
+    it("returns 'landed' when the pending snapshot commits", async () => {
+      const engine = makeEngine();
+      handlers.update = () => ({ data: [{ profile_id: PROFILE }], error: null });
+      await engine.start();
+      engine.notifySnapshotChange();
+      expect(await engine.flushPending()).toBe("landed");
+      engine.stop();
+    });
+
+    it("returns 'landed' with nothing pending and a clean outbox, but 'parked' while an earlier failure still holds a parked snapshot", async () => {
+      const engine = makeEngine();
+      await engine.start();
+      expect(await engine.flushPending()).toBe("landed"); // nothing to flush
+      // An earlier failure parked a snapshot: that content has NOT landed, so a
+      // publish caller must not treat the quiet queue as current.
+      parkSnapshot(USER, 3, docWith(), engineStorage);
+      expect(await engine.flushPending()).toBe("parked");
+      engine.stop();
+    });
+
+    it("returns 'parked' on a retryable failure (snapshot parked for replay)", async () => {
+      const engine = makeEngine();
+      handlers.update = () => ({ data: null, error: new Error("network dropped") });
+      await engine.start();
+      engine.notifySnapshotChange();
+      expect(await engine.flushPending()).toBe("parked");
+      expect(readOutbox(USER, engineStorage).snapshot).not.toBeNull();
+      engine.stop();
+    });
+
+    it("returns 'parked' on a terminal refusal (content dropped — it will never land)", async () => {
+      const engine = makeEngine();
+      handlers.update = () => ({ data: null, error: { code: "23514", message: "doc too big" } });
+      await engine.start();
+      engine.notifySnapshotChange();
+      expect(await engine.flushPending()).toBe("parked");
+      engine.stop();
+    });
+
+    it("returns 'cas-rescheduled' when the CAS is lost twice this round", async () => {
+      const engine = makeEngine();
+      handlers.update = () => ({ data: [], error: null }); // stale base, both attempts
+      await engine.start();
+      handlers.select = () => ({ data: { doc, revision: 8 }, error: null }); // rebase refetch
+      engine.notifySnapshotChange();
+      expect(await engine.flushPending()).toBe("cas-rescheduled");
+      engine.stop();
+    });
+
+    it("returns 'parked' on a stopped engine (superseded session flushes nothing)", async () => {
+      const engine = makeEngine();
+      await engine.start();
+      engine.notifySnapshotChange();
+      engine.stop();
+      expect(await engine.flushPending()).toBe("parked");
+    });
+
+    it("returns 'parked' with content pending but NO resolved profile (unflushable)", async () => {
+      // Review P3(a): the !profileId branch. The profile select answers empty,
+      // so start() resolves no profile id; a pending edit then cannot flush.
+      handlers.select = () => ({ data: null, error: null });
+      const engine = makeEngine();
+      await engine.start();
+      engine.notifySnapshotChange();
+      expect(await engine.flushPending()).toBe("parked");
+      engine.stop();
+    });
+
+    // ── P0 reentrancy: overlapping flushPending calls (flushNow vs timers) ───
+    it("REENTRANCY: a concurrent second flushPending never answers a false 'landed' while the first save is unresolved", async () => {
+      const engine = makeEngine();
+      let releaseSave: (result: unknown) => void = () => undefined;
+      handlers.update = () =>
+        new Promise((resolve) => {
+          releaseSave = resolve;
+        });
+      await engine.start();
+      engine.notifySnapshotChange();
+
+      // The exact commit→flushNow race: the first flush is awaiting the save
+      // (pending already false, outbox empty) when the second call arrives.
+      const p1 = engine.flushPending();
+      const p2 = engine.flushPending();
+      let p2Resolved = false;
+      void p2.then(() => {
+        p2Resolved = true;
+      });
+      await vi.advanceTimersByTimeAsync(0);
+      // Pre-fix this was a false 'landed' already; now the second call is
+      // still waiting on the first's unresolved save.
+      expect(p2Resolved).toBe(false);
+
+      releaseSave({ data: [{ profile_id: PROFILE }], error: null });
+      expect(await p1).toBe("landed");
+      expect(await p2).toBe("landed"); // truth: the content HAS landed by now
+      engine.stop();
+    });
+
+    it("REENTRANCY: when the first flush FAILS, the awaited second call reports the truth ('parked'), never 'landed'", async () => {
+      const engine = makeEngine();
+      let releaseSave: (result: unknown) => void = () => undefined;
+      handlers.update = () =>
+        new Promise((resolve) => {
+          releaseSave = resolve;
+        });
+      await engine.start();
+      engine.notifySnapshotChange();
+
+      const p1 = engine.flushPending();
+      const p2 = engine.flushPending();
+      releaseSave({ data: null, error: new Error("network dropped") }); // retryable
+      expect(await p1).toBe("parked");
+      // The second call's own pass re-reads reality: nothing pending, but the
+      // failed content sits parked in the outbox.
+      expect(await p2).toBe("parked");
+      expect(readOutbox(USER, engineStorage).snapshot).not.toBeNull();
+      engine.stop();
+    });
+
+    it("REENTRANCY: content that became pending DURING the wait is flushed by the second call's own pass", async () => {
+      const engine = makeEngine();
+      let updateCalls = 0;
+      let releaseFirst: (result: unknown) => void = () => undefined;
+      handlers.update = () => {
+        updateCalls += 1;
+        if (updateCalls === 1) {
+          return new Promise((resolve) => {
+            releaseFirst = resolve;
+          });
+        }
+        return { data: [{ profile_id: PROFILE }], error: null };
+      };
+      await engine.start();
+      engine.notifySnapshotChange();
+
+      const p1 = engine.flushPending();
+      // A NEW edit lands while the first flush is on the wire…
+      engine.notifySnapshotChange();
+      const p2 = engine.flushPending();
+      releaseFirst({ data: [{ profile_id: PROFILE }], error: null });
+      expect(await p1).toBe("landed");
+      // …so the second call runs its OWN flush for the new content.
+      expect(await p2).toBe("landed");
+      expect(updateCalls).toBe(2);
+      engine.stop();
+    });
+
+    // ── P1 terminal-drop stickiness ──────────────────────────────────────────
+    it("after a terminal drop, keeps answering 'parked' (even with nothing pending) until content actually lands", async () => {
+      const engine = makeEngine();
+      handlers.update = () => ({ data: null, error: { code: "23514", message: "doc too big" } });
+      await engine.start();
+      engine.notifySnapshotChange();
+      expect(await engine.flushPending()).toBe("parked"); // terminal drop
+
+      // Nothing newly pending and the outbox is clean (terminal never parks) —
+      // pre-fix this read 'landed' and Unit 5 would publish stale content.
+      expect(await engine.flushPending()).toBe("parked");
+
+      // New content lands successfully: the stickiness clears.
+      handlers.update = () => ({ data: [{ profile_id: PROFILE }], error: null });
+      engine.notifySnapshotChange();
+      expect(await engine.flushPending()).toBe("landed");
+      // And a quiet queue is honest again.
+      expect(await engine.flushPending()).toBe("landed");
+      engine.stop();
+    });
+  });
 });
 
 // ── Feedback ("Stuck? Tell us") module paths ─────────────────────────────────

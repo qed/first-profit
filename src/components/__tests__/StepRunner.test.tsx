@@ -39,6 +39,15 @@ vi.mock("../../lib/draftCache", () => {
   };
 });
 
+// Public-site flag (Unit 6 one-liner public-string treatment): default OFF so
+// every pre-Unit-6 scenario runs against the unchanged runner; the public-
+// string describe flips it per test.
+let publicSiteFlag = false;
+vi.mock("../../config", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../config")>();
+  return { ...actual, isPublicSiteEnabled: () => publicSiteFlag };
+});
+
 // Replace StuckBox with a prop-probe stub (its own behavior has its own suite);
 // taskIdFor stays REAL so StepRunner's synthesized task id is pinned here.
 vi.mock("../StuckBox", async (importOriginal) => {
@@ -76,11 +85,14 @@ function Harness({
   seed,
   onAction,
   band = "g6_8",
+  flushNow,
 }: {
   seed: GameState;
   onAction?: (a: unknown) => void;
   /** The session band GameContext derives from the grade (displayBand). */
   band?: Band;
+  /** GameApi.flushNow stand-in (Unit 6 one-liner commit → immediate flush). */
+  flushNow?: () => Promise<string>;
 }) {
   const [state, rawDispatch] = React.useReducer(reducer, seed);
   const dispatch: typeof rawDispatch = (action) => {
@@ -91,6 +103,7 @@ function Harness({
     ...state,
     dispatch,
     band,
+    flushNow,
     isTaskDone: (ideaIndex: number, stepId: string, index: number) =>
       isTaskDoneFn(state, ideaIndex, stepId, index),
   };
@@ -118,7 +131,10 @@ function seedAtLastTaskOf11(): GameState {
   };
 }
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  publicSiteFlag = false;
+});
 
 describe("StepRunner", () => {
   it("shows the criterion header, task rail count, and done-when for 1.1", () => {
@@ -450,5 +466,57 @@ describe("Celebration across phase boundaries (Unit 8)", () => {
     // Dismiss works from the terminal state too.
     fireEvent.click(screen.getByText("Back to the floor"));
     expect(screen.queryByText("Path complete")).toBeNull();
+  });
+});
+
+describe("one-liner public-string treatment (real-public-site Unit 6)", () => {
+  /** Runner open at 1.1 task 1 (the productName + oneLiner authoring task). */
+  function seedAtFirstTaskOf11(): GameState {
+    return {
+      ...initialState(),
+      stage: "app",
+      ideas: [{ fields: {}, done: {} }],
+      activeIdea: 0,
+      runnerOpen: true,
+      runnerStep: "1.1",
+      runnerIndex: 0,
+    };
+  }
+
+  it("flag ON: the one-liner caps at 140 and commit (blur) forces an immediate flush", () => {
+    publicSiteFlag = true;
+    const flushNow = vi.fn().mockResolvedValue("landed");
+    render(<Harness seed={seedAtFirstTaskOf11()} flushNow={flushNow} />);
+    const liner = screen.getByLabelText("Your one-liner") as HTMLInputElement;
+    expect(liner.getAttribute("maxlength")).toBe("140");
+    fireEvent.change(liner, { target: { value: "Friendship bracelets for recess trades" } });
+    fireEvent.blur(liner);
+    expect(flushNow).toHaveBeenCalledTimes(1);
+    // The public-page nudge copy sits by the field (R23 accepted-limit note).
+    expect(document.body.textContent).toContain(
+      "This goes on your public page. No phone numbers, addresses, or last names.",
+    );
+  });
+
+  it("flag ON: non-public fields keep the generic cap and never flush on blur", () => {
+    publicSiteFlag = true;
+    const flushNow = vi.fn().mockResolvedValue("landed");
+    render(<Harness seed={seedAtFirstTaskOf11()} flushNow={flushNow} />);
+    const name = screen.getByLabelText("Product name") as HTMLInputElement;
+    expect(name.getAttribute("maxlength")).toBe("2000");
+    fireEvent.change(name, { target: { value: "Bracelets" } });
+    fireEvent.blur(name);
+    expect(flushNow).not.toHaveBeenCalled();
+  });
+
+  it("flag OFF: the one-liner behaves exactly as before (2000 cap, no flush, no nudge)", () => {
+    publicSiteFlag = false;
+    const flushNow = vi.fn().mockResolvedValue("landed");
+    render(<Harness seed={seedAtFirstTaskOf11()} flushNow={flushNow} />);
+    const liner = screen.getByLabelText("Your one-liner") as HTMLInputElement;
+    expect(liner.getAttribute("maxlength")).toBe("2000");
+    fireEvent.blur(liner);
+    expect(flushNow).not.toHaveBeenCalled();
+    expect(document.body.textContent).not.toContain("This goes on your public page.");
   });
 });

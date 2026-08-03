@@ -23,6 +23,15 @@
  */
 import { useEffect, useState } from "react";
 import { useReducedMotion } from "framer-motion";
+import { defaultSiteHeadline } from "../../lib/siteCopy";
+import { ClaimBlock, GreenCta, type FounderProfileClaim } from "../../components/claim/ClaimBlock";
+
+// The claim UI + green CTA moved to the shared component module (Unit 6
+// review P2: the Your Site room consumes them too, and components/ must not
+// import from screens/). Re-exported here so every existing import site —
+// the signup flow's GreenCta, the onboarding tests' types — keeps working.
+export { ClaimBlock, GreenCta } from "../../components/claim/ClaimBlock";
+export type { ClaimBadge, ClaimNotice, FounderProfileClaim } from "../../components/claim/ClaimBlock";
 
 /** Compact stepped logo mark (four ascending bars in phase colors). */
 export function LogoMark() {
@@ -67,32 +76,6 @@ export function ProgressBar({ filled }: { filled: number }) {
   );
 }
 
-/**
- * The green Fraunces CTA with the design system's hard shadow. Exported for
- * reuse by the signup flow (Unit 8). `disabled` renders a dimmed, un-clickable
- * button (used to gate the consent step until the parent has attested).
- */
-export function GreenCta({
-  children,
-  onClick,
-  disabled,
-}: {
-  children: React.ReactNode;
-  onClick: () => void;
-  disabled?: boolean;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      disabled={disabled}
-      className="mt-6 flex min-h-[54px] w-full items-center justify-center gap-2 rounded-2xl bg-verified px-5 font-display text-lg font-bold text-white shadow-[0_6px_0_hsl(150_52%_26%)] transition-transform hover:-translate-y-0.5 active:translate-y-px active:shadow-[0_3px_0_hsl(150_52%_26%)] disabled:cursor-not-allowed disabled:opacity-50 disabled:shadow-[0_6px_0_hsl(150_52%_26%)] disabled:hover:translate-y-0"
-    >
-      {children}
-    </button>
-  );
-}
-
 /** A small back affordance (>=44px tap area), exported for reuse by signup. */
 export function BackLink({ onClick }: { onClick: () => void }) {
   return (
@@ -124,12 +107,22 @@ export interface FounderProfileProps {
   handle: string;
   /** Called on every keystroke with the new first name. */
   onFirstNameChange: (value: string) => void;
-  /** Advance to screen 3. Only fired once a non-empty first name is entered. */
+  /** Advance to screen 3. Only fired once a non-empty first name is entered.
+   *  With `claim` wiring present the container claims first and advances
+   *  itself on success — this screen just reports the tap. */
   onNext: () => void;
+  /** Real claim wiring (Unit 5). Absent → original static preview. */
+  claim?: FounderProfileClaim;
 }
 
 /** Screen 2 · Founder profile. */
-export function FounderProfile({ firstName, handle, onFirstNameChange, onNext }: FounderProfileProps) {
+export function FounderProfile({
+  firstName,
+  handle,
+  onFirstNameChange,
+  onNext,
+  claim,
+}: FounderProfileProps) {
   const displayHandle = deriveHandle(handle, firstName);
   const canClaim = firstName.trim().length > 0;
 
@@ -153,19 +146,25 @@ export function FounderProfile({ firstName, handle, onFirstNameChange, onNext }:
         />
       </label>
 
-      <div className="mt-4 flex items-center gap-2 rounded-xl border-2 border-dashed border-[hsl(25_34%_20%/0.15)] bg-white px-3.5 py-3">
-        <span aria-hidden className="text-sm">
-          🌐
-        </span>
-        <p className="min-w-0 truncate font-mono text-[12.5px] text-[hsl(25_20%_38%)]">
-          firstprofit.school/<b className="text-[hsl(25_34%_20%)]">{displayHandle}</b>
-        </p>
-        <span className="ml-auto shrink-0 font-mono text-[10px] uppercase tracking-[0.08em] text-verified">
-          available
-        </span>
-      </div>
+      {claim ? (
+        <ClaimBlock claim={claim} />
+      ) : (
+        <div className="mt-4 flex items-center gap-2 rounded-xl border-2 border-dashed border-[hsl(25_34%_20%/0.15)] bg-white px-3.5 py-3">
+          <span aria-hidden className="text-sm">
+            🌐
+          </span>
+          <p className="min-w-0 truncate font-mono text-[12.5px] text-[hsl(25_20%_38%)]">
+            firstprofit.school/<b className="text-[hsl(25_34%_20%)]">{displayHandle}</b>
+          </p>
+          <span className="ml-auto shrink-0 font-mono text-[10px] uppercase tracking-[0.08em] text-verified">
+            available
+          </span>
+        </div>
+      )}
 
-      <GreenCta onClick={() => canClaim && onNext()}>Claim my page →</GreenCta>
+      <GreenCta onClick={() => canClaim && !claim?.claiming && onNext()} disabled={claim?.claiming}>
+        {claim?.claiming ? "Claiming…" : claim?.claimed ? "Keep going →" : "Claim my page →"}
+      </GreenCta>
     </>
   );
 }
@@ -179,16 +178,26 @@ export interface WebsiteRevealProps {
   onNext: () => void;
   /** Return to screen 2. */
   onBack: () => void;
+  /**
+   * Real publish state (Unit 5; R19). Absent → the original static "● live"
+   * chip (flag off / signup preview), unchanged. "going-live" renders the
+   * honest not-live-yet framing: the URL stays displayed but the chip reads
+   * "going live…" and there is NO share encouragement (the page is not
+   * fetchable until the completion publish lands). "live" adds the share
+   * line. Either real state also shows the R20 headline soft nudge.
+   */
+  liveState?: "live" | "going-live";
 }
 
 /** Screen 3 · Website reveal (typed headline). */
-export function WebsiteReveal({ firstName, handle, onNext, onBack }: WebsiteRevealProps) {
+export function WebsiteReveal({ firstName, handle, onNext, onBack, liveState }: WebsiteRevealProps) {
   const reduceMotion = useReducedMotion();
   const name = firstName.trim() || "Founder";
   const displayHandle = deriveHandle(handle, name);
   // Age is not part of the Slice A profile, so the age clause is omitted
-  // (truthful, no invented field). The rest matches the prototype verbatim.
-  const sentence = `Hi, I'm ${name}. This is the future site of my first $1,000 profit company.`;
+  // (truthful, no invented field). The sentence is the shared default site
+  // headline (src/lib/siteCopy.ts) — the public page renders the same one.
+  const sentence = defaultSiteHeadline(name);
   const [typed, setTyped] = useState("");
 
   useEffect(() => {
@@ -223,8 +232,12 @@ export function WebsiteReveal({ firstName, handle, onNext, onBack }: WebsiteReve
           <span className="ml-2 min-w-0 truncate rounded-md bg-white px-2.5 py-0.5 font-mono text-[10.5px] text-[hsl(25_20%_38%)]">
             firstprofit.school/{displayHandle}
           </span>
-          <span className="ml-auto shrink-0 font-mono text-[9.5px] uppercase tracking-[0.08em] text-verified">
-            ● live
+          <span
+            className={`ml-auto shrink-0 font-mono text-[9.5px] uppercase tracking-[0.08em] ${
+              liveState === "going-live" ? "text-[hsl(41_74%_38%)]" : "text-verified"
+            }`}
+          >
+            {liveState === "going-live" ? "going live…" : "● live"}
           </span>
         </div>
         <div className="px-6 py-10 text-center">
@@ -238,6 +251,22 @@ export function WebsiteReveal({ firstName, handle, onNext, onBack }: WebsiteReve
           </p>
         </div>
       </div>
+
+      {liveState === "going-live" ? (
+        <p className="mt-3 rounded-xl bg-[hsl(41_88%_52%/0.12)] px-3.5 py-2.5 text-[12.5px] leading-[1.5] text-[hsl(25_20%_38%)]">
+          Your page is going live. In a minute or two it will be real at that link.
+        </p>
+      ) : null}
+      {liveState === "live" ? (
+        <p className="mt-3 rounded-xl bg-[hsl(150_52%_40%/0.1)] px-3.5 py-2.5 text-[12.5px] leading-[1.5] text-[hsl(25_20%_38%)]">
+          It's real. Anyone you send that link to can see your page.
+        </p>
+      ) : null}
+      {liveState ? (
+        <p className="mt-2 text-[12.5px] leading-[1.5] text-[hsl(25_20%_38%)]">
+          Tip: write your own headline in your Site room, so your page sounds like you.
+        </p>
+      ) : null}
 
       <GreenCta onClick={onNext}>My money booth next →</GreenCta>
       <BackLink onClick={onBack} />

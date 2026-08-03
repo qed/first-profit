@@ -7,7 +7,7 @@
  *
  * Unit 8: all five phase cards are REAL — unlock state from the phase engine
  * (isPhaseUnlocked, per the ACTIVE idea; origin IA: the Path shows the active
- * idea, the switcher chip reaches the rest), criterion pips/done from
+ * idea, the GlobalNav's idea chip reaches the rest), criterion pips/done from
  * isCriterionDone, and tapping an unlocked phase opens its criterion floor.
  * The Grow card carries the promotion affordance while it is locked-but-
  * promotable (an idea finished Validate and no business exists yet).
@@ -29,21 +29,11 @@ import {
 import { phaseById, type PhaseId } from "../data/path";
 import { ideaProgressLabel, ideaSummaryName } from "../state/floorSelectors";
 import { CompanyCard, DashedSlot, PhaseCard, ProductCard, ProductEmpty, SectionTitle } from "./PodCardContent";
-import { IdeaSwitcherChip } from "./IdeaSwitcherChip";
 import type { WalkIntent } from "./FactoryFloor";
 
 const GRID = "mt-3 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5";
 
-export function PhasesFloor({
-  onWalk,
-  onOpenSwitcher,
-  overlayOpen,
-}: {
-  onWalk: (intent: WalkIntent) => void;
-  onOpenSwitcher: () => void;
-  /** Factory's lifted anyOverlayOpen (unit review FIX 5) — hides the chip. */
-  overlayOpen?: boolean;
-}) {
+export function PhasesFloor({ onWalk }: { onWalk: (intent: WalkIntent) => void }) {
   const game = useGame();
   const { profile, ideas, activeIdea, isCriterionDone } = game;
   const handle = profile.handle || "you";
@@ -57,10 +47,8 @@ export function PhasesFloor({
   return (
     <div className="flex flex-col gap-5">
       <section>
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          <SectionTitle>The Path</SectionTitle>
-          <IdeaSwitcherChip onOpen={onOpenSwitcher} hidden={overlayOpen} />
-        </div>
+        {/* Idea identity lives in the GlobalNav's chip (the one bar), not here. */}
+        <SectionTitle>The Path</SectionTitle>
         <div className={GRID}>
           {PHASE_ORDER.map((phaseId: PhaseId) => {
             const ph = phaseById(phaseId);

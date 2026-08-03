@@ -98,3 +98,25 @@ describe("Onboarding screens", () => {
     }
   });
 });
+
+/**
+ * Unit 5 flag-off proof: with VITE_ENABLE_PUBLIC_SITE off (the default test
+ * env, and this file's provider stub carries NO site slice at all), the claim
+ * UI never mounts and onboarding renders exactly the pre-Unit-5 markup. The
+ * flag-ON behavior lives in OnboardingClaim.test.tsx.
+ */
+describe("public-site flag off: no claim UI", () => {
+  it("screen 2 renders the static preview, no handle input, no live region", () => {
+    renderAt(2);
+    expect(screen.queryByLabelText("Page name")).toBeNull();
+    expect(screen.queryByRole("status")).toBeNull();
+    expect(screen.getByText("available")).toBeTruthy();
+  });
+
+  it("screen 3 keeps the static live chip with no going-live copy and no nudge", () => {
+    renderAt(3);
+    expect(screen.getByText("● live")).toBeTruthy();
+    expect(document.body.textContent).not.toContain("going live");
+    expect(document.body.textContent).not.toContain("Tip: write your own headline");
+  });
+});

@@ -13,6 +13,8 @@ import {
   fromSaveDoc,
   grossSalesSumCents,
   ideasEligibleFor,
+  ideasEnterableFor,
+  ideasReviewableFor,
   initialState,
   isCriterionDone,
   isIdeaEligibleFor,
@@ -670,6 +672,33 @@ describe("idea eligibility (room click)", () => {
     expect(isIdeaEligibleFor(s, 0, "1.2")).toBe(false);
     s = completeCriterion(s, 0, "1.1");
     expect(isIdeaEligibleFor(s, 0, "1.2")).toBe(true);
+  });
+
+  it("a DONE criterion stays reviewable (unlocked+done), and enterable falls back to it", () => {
+    let s = withOneIdea();
+    // In progress: enterable == eligible, reviewable empty.
+    expect(ideasReviewableFor(s, "1.1")).toEqual([]);
+    expect(ideasEnterableFor(s, "1.1")).toEqual([0]);
+    s = completeCriterion(s, 0, "1.1");
+    // Done: eligible empty, but the room stays enterable in review mode.
+    expect(ideasEligibleFor(s, "1.1")).toEqual([]);
+    expect(ideasReviewableFor(s, "1.1")).toEqual([0]);
+    expect(ideasEnterableFor(s, "1.1")).toEqual([0]);
+    // A LOCKED criterion is neither (never reviewable ahead of unlock).
+    expect(ideasReviewableFor(s, "1.3")).toEqual([]);
+  });
+
+  it("enterable keeps in-progress priority over done ideas (no picker regression)", () => {
+    let s = apply(
+      initialState(),
+      { type: "CREATE_IDEA" },
+      { type: "CLOSE_RUNNER" },
+      { type: "CREATE_IDEA" },
+      { type: "CLOSE_RUNNER" },
+    );
+    s = completeCriterion(s, 0, "1.1");
+    // Idea 1 still mid-1.1 → it alone is enterable, exactly the old behavior.
+    expect(ideasEnterableFor(s, "1.1")).toEqual([1]);
   });
 });
 
@@ -2339,5 +2368,94 @@ describe("UNION_REMOTE (FIX 1: the rebased doc feeds back into live state)", () 
     const viaReducer = reducer(tabA, { type: "UNION_REMOTE", doc: toSaveDoc(tabB) });
     const viaUnion = unionCompletionMaps(toSaveDoc(tabA), toSaveDoc(tabB));
     expect(toSaveDoc(viaReducer)).toEqual(viaUnion);
+  });
+});
+
+// ── Site slice (real-public-site plan, Unit 4) ───────────────────────────────
+describe("site slice (SET_SITE / RESET_SESSION / save-doc exclusion)", () => {
+  it("initial state is the honest unknown: no handle, status 'unknown', no projection", () => {
+    expect(initialState().site).toEqual({ handle: null, status: "unknown", projected: null });
+  });
+
+  it("SET_SITE adopts the read-back (every server status value round-trips)", () => {
+    let s = initialState();
+    for (const status of ["none", "claimed", "published", "offline", "unknown"] as const) {
+      const handle = status === "none" || status === "unknown" ? null : "cedric";
+      s = reducer(s, { type: "SET_SITE", handle, status });
+      expect(s.site).toEqual({ handle, status, projected: null });
+    }
+  });
+
+  it("SET_SITE projected semantics (Unit 7): explicit object/null ADOPTS, absent PRESERVES (claim/publish must not clobber the last-known projection)", () => {
+    // The refresh path adopts a projection.
+    let s = reducer(initialState(), {
+      type: "SET_SITE",
+      handle: "cedric",
+      status: "claimed",
+      projected: { headline: "", oneLiner: "I walk dogs" },
+    });
+    expect(s.site.projected).toEqual({ headline: "", oneLiner: "I walk dogs" });
+    // A claim/publish-style dispatch (no projected field) preserves it.
+    s = reducer(s, { type: "SET_SITE", handle: "cedric", status: "published" });
+    expect(s.site).toEqual({
+      handle: "cedric",
+      status: "published",
+      projected: { headline: "", oneLiner: "I walk dogs" },
+    });
+    // An explicit null clears it (failed refresh / no row).
+    s = reducer(s, { type: "SET_SITE", handle: null, status: "unknown", projected: null });
+    expect(s.site.projected).toBeNull();
+  });
+
+  it("RESET_SESSION round-trip: written in session 1, ABSENT after logout, repopulated by session 2's read-back", () => {
+    // Session 1: hydrate's read-back populates the slice (projection included).
+    let s = reducer(initialState(), {
+      type: "SET_SITE",
+      handle: "cedric",
+      status: "published",
+      projected: { headline: "Dog walking", oneLiner: "" },
+    });
+    expect(s.site).toEqual({
+      handle: "cedric",
+      status: "published",
+      projected: { headline: "Dog walking", oneLiner: "" },
+    });
+
+    // Logout (shared-device learning): the slice must not survive the boundary
+    // — the next child must never see the previous child's handle, a false
+    // "published", or the previous child's projected content.
+    s = reducer(s, { type: "RESET_SESSION" });
+    expect(s.site).toEqual({ handle: null, status: "unknown", projected: null });
+
+    // Session 2: the next hydrate's read-back repopulates it fresh.
+    s = reducer(s, { type: "SET_SITE", handle: "sibling", status: "claimed" });
+    expect(s.site).toEqual({ handle: "sibling", status: "claimed", projected: null });
+  });
+
+  it("the site slice is NOT in the save doc (no docVersion change, no new field)", () => {
+    const s = reducer(initialState(), {
+      type: "SET_SITE",
+      handle: "cedric",
+      status: "published",
+    });
+    const doc = toSaveDoc(s);
+    expect("site" in doc).toBe(false);
+    expect(doc.docVersion).toBe(DOC_VERSION); // no version bump for the slice
+    // And a doc that (maliciously/accidentally) carries a `site` key is not
+    // adopted into the slice by the load path: fromSaveDoc strips it.
+    const loaded = fromSaveDoc({ ...doc, site: { handle: "evil", status: "published" } });
+    expect(loaded.ok).toBe(true);
+    if (loaded.ok) expect("site" in loaded.doc).toBe(false);
+  });
+
+  it("HYDRATE neither invents nor clears the slice — the registry read-back owns it", () => {
+    // Login order is RESET_SESSION → hydrate; the read-back may land before OR
+    // after HYDRATE. A read-back that landed first must survive the hydrate.
+    let s = reducer(initialState(), { type: "SET_SITE", handle: "cedric", status: "claimed" });
+    s = reducer(s, { type: "HYDRATE", doc: toSaveDoc(withOneIdea()) });
+    expect(s.site).toEqual({ handle: "cedric", status: "claimed", projected: null });
+    // And a fresh state hydrating stays at the honest unknown (never a fake).
+    const fresh = reducer(initialState(), { type: "HYDRATE", doc: toSaveDoc(withOneIdea()) });
+    expect(fresh.site).toEqual({ handle: null, status: "unknown", projected: null });
   });
 });

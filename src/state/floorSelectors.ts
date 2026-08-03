@@ -10,9 +10,8 @@ import {
   PHASE_ORDER,
   activeBusinessExists,
   criterionIdsForPhase,
-  isCriterionDone,
+  ideasEnterableFor,
   isPhaseComplete,
-  isStepUnlocked,
   isTaskDone,
   nextUpFor,
   phaseOfCriterion,
@@ -31,9 +30,21 @@ export function ideaOneLiner(state: GameState, ideaIndex: number): string {
   return (idea.fields.oneLiner ?? "").trim();
 }
 
-/** Display name for an idea summary card: truncated one-liner or "Not named yet". */
+/** The raw product name for an idea (field key `productName`, criterion 1.1), trimmed. */
+export function ideaProductName(state: GameState, ideaIndex: number): string {
+  const idea = state.ideas[ideaIndex];
+  if (!idea) return "";
+  return (idea.fields.productName ?? "").trim();
+}
+
+/**
+ * Display name for an idea summary card: the PRODUCT NAME first and foremost
+ * (the `productName` field the learner authors in criterion 1.1), falling back
+ * to the one-liner for ideas that haven't named a product yet, else the
+ * "Not named yet" placeholder. Truncated for card handoff.
+ */
 export function ideaSummaryName(state: GameState, ideaIndex: number): string {
-  const text = ideaOneLiner(state, ideaIndex);
+  const text = ideaProductName(state, ideaIndex) || ideaOneLiner(state, ideaIndex);
   if (!text) return "Not named yet";
   return text.length > IDEA_NAME_MAX ? `${text.slice(0, IDEA_NAME_MAX)}…` : text;
 }
@@ -209,12 +220,10 @@ export function roomEntryFor(
   built: ReadonlySet<string> = BUILT_CRITERIA,
 ): RoomEntry {
   if (!built.has(stepId)) return { action: "noop" };
-  const eligible: number[] = [];
-  for (let i = 0; i < state.ideas.length; i++) {
-    if (isStepUnlocked(state, i, stepId) && !isCriterionDone(state, i, stepId)) {
-      eligible.push(i);
-    }
-  }
+  // In-progress ideas keep exact pre-existing priority; when none, DONE ideas
+  // re-enter in review mode (task 1, idempotent completion) so authored fields
+  // like 1.1's productName/oneLiner are never orphaned behind a finished room.
+  const eligible = ideasEnterableFor(state, stepId);
   if (eligible.length === 0) return { action: "noop" };
   if (eligible.length === 1) {
     const ideaIndex = eligible[0];

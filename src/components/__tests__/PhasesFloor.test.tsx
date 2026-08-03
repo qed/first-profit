@@ -2,8 +2,8 @@
 /**
  * The Path overview (Unit 8): the phase 2-5 cards are REAL — unlock/done/pips
  * from the engine for the ACTIVE idea, phase-floor entry intents, the locked
- * dashed treatment with gate copy, the Grow promotion affordance, and the
- * idea-switcher chip near the Path header.
+ * dashed treatment with gate copy, and the Grow promotion affordance. Idea
+ * identity lives in the GlobalNav's chip now, not on the floor.
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
 import React from "react";
@@ -25,13 +25,12 @@ const Ctx = (GameContext as unknown as { __ctx: React.Context<unknown> }).__ctx;
 
 function mount(seed: GameState) {
   const walks: WalkIntent[] = [];
-  const opened: string[] = [];
   const utils = render(
     <FloorHarness seed={seed} Ctx={Ctx}>
-      <PhasesFloor onWalk={(i) => walks.push(i)} onOpenSwitcher={() => opened.push("switcher")} />
+      <PhasesFloor onWalk={(i) => walks.push(i)} />
     </FloorHarness>,
   );
-  return { walks, opened, ...utils };
+  return { walks, ...utils };
 }
 
 afterEach(cleanup);
@@ -86,14 +85,8 @@ describe("PhasesFloor — real phase cards (Unit 8)", () => {
     expect(screen.getByText("Your business is a different idea")).toBeTruthy();
   });
 
-  it("shows the idea-switcher chip by the Path header and routes its tap up", () => {
-    const { opened } = mount(withIdeas(2));
-    fireEvent.click(screen.getByLabelText("Switch idea"));
-    expect(opened).toEqual(["switcher"]);
-  });
-
-  it("hides the switcher chip with zero ideas (nothing to switch)", () => {
-    mount(withIdeas(0));
+  it("renders no idea-switcher chip (idea identity lives in the GlobalNav)", () => {
+    mount(withIdeas(2));
     expect(screen.queryByLabelText("Switch idea")).toBeNull();
   });
 

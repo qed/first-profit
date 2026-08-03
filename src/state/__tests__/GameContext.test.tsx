@@ -18,25 +18,43 @@ const authMock = {
   logout: vi.fn(),
   getCurrentUserId: vi.fn(),
   submitBirthYear: vi.fn(),
+  fetchSiteStatus: vi.fn(),
+  claimHandle: vi.fn(),
+  publishSite: vi.fn(),
 };
 vi.mock("../../lib/auth", () => ({
   loginChild: (...a: unknown[]) => authMock.loginChild(...a),
   logout: (...a: unknown[]) => authMock.logout(...a),
   getCurrentUserId: (...a: unknown[]) => authMock.getCurrentUserId(...a),
   submitBirthYear: (...a: unknown[]) => authMock.submitBirthYear(...a),
+  // Public-site client (Unit 4): hydrate fires fetchSiteStatus fire-and-forget,
+  // so it must exist here; the flat failure keeps the slice at 'unknown'.
+  fetchSiteStatus: (...a: unknown[]) => authMock.fetchSiteStatus(...a),
+  claimHandle: (...a: unknown[]) => authMock.claimHandle(...a),
+  publishSite: (...a: unknown[]) => authMock.publishSite(...a),
 }));
 
+// In-memory draft store so the profile-cache round-trip (login writes,
+// restored-session hydrate reads) is exercised for real through the mock.
+const draftStore = new Map<string, unknown>();
 const draftMock = {
   wipeAllForUser: vi.fn(),
   wipeAllFpKeys: vi.fn(),
   getLastUserId: vi.fn(),
   setLastUserId: vi.fn(),
+  getDraft: vi.fn((userId: string, name: string) => draftStore.get(`${userId}:${name}`)),
+  setDraft: vi.fn((userId: string, name: string, value: unknown) => {
+    draftStore.set(`${userId}:${name}`, value);
+    return true;
+  }),
 };
 vi.mock("../../lib/draftCache", () => ({
   wipeAllForUser: (...a: unknown[]) => draftMock.wipeAllForUser(...a),
   wipeAllFpKeys: (...a: unknown[]) => draftMock.wipeAllFpKeys(...a),
   getLastUserId: (...a: unknown[]) => draftMock.getLastUserId(...a),
   setLastUserId: (...a: unknown[]) => draftMock.setLastUserId(...a),
+  getDraft: (...a: unknown[]) => draftMock.getDraft(...(a as [string, string])),
+  setDraft: (...a: unknown[]) => draftMock.setDraft(...(a as [string, string, unknown])),
 }));
 
 interface FakeEngine {
@@ -112,10 +130,16 @@ beforeEach(() => {
   authMock.loginChild.mockReset();
   authMock.logout.mockReset().mockResolvedValue("explicit");
   authMock.getCurrentUserId.mockReset().mockResolvedValue(null);
+  authMock.fetchSiteStatus.mockReset().mockResolvedValue({ ok: false });
+  authMock.claimHandle.mockReset().mockResolvedValue({ ok: false, reason: "outage" });
+  authMock.publishSite.mockReset().mockResolvedValue({ ok: false, reason: "outage" });
   draftMock.wipeAllForUser.mockReset();
   draftMock.wipeAllFpKeys.mockReset();
   draftMock.getLastUserId.mockReset().mockReturnValue(null);
   draftMock.setLastUserId.mockReset();
+  draftStore.clear();
+  draftMock.getDraft.mockClear();
+  draftMock.setDraft.mockClear();
   syncMock.resolveProfileId.mockReset().mockResolvedValue("profile-1");
   syncMock.loadSave.mockReset().mockResolvedValue({ doc: null, revision: 0 });
   syncMock.loadLedger.mockReset().mockResolvedValue([]);
@@ -197,6 +221,39 @@ describe("GameProvider boot", () => {
     syncMock.loadSave.mockRejectedValue(new Error("load blew up"));
     renderProvider();
     await waitFor(() => expect(api?.stage).toBe("onboard"));
+  });
+
+  it("restored session re-adopts the cached roster profile (no 'Founder' after reload)", async () => {
+    // Login is the only roster-patch writer, so without the cache a reload
+    // degraded the founder chip/avatar label to the "Founder" fallback.
+    const { setDraft } = await import("../../lib/draftCache");
+    setDraft("user-A", "profileCache", { firstName: "Cedric", handle: "cedric", grade: 6 });
+    authMock.getCurrentUserId.mockResolvedValue("user-A");
+    syncMock.loadSave.mockResolvedValue({
+      doc: {
+        docVersion: 1,
+        ideas: [{ fields: {}, done: {} }],
+        activeIdea: 0,
+        siteHeadline: "",
+        onboardingComplete: true,
+      },
+      revision: 3,
+    });
+    renderProvider();
+    await waitFor(() => expect(api?.stage).toBe("app"));
+    expect(api?.profile.firstName).toBe("Cedric");
+    expect(api?.profile.handle).toBe("cedric");
+    expect(api?.profile.grade).toBe(6);
+  });
+
+  it("a corrupt or missing profile cache is harmless on restore (fallback chip only)", async () => {
+    const { setDraft } = await import("../../lib/draftCache");
+    setDraft("user-A", "profileCache", { firstName: 42, handle: null });
+    authMock.getCurrentUserId.mockResolvedValue("user-A");
+    syncMock.loadSave.mockResolvedValue({ doc: null, revision: 0 });
+    renderProvider();
+    await waitFor(() => expect(api?.stage).toBe("onboard"));
+    expect(api?.profile.firstName).toBe("");
   });
 
   it("loads existing fp_ledger rows into state and does NOT re-insert them", async () => {
