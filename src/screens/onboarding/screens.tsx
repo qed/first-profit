@@ -215,11 +215,6 @@ export function WebsiteReveal({ firstName, handle, onNext, onBack }: WebsiteReve
       <h2 className="mt-2 font-display text-[30px] font-black leading-[1.1] text-[hsl(25_34%_20%)]">
         {name}, you have a website.
       </h2>
-      <p className="mt-2 text-sm leading-[1.6] text-[hsl(25_20%_38%)]">
-        It is live right now, and it says exactly one true thing. You will fill in the rest as the
-        business becomes real.
-      </p>
-
       <div className="mt-5 overflow-hidden rounded-2xl border-2 border-[hsl(25_34%_20%/0.15)] bg-white">
         <div className="flex items-center gap-1.5 border-b-2 border-[hsl(25_34%_20%/0.1)] bg-[hsl(25_34%_20%/0.05)] px-3 py-2.5">
           <span className="h-2.5 w-2.5 rounded-full bg-sell" />
