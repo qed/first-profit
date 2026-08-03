@@ -45,8 +45,10 @@ import {
   loginChild,
   logout as authLogout,
   getCurrentUserId,
+  submitBirthYear,
   type ChildProfile,
 } from "../lib/auth";
+import { bandForFeedback, displayBand, gradeFromBirthYear, type Band } from "../lib/band";
 import { wipeAllForUser, wipeAllFpKeys, getLastUserId, setLastUserId } from "../lib/draftCache";
 import {
   resolveProfileId,
@@ -101,11 +103,39 @@ export interface GameApi extends GameState {
 
   /**
    * Submit a "Stuck? Tell us" report for a task. Empty body allowed (a tap is
-   * signal). `band` defaults to "unknown" — the Unit 3 grade plumbing passes a
-   * real band here once it exists; until then "unknown" keeps the owner's band
-   * analysis unbiased.
+   * signal). When `band` is omitted it resolves from the session's grade via
+   * bandForFeedback — the real band when the grade is known, the honest
+   * "unknown" when it is not (never the defaulted display band, which would
+   * bias the owner's band analysis).
    */
   submitFeedback: (taskId: string, body: string, band?: FeedbackBand) => Promise<FeedbackSubmitOutcome>;
+
+  // ── Grade / band (Unit 3; R9/R10) ────────────────────────────────────────
+  /** The session's grade (roster-derived, adopted at login / ask-once), or null. */
+  grade: number | null;
+  /** The band task text renders in: resolved from grade, g6_8 while unknown. */
+  band: Band;
+  /**
+   * True once the ask-once card was answered OR skipped THIS session.
+   * IN-MEMORY ONLY, on purpose: a skip must not reappear this session but MUST
+   * reappear next session while the roster grade is still null (the plan's
+   * ask-once semantics), and an ANSWER needs no local marker at all — the next
+   * login returns the roster grade, so the `grade === null` gate never fires
+   * again. Persisting this flag (draftCache) would wrongly silence the ask
+   * forever after a single skip.
+   */
+  gradeAskDone: boolean;
+  /** Skip the ask for this session (default band applies; see gradeAskDone). */
+  skipGradeAsk: () => void;
+  /**
+   * Answer the ask-once birth-year question. Posts the write-back; on success
+   * adopts the server's derived grade. On a generic failure it still adopts
+   * the CLIENT-derived grade for this session (same school-year arithmetic,
+   * band never gates play) and silently retries the write-back exactly ONCE on
+   * the next window focus. Makes ONE network attempt per call — the route is
+   * rate limited, so any further retry is the caller's explicit choice.
+   */
+  submitGradeAnswer: (birthYear: number) => Promise<{ ok: boolean }>;
 }
 
 const GameContext = createContext<GameApi | null>(null);
@@ -135,6 +165,18 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
   // Live mirror of state for the framework-agnostic sync engine to read on demand.
   const stateRef = useRef(state);
   stateRef.current = state;
+
+  // ── Grade / band plumbing (Unit 3; R9/R10) ────────────────────────────────
+  // Ask-once bookkeeping: IN-MEMORY only, reset at every session boundary (see
+  // the GameApi.gradeAskDone doc for why it is deliberately not persisted).
+  const [gradeAskDone, setGradeAskDone] = useState(false);
+  // Session generation for the grade's async writers (the async-writer-
+  // generation-token learning): login and logout bump it; any grade write that
+  // awaited across a session change discards its result instead of stamping a
+  // stale answer onto the next child's session.
+  const sessionGenRef = useRef(0);
+  // The one-shot silent write-back retry armed by a failed ask-once answer.
+  const gradeRetryRef = useRef<{ birthYear: number; gen: number } | null>(null);
 
   // ── Sync engine plumbing ──────────────────────────────────────────────────
   // The engine is created per logged-in session (its outbox is user-scoped). The
@@ -307,6 +349,11 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
       // Clear any resident per-account state up front so no path can advance the
       // stage with a previous child's ideas/ledger resident on a shared device.
       dispatch({ type: "RESET_SESSION" });
+      // New session boundary: invalidate any in-flight grade writer, disarm the
+      // one-shot write-back retry, and re-arm the ask-once card.
+      sessionGenRef.current += 1;
+      gradeRetryRef.current = null;
+      setGradeAskDone(false);
       // A new session may be a different child → a different profile. Drop the
       // cached profile id so resolveProfileId re-reads under the new session.
       resetProfileIdCache();
@@ -339,7 +386,10 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
         const profile: ChildProfile = result.profile;
         dispatch({
           type: "SET_PROFILE",
-          patch: { firstName: profile.firstName, handle: profile.handle },
+          // Adopt the roster's read-time grade alongside the profile (Unit 3;
+          // R9): a number means the band resolves immediately and the ask-once
+          // card never shows; null arms the ask.
+          patch: { firstName: profile.firstName, handle: profile.handle, grade: result.grade ?? null },
         });
 
         // Resolve the profile (RLS "own row"), load the save, HYDRATE or route to
@@ -369,6 +419,12 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
       // session is revoked, so no post-logout write races out.
       stopEngine();
       resetProfileIdCache();
+      // Session boundary: invalidate in-flight grade writers, disarm the
+      // one-shot retry, and reset the ask-once flag (in-memory-state-survives-
+      // logout learning — grade/ask state must never outlive the session).
+      sessionGenRef.current += 1;
+      gradeRetryRef.current = null;
+      setGradeAskDone(false);
       await authLogout(scope);
       if (scope === "explicit" && userId) {
         // Explicit logout purges this user's drafts + outbox. Idle logout does
@@ -378,7 +434,10 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
       // Clear resident ideas/ledger/UI on BOTH scopes so a shared device never
       // carries one child's business/financial state past logout.
       dispatch({ type: "RESET_SESSION" });
-      dispatch({ type: "SET_PROFILE", patch: { firstName: "", handle: "", siteHeadline: "" } });
+      dispatch({
+        type: "SET_PROFILE",
+        patch: { firstName: "", handle: "", siteHeadline: "", grade: null },
+      });
       dispatch({ type: "SET_STAGE", stage: scope === "explicit" ? "landing" : "login" });
     },
     [stopEngine],
@@ -387,6 +446,66 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
   const logout = useCallback(async () => {
     await runLogout("explicit");
   }, [runLogout]);
+
+  // ── Ask-once grade answer (Unit 3; R9/R10) ────────────────────────────────
+  const skipGradeAsk = useCallback(() => {
+    // Skip = the display default band for this session. In-memory flag only:
+    // the ask reappears next session while the roster grade stays null.
+    setGradeAskDone(true);
+  }, []);
+
+  const submitGradeAnswer = useCallback(async (birthYear: number): Promise<{ ok: boolean }> => {
+    // Capture the session generation BEFORE the await (async-writer learning):
+    // if login/logout changes the session while the write is in flight, the
+    // result is discarded — never adopted into another child's session.
+    const gen = sessionGenRef.current;
+    const result = await submitBirthYear(birthYear);
+    if (gen !== sessionGenRef.current) return { ok: false };
+
+    setGradeAskDone(true);
+    if (result.ok) {
+      dispatch({ type: "SET_PROFILE", patch: { grade: result.grade } });
+      return { ok: true };
+    }
+    // Generic failure (offline, rate limited, expired token): apply the band
+    // LOCALLY for this session from the same school-year arithmetic the server
+    // uses — the kid's experience never depends on the write landing — and arm
+    // ONE silent write-back retry for the next window focus. No retry loops:
+    // the route is rate limited (5 per 15 min per user).
+    dispatch({ type: "SET_PROFILE", patch: { grade: gradeFromBirthYear(birthYear, new Date()) } });
+    gradeRetryRef.current = { birthYear, gen };
+    return { ok: false };
+  }, []);
+
+  // The one-shot silent write-back retry: on the next return to a visible /
+  // focused window, re-post a failed ask-once answer exactly once. The pending
+  // entry is consumed BEFORE the attempt (never re-armed → never a retry
+  // storm against the rate limiter), and both the attempt and the adoption are
+  // generation-guarded so a logout/login in between discards it.
+  useEffect(() => {
+    const retry = () => {
+      const pending = gradeRetryRef.current;
+      if (!pending) return;
+      gradeRetryRef.current = null; // consumed: this retry happens ONCE
+      if (pending.gen !== sessionGenRef.current) return;
+      void submitBirthYear(pending.birthYear).then((result) => {
+        if (result.ok && pending.gen === sessionGenRef.current) {
+          dispatch({ type: "SET_PROFILE", patch: { grade: result.grade } });
+        }
+        // A second failure is accepted silently: the local band already
+        // applies, and the roster ask simply reappears next session.
+      });
+    };
+    const onVisibility = () => {
+      if (document.visibilityState === "visible") retry();
+    };
+    window.addEventListener("focus", retry);
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => {
+      window.removeEventListener("focus", retry);
+      document.removeEventListener("visibilitychange", onVisibility);
+    };
+  }, []);
 
   // ── "Stuck? Tell us" feedback submission ─────────────────────────────────
   // Date.now()/crypto.randomUUID stay at this caller boundary (gameCore and
@@ -397,8 +516,13 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
     async (
       taskId: string,
       body: string,
-      band: FeedbackBand = "unknown",
+      band?: FeedbackBand,
     ): Promise<FeedbackSubmitOutcome> => {
+      // Band seam (Unit 3): when the caller does not pass one, stamp the
+      // session's resolved band — bandForFeedback answers the real band when
+      // the grade is known and the honest "unknown" when it is not (NEVER the
+      // defaulted display band; that would bias the owner's band analysis).
+      const stampedBand: FeedbackBand = band ?? bandForFeedback(stateRef.current.profile.grade);
       const userId = getLastUserId();
       if (!userId) return "dropped";
       // UTC day via the shared derivation (mirrors the DB trigger's date_trunc).
@@ -407,7 +531,7 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
       const row = {
         id: crypto.randomUUID(),
         taskId,
-        band,
+        band: stampedBand,
         body: body.slice(0, FEEDBACK_BODY_MAX),
       };
       // Validate BEFORE the day-counter bump so a row that would be refused at
@@ -480,8 +604,13 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
       login,
       logout,
       submitFeedback,
+      grade: state.profile.grade,
+      band: displayBand(state.profile.grade),
+      gradeAskDone,
+      skipGradeAsk,
+      submitGradeAnswer,
     }),
-    [state, syncStatus, login, logout, submitFeedback],
+    [state, syncStatus, login, logout, submitFeedback, gradeAskDone, skipGradeAsk, submitGradeAnswer],
   );
 
   return <GameContext.Provider value={value}>{children}</GameContext.Provider>;

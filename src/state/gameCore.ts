@@ -86,6 +86,15 @@ export interface Profile {
   firstName: string;
   handle: string;
   siteHeadline: string;
+  /**
+   * The child's grade (Unit 3; R9), or null while unknown. ROSTER-DERIVED and
+   * adopted at login from the /api/fp/login response (or from the ask-once
+   * answer), so it is deliberately NOT part of the save doc: persisting a
+   * grade snapshot would let it go stale across school years, while the
+   * roster's read-time derivation never does — every session re-adopts the
+   * current truth. Per-account child data, so RESET_SESSION nulls it.
+   */
+  grade: number | null;
 }
 
 export interface GameState {
@@ -119,7 +128,7 @@ export function initialState(): GameState {
   return {
     stage: "boot",
     ob: 2,
-    profile: { firstName: "", handle: "", siteHeadline: "" },
+    profile: { firstName: "", handle: "", siteHeadline: "", grade: null },
     ideas: [],
     activeIdea: 0,
     ledger: [],
@@ -663,12 +672,15 @@ export function reducer(state: GameState, action: Action): GameState {
     case "RESET_SESSION": {
       // Clear all per-account business/financial + UI state so no previous
       // child's ideas/ledger can leak into the next session on a shared device.
-      // `stage` and `profile` are deliberately left for the caller to set.
+      // `stage` and `profile` are deliberately left for the caller to set —
+      // EXCEPT `grade`, which is per-account child data adopted from the
+      // roster at login and must never survive a session boundary (the next
+      // child's login re-adopts, or the ask-once flow runs).
       const fresh = initialState();
       return {
         ...fresh,
         stage: state.stage,
-        profile: state.profile,
+        profile: { ...state.profile, grade: null },
       };
     }
 

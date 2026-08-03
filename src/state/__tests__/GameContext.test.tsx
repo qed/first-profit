@@ -17,11 +17,13 @@ const authMock = {
   loginChild: vi.fn(),
   logout: vi.fn(),
   getCurrentUserId: vi.fn(),
+  submitBirthYear: vi.fn(),
 };
 vi.mock("../../lib/auth", () => ({
   loginChild: (...a: unknown[]) => authMock.loginChild(...a),
   logout: (...a: unknown[]) => authMock.logout(...a),
   getCurrentUserId: (...a: unknown[]) => authMock.getCurrentUserId(...a),
+  submitBirthYear: (...a: unknown[]) => authMock.submitBirthYear(...a),
 }));
 
 const draftMock = {

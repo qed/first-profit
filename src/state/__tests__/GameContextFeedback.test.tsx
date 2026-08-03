@@ -23,11 +23,13 @@ const authMock = {
   loginChild: vi.fn(),
   logout: vi.fn(),
   getCurrentUserId: vi.fn(),
+  submitBirthYear: vi.fn(),
 };
 vi.mock("../../lib/auth", () => ({
   loginChild: (...a: unknown[]) => authMock.loginChild(...a),
   logout: (...a: unknown[]) => authMock.logout(...a),
   getCurrentUserId: (...a: unknown[]) => authMock.getCurrentUserId(...a),
+  submitBirthYear: (...a: unknown[]) => authMock.submitBirthYear(...a),
 }));
 
 interface FakeEngine {
@@ -102,12 +104,13 @@ async function bootToLanding() {
   await waitFor(() => expect(api?.stage).toBe("landing"));
 }
 
-async function loginAs(userId: string) {
+async function loginAs(userId: string, grade: number | null = null) {
   await bootToLanding();
   authMock.loginChild.mockResolvedValue({
     ok: true,
     userId,
     profile: { firstName: "Kid", handle: "kid" },
+    grade,
   });
   await act(async () => {
     await getApi().login("kid", "supersecret10");
@@ -157,6 +160,25 @@ describe("GameContext.submitFeedback (real feedback plumbing)", () => {
     expect(row.id).toMatch(UUID_RE);
     // The real day counter was bumped for today (FIX 6: after validation).
     expect(feedbackCountForDay("user-A", utcDayToday())).toBe(1);
+  });
+
+  it("UNIT 3 BAND SEAM: a known roster grade stamps the RESOLVED band on the row", async () => {
+    await loginAs("user-A", 4); // grade 4 -> g3_5
+
+    const outcome = await submit("1.1.2", "stuck with a known grade");
+    expect(outcome).toBe("sent");
+    const row = typedEngines[0].notifyFeedback.mock.calls[0][0] as { band: string };
+    // The resolved band, NOT the display default: bandForFeedback(4) = g3_5.
+    expect(row.band).toBe("g3_5");
+  });
+
+  it("UNIT 3 BAND SEAM: an out-of-band grade still stamps the honest 'unknown' (never the display default)", async () => {
+    await loginAs("user-A", 2); // outside 3-12 bands -> bandForFeedback = unknown
+
+    const outcome = await submit("1.1.2", "little sibling on the account");
+    expect(outcome).toBe("sent");
+    const row = typedEngines[0].notifyFeedback.mock.calls[0][0] as { band: string };
+    expect(row.band).toBe("unknown");
   });
 
   it("at the local cap it short-circuits to 'capped' and enqueues NOTHING", async () => {

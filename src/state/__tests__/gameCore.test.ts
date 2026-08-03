@@ -768,7 +768,7 @@ describe("field + misc reducer actions", () => {
     let s = initialState();
     s = reducer(s, { type: "SET_PROFILE", patch: { firstName: "Cedric" } });
     s = reducer(s, { type: "SET_PROFILE", patch: { handle: "cedric" } });
-    expect(s.profile).toEqual({ firstName: "Cedric", handle: "cedric", siteHeadline: "" });
+    expect(s.profile).toEqual({ firstName: "Cedric", handle: "cedric", siteHeadline: "", grade: null });
     s = reducer(s, { type: "SET_STAGE", stage: "app" });
     expect(s.stage).toBe("app");
     s = reducer(s, { type: "SET_OB", ob: 4 });
@@ -1027,13 +1027,44 @@ describe("RESET_SESSION (shared-device state clear)", () => {
     expect(reset.celebrate).toBeNull();
     expect(reset.room).toBeNull();
 
-    // Caller-controlled fields are preserved for the provider to overwrite.
+    // Caller-controlled fields are preserved for the provider to overwrite —
+    // EXCEPT grade, which is per-account child data (asserted separately below).
     expect(reset.stage).toBe("app");
-    expect(reset.profile).toEqual({ firstName: "Ada", handle: "ada", siteHeadline: "" });
+    expect(reset.profile).toEqual({ firstName: "Ada", handle: "ada", siteHeadline: "", grade: null });
 
     // The reducer remains usable afterwards.
     const revived = reducer(reset, { type: "CREATE_IDEA" });
     expect(revived.ideas).toHaveLength(1);
+  });
+});
+
+describe("profile.grade (Unit 3: roster-derived, session-scoped)", () => {
+  it("initialState carries grade null; SET_PROFILE adopts and clears it", () => {
+    let s = initialState();
+    expect(s.profile.grade).toBeNull();
+    s = reducer(s, { type: "SET_PROFILE", patch: { grade: 7 } });
+    expect(s.profile.grade).toBe(7);
+    s = reducer(s, { type: "SET_PROFILE", patch: { grade: null } });
+    expect(s.profile.grade).toBeNull();
+  });
+
+  it("RESET_SESSION nulls grade even though the rest of the profile survives", () => {
+    let s = initialState();
+    s = reducer(s, { type: "SET_PROFILE", patch: { firstName: "Ada", handle: "ada", grade: 4 } });
+    const reset = reducer(s, { type: "RESET_SESSION" });
+    expect(reset.profile.firstName).toBe("Ada");
+    expect(reset.profile.handle).toBe("ada");
+    expect(reset.profile.grade).toBeNull();
+  });
+
+  it("grade is NOT persisted: toSaveDoc has no grade field and HYDRATE leaves it alone", () => {
+    let s = initialState();
+    s = reducer(s, { type: "SET_PROFILE", patch: { grade: 9 } });
+    const doc = toSaveDoc(s);
+    expect(JSON.stringify(doc)).not.toContain("grade");
+    // HYDRATE (a save load) must not touch the session's adopted grade.
+    const hydrated = reducer(s, { type: "HYDRATE", doc });
+    expect(hydrated.profile.grade).toBe(9);
   });
 });
 
