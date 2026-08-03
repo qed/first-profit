@@ -89,14 +89,15 @@ describe("StepRunner", () => {
     expect(document.body.textContent).not.toMatch(/—/);
   });
 
-  it("renders the oneLiner input on task 1 and mirrors keystrokes into the reducer", () => {
+  it("renders the productName + oneLiner inputs on task 1 and mirrors keystrokes into the reducer", () => {
     const s = seedAtLastTaskOf11();
     render(<Harness seed={{ ...s, runnerIndex: 0, ideas: [{ fields: {}, done: {} }] }} />);
-    const input = screen.getByPlaceholderText(/friendship bracelets/i) as HTMLInputElement;
-    fireEvent.change(input, { target: { value: "My idea" } });
-    expect((screen.getByPlaceholderText(/friendship bracelets/i) as HTMLInputElement).value).toBe(
-      "My idea",
-    );
+    const nameInput = screen.getByLabelText("Product name") as HTMLInputElement;
+    const linerInput = screen.getByLabelText("Your one-liner") as HTMLInputElement;
+    fireEvent.change(nameInput, { target: { value: "Bracelets" } });
+    fireEvent.change(linerInput, { target: { value: "My idea" } });
+    expect((screen.getByLabelText("Product name") as HTMLInputElement).value).toBe("Bracelets");
+    expect((screen.getByLabelText("Your one-liner") as HTMLInputElement).value).toBe("My idea");
   });
 
   it("completing the last task swaps the runner for the celebration listing 1.2", () => {
@@ -118,7 +119,7 @@ describe("Celebration after 1.2", () => {
     // 1.1 fully done, 1.2 done except its last task; runner on 1.2's last task.
     const done: Record<string, boolean> = {};
     for (let i = 0; i < 5; i++) done[taskKey("1.1", i)] = true;
-    for (let i = 0; i < 3; i++) done[taskKey("1.2", i)] = true;
+    for (let i = 0; i < 4; i++) done[taskKey("1.2", i)] = true;
     const seed: GameState = {
       ...s,
       stage: "app",
@@ -126,7 +127,7 @@ describe("Celebration after 1.2", () => {
       activeIdea: 0,
       runnerOpen: true,
       runnerStep: "1.2",
-      runnerIndex: 3,
+      runnerIndex: 4,
     };
     render(<Harness seed={seed} />);
     fireEvent.click(screen.getByText("✓ I did it"));

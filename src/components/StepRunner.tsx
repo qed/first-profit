@@ -7,9 +7,10 @@
  * FactoryFloor breakpoint conditional, so a lg/sm crossing never drops it.
  *
  * Draft handling (origin R6 — session expiry must never silently lose input):
- *   - The optional per-criterion input (step.field, e.g. 1.1 `oneLiner`) is saved
- *     PER IDEA through SET_FIELD (the reducer → sync → save doc is the source of
- *     truth on completion) AND mirrored to the account-scoped draft cache on every
+ *   - The optional per-criterion inputs (step.fields, e.g. 1.1's product name +
+ *     one-liner; legacy single step.field still supported) are saved PER IDEA
+ *     through SET_FIELD (the reducer → sync → save doc is the source of truth on
+ *     completion) AND mirrored to the account-scoped draft cache on every
  *     keystroke, so text typed but not yet synced survives an idle logout.
  *   - Hydration order: the idea's saved field first; when that is empty, we seed
  *     the reducer from the account-scoped draft so a re-login restores it.
@@ -58,24 +59,28 @@ export function StepRunner() {
   const total = step ? step.tasks.length : 0;
   const idx = total > 0 ? Math.min(Math.max(runnerIndex, 0), total - 1) : 0;
 
-  // The criterion's single optional input (path.ts field). Shown on the first
-  // task — that is where the artifact (e.g. the one-liner) is authored.
-  const field = step?.field;
-  const fieldKey = field && idx === 0 ? field.key : null;
+  // The criterion's optional authored inputs (path.ts `fields`, or the legacy
+  // single `field`). Shown on the first task — that is where the artifact (e.g.
+  // 1.1's product name + one-liner) is authored.
+  const stepFields = step ? (step.fields ?? (step.field ? [step.field] : [])) : [];
+  const taskFields = idx === 0 ? stepFields : [];
   const idea = ideas[activeIdea];
-  const reducerValue = fieldKey ? idea?.fields[fieldKey] ?? "" : "";
   const userId = getLastUserId();
 
-  // Seed the reducer field from the account-scoped draft when the idea's saved
-  // value is empty (R6 restore-after-expiry). Runs when the field/idea changes;
-  // the `=== ""` guard makes it idempotent, so no dispatch loop.
+  // Seed each reducer field from the account-scoped draft when the idea's saved
+  // value is empty (R6 restore-after-expiry). Runs when the fields/idea change;
+  // the `!== ""` guard makes it idempotent, so no dispatch loop.
   useEffect(() => {
-    if (!open || !fieldKey || !userId || reducerValue !== "") return;
-    const draft = getDraft<string>(userId, fieldDraftName(activeIdea, fieldKey));
-    if (typeof draft === "string" && draft !== "") {
-      dispatch({ type: "SET_FIELD", ideaIndex: activeIdea, key: fieldKey, value: draft });
+    if (!open || !userId || taskFields.length === 0) return;
+    for (const f of taskFields) {
+      if ((idea?.fields[f.key] ?? "") !== "") continue;
+      const draft = getDraft<string>(userId, fieldDraftName(activeIdea, f.key));
+      if (typeof draft === "string" && draft !== "") {
+        dispatch({ type: "SET_FIELD", ideaIndex: activeIdea, key: f.key, value: draft });
+      }
     }
-  }, [open, fieldKey, userId, reducerValue, activeIdea, dispatch]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, userId, activeIdea, runnerStep, idx, ideas, dispatch]);
 
   if (!open || !step || !runnerStep) return null;
 
@@ -103,11 +108,10 @@ export function StepRunner() {
     dispatch({ type: "COMPLETE_TASK", ideaIndex: activeIdea, stepId: runnerStep, index: idx });
     advance();
   };
-  const onFieldChange = (value: string) => {
-    if (!fieldKey) return;
-    dispatch({ type: "SET_FIELD", ideaIndex: activeIdea, key: fieldKey, value });
+  const onFieldChange = (key: string, value: string) => {
+    dispatch({ type: "SET_FIELD", ideaIndex: activeIdea, key, value });
     // Mirror to the account-scoped draft cache on keystroke (survives expiry, R6).
-    if (userId) setDraft(userId, fieldDraftName(activeIdea, fieldKey), value);
+    if (userId) setDraft(userId, fieldDraftName(activeIdea, key), value);
   };
 
   const close = () => dispatch({ type: "CLOSE_RUNNER" });
@@ -146,7 +150,7 @@ export function StepRunner() {
           </button>
         </header>
 
-        {/* Task rail — one segment per REAL task (1.1 has 5, 1.2 has 4) */}
+        {/* Task rail — one segment per REAL task (1.1 and 1.2 have 5 each) */}
         <div className="flex gap-1.5 border-b-2 border-[hsl(25_34%_20%/0.1)] px-5 py-3 sm:px-6">
           {step.tasks.map((raw, i) => {
             const done = isTaskDone(activeIdea, runnerStep, i);
@@ -189,36 +193,40 @@ export function StepRunner() {
               save doc well under the server's 256KiB cap even at MAX_IDEAS=5, so a
               large paste can't trigger a terminal save failure that kills all future
               saves. */}
-          {field && fieldKey ? (
-            <div className="mt-[18px]">
-              <label
-                htmlFor="fp-runner-field"
-                className="mb-1.5 block font-mono text-[10.5px] uppercase tracking-[0.08em] text-[hsl(25_20%_38%)]"
-              >
-                {field.label}
-              </label>
-              {field.long ? (
-                <textarea
-                  id="fp-runner-field"
-                  rows={4}
-                  maxLength={4000}
-                  value={reducerValue}
-                  onChange={(e) => onFieldChange(e.target.value)}
-                  placeholder={field.placeholder}
-                  className="w-full resize-y rounded-[10px] border-2 border-[hsl(25_34%_20%/0.15)] bg-white px-3.5 py-3 text-sm text-[hsl(25_34%_20%)] outline-none focus:border-sell"
-                />
-              ) : (
-                <input
-                  id="fp-runner-field"
-                  maxLength={2000}
-                  value={reducerValue}
-                  onChange={(e) => onFieldChange(e.target.value)}
-                  placeholder={field.placeholder}
-                  className="w-full rounded-[10px] border-2 border-[hsl(25_34%_20%/0.15)] bg-white px-3.5 py-3 text-sm text-[hsl(25_34%_20%)] outline-none focus:border-sell"
-                />
-              )}
-            </div>
-          ) : null}
+          {taskFields.map((f) => {
+            const value = idea?.fields[f.key] ?? "";
+            const inputId = `fp-runner-field-${f.key}`;
+            return (
+              <div key={f.key} className="mt-[18px]">
+                <label
+                  htmlFor={inputId}
+                  className="mb-1.5 block font-mono text-[10.5px] uppercase tracking-[0.08em] text-[hsl(25_20%_38%)]"
+                >
+                  {f.label}
+                </label>
+                {f.long ? (
+                  <textarea
+                    id={inputId}
+                    rows={4}
+                    maxLength={4000}
+                    value={value}
+                    onChange={(e) => onFieldChange(f.key, e.target.value)}
+                    placeholder={f.placeholder}
+                    className="w-full resize-y rounded-[10px] border-2 border-[hsl(25_34%_20%/0.15)] bg-white px-3.5 py-3 text-sm text-[hsl(25_34%_20%)] outline-none focus:border-sell"
+                  />
+                ) : (
+                  <input
+                    id={inputId}
+                    maxLength={2000}
+                    value={value}
+                    onChange={(e) => onFieldChange(f.key, e.target.value)}
+                    placeholder={f.placeholder}
+                    className="w-full rounded-[10px] border-2 border-[hsl(25_34%_20%/0.15)] bg-white px-3.5 py-3 text-sm text-[hsl(25_34%_20%)] outline-none focus:border-sell"
+                  />
+                )}
+              </div>
+            );
+          })}
 
           {/* Done-when callout — terracotta left border */}
           <div className="mt-[18px] rounded-r-[10px] border-l-2 border-sell bg-[hsl(40_30%_99%)] px-3.5 py-2.5">

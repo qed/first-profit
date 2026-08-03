@@ -32,8 +32,13 @@ export interface Step {
   xp: number;
   /** A task string prefixed with "@artifact " auto-completes when that artifact is built. */
   tasks: string[];
-  field?: {key: string;label: string;placeholder: string;long?: boolean;};
+  field?: StepField;
+  /** Multiple authored inputs on the first task (e.g. 1.1's product name +
+   *  one-liner). Takes precedence over `field` when present. */
+  fields?: StepField[];
 }
+
+export interface StepField {key: string;label: string;placeholder: string;long?: boolean;}
 
 export const PHASES: Phase[] = [
 {
@@ -95,11 +100,18 @@ export const STEPS: Step[] = [
   coach:
   'Start here. Write one sentence. What it is, who it is for, why they want it. Everything else in First Profit hangs off that sentence.',
   xp: 60,
-  field: {
+  fields: [
+  {
+    key: 'productName',
+    label: 'Product name',
+    placeholder: 'Recess bracelets'
+  },
+  {
     key: 'oneLiner',
     label: 'Your one-liner',
     placeholder: 'Custom friendship bracelets for kids who want to trade at recess.'
-  },
+  }],
+
   tasks: [
   'Pick the product and write the one-liner',
   'Write the 60-second pitch: hook, what it is, why it is good, the ask',
@@ -123,7 +135,8 @@ export const STEPS: Step[] = [
   'Choose the offer and set the price',
   'Build the first prospect list of ten',
   'Set up the point of sale and dress-rehearse it',
-  'Ask until one yes. Log the sale']
+  'Ask until one yes',
+  'Deliver, thank, and log the sale']
 
 },
 {
