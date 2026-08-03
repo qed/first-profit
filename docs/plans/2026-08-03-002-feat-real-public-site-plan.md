@@ -206,7 +206,7 @@ Publish lifecycle: `unclaimed → claimed (not published) → published ⇄ unpu
 
 **Verification:** endpoint suite green in the120; manual: claim→publish→email received; parent unpublish→page offline.
 
-- [ ] **Unit 3: Serving layer — vercel.json + public page function** — *target repo: first-profit*
+- [x] **Unit 3: Serving layer — vercel.json + public page function** — code complete + reviewed (6 bundles, all findings fixed; 47 api tests); PREVIEW-DEPLOY CHECKLIST in api/site.ts is the outstanding live gate (Unit 7); compound doc deferred to post-preview per plan — *target repo: first-profit*
 
 **Goal:** `firstprofit.school/<handle>` serves real HTML with per-page meta tags for all four R9 states; existing SPA routes and assets untouched.
 

@@ -23,6 +23,7 @@
  */
 import { useEffect, useState } from "react";
 import { useReducedMotion } from "framer-motion";
+import { defaultSiteHeadline } from "../../lib/siteCopy";
 
 /** Compact stepped logo mark (four ascending bars in phase colors). */
 export function LogoMark() {
@@ -187,8 +188,9 @@ export function WebsiteReveal({ firstName, handle, onNext, onBack }: WebsiteReve
   const name = firstName.trim() || "Founder";
   const displayHandle = deriveHandle(handle, name);
   // Age is not part of the Slice A profile, so the age clause is omitted
-  // (truthful, no invented field). The rest matches the prototype verbatim.
-  const sentence = `Hi, I'm ${name}. This is the future site of my first $1,000 profit company.`;
+  // (truthful, no invented field). The sentence is the shared default site
+  // headline (src/lib/siteCopy.ts) — the public page renders the same one.
+  const sentence = defaultSiteHeadline(name);
   const [typed, setTyped] = useState("");
 
   useEffect(() => {

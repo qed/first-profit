@@ -8,6 +8,7 @@
  * profile (which is service-role-write-only). Editing dispatches SET_PROFILE
  * {siteHeadline}; the sync layer persists it ("Edits publish instantly.").
  */
+import { defaultSiteHeadline } from "../../lib/siteCopy";
 import { useGame } from "../../state/GameContext";
 import { ideaOneLiner } from "../../state/floorSelectors";
 
@@ -17,12 +18,11 @@ export function YourSite() {
   const handle = profile.handle || "you";
   const oneLiner = ideaOneLiner(game, activeIdea);
 
-  // The frame + input display the saved headline, defaulting to a friendly
-  // starter line while the save doc's headline is still empty.
-  const defaultHeadline = `Hi, I'm ${
-    profile.firstName || "Founder"
-  }. This is the future site of my first $1,000 profit company.`;
-  const headline = profile.siteHeadline || defaultHeadline;
+  // The frame + input display the saved headline, defaulting to the shared
+  // starter line (src/lib/siteCopy.ts — the public page renders the same
+  // sentence, R12) while the save doc's headline is still empty.
+  const headline =
+    profile.siteHeadline || defaultSiteHeadline(profile.firstName || "Founder");
 
   return (
     <div>
