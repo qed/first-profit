@@ -33,7 +33,9 @@ Every UI change MUST look good and work well on mobile before it is considered d
   green button docked at the bottom of the floor (absolute, bottom-7 / lg:bottom-11) that
   targets whatever comes next via `nextCoachTarget` — create-idea, the next criterion's
   room, or the promotion screen — routing through the same `onWalk` intent channel as card
-  taps. `MobilePath` reserves bottom padding (`pb-80`) so the bottom-docked coach never
+  taps. With `VITE_ENABLE_PUBLIC_SITE` on, a one-shot session hint pre-empts
+  `nextCoachTarget` for handle-less accounts (site status `none`, ≥1 idea), pointing at
+  the Your Site room until that room first opens. `MobilePath` reserves bottom padding (`pb-80`) so the bottom-docked coach never
   covers the last card. Preserve that padding if you change either component.
 - Styling is Tailwind mobile-first: base classes are the mobile styles; desktop is layered
   on with `sm:`/`lg:` variants. When fixing mobile, don't silently change desktop —

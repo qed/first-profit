@@ -40,6 +40,21 @@ import { ideaOneLiner, ideaSummaryName } from "../state/floorSelectors";
 import { getDraft, setDraft, getLastUserId } from "../lib/draftCache";
 import { useFocusTrap } from "../lib/useFocusTrap";
 import { StuckBox, taskIdFor } from "./StuckBox";
+import { isPublicSiteEnabled } from "../config";
+import { SITE_ONE_LINER_MAX_CHARS } from "../lib/siteCopy";
+
+/**
+ * The one authored field that renders on the PUBLIC page (real-public-site
+ * plan, Unit 6): the active idea's one-liner (FIELD_HOOKS key "oneLiner",
+ * criterion 1.1). With the public site enabled it takes the public-string
+ * treatment: the R6 input cap (140, matching the projection/render clamps —
+ * see src/lib/siteCopy.ts) and commit → immediate flush (R11), exactly like
+ * the headline editor in the Your Site room. Content screening stays
+ * server-side at the projection/publish layer (blocked strings stored empty);
+ * the client ships no blocklist corpus. Flag off → the field behaves exactly
+ * as before (generic 2000 cap, debounced sync only).
+ */
+const PUBLIC_ONE_LINER_KEY = "oneLiner";
 
 /** Draft-cache name (within the user namespace) for a criterion field on an idea. */
 function fieldDraftName(ideaIndex: number, key: string): string {
@@ -330,6 +345,11 @@ export function StepRunner() {
           {taskFields.map((f) => {
             const value = idea?.fields[f.key] ?? "";
             const inputId = `fp-runner-field-${f.key}`;
+            // Public-string treatment for the one-liner (see PUBLIC_ONE_LINER_KEY
+            // doc). game.flushNow is optional-called defensively: test harnesses
+            // that stub the context may omit it, and flag-off never calls it.
+            const isPublicString = isPublicSiteEnabled() && f.key === PUBLIC_ONE_LINER_KEY;
+            const onCommit = isPublicString ? () => void game.flushNow?.() : undefined;
             return (
               <div key={f.key} className="mt-[18px]">
                 <label
@@ -342,22 +362,31 @@ export function StepRunner() {
                   <textarea
                     id={inputId}
                     rows={4}
-                    maxLength={4000}
+                    maxLength={isPublicString ? SITE_ONE_LINER_MAX_CHARS : 4000}
                     value={value}
                     onChange={(e) => onFieldChange(f.key, e.target.value)}
+                    onBlur={onCommit}
                     placeholder={f.placeholder}
                     className="w-full resize-y rounded-[10px] border-2 border-[hsl(25_34%_20%/0.15)] bg-white px-3.5 py-3 text-sm text-[hsl(25_34%_20%)] outline-none focus:border-sell"
                   />
                 ) : (
                   <input
                     id={inputId}
-                    maxLength={2000}
+                    maxLength={isPublicString ? SITE_ONE_LINER_MAX_CHARS : 2000}
                     value={value}
                     onChange={(e) => onFieldChange(f.key, e.target.value)}
+                    onBlur={onCommit}
                     placeholder={f.placeholder}
                     className="w-full rounded-[10px] border-2 border-[hsl(25_34%_20%/0.15)] bg-white px-3.5 py-3 text-sm text-[hsl(25_34%_20%)] outline-none focus:border-sell"
                   />
                 )}
+                {isPublicString ? (
+                  // R23 accepted-limit nudge: this string renders on the PUBLIC
+                  // page, and a blocklist cannot catch self-disclosure.
+                  <p className="mt-1.5 text-[12px] text-[hsl(25_20%_38%)]">
+                    This goes on your public page. No phone numbers, addresses, or last names.
+                  </p>
+                ) : null}
               </div>
             );
           })}

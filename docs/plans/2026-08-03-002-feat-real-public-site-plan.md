@@ -303,7 +303,7 @@ Publish lifecycle: `unclaimed → claimed (not published) → published ⇄ unpu
 
 **Verification:** suite green; manual run at 390px and desktop through fresh onboarding against a preview backend.
 
-- [ ] **Unit 6: Your Site room, first-login claim, publish-state UI**
+- [x] **Unit 6: Your Site room, first-login claim, publish-state UI** — shipped (three-state room + shared useClaimFlow/ClaimBlock; in-room claim→publish go-live; P0 stale-closure publish + overlap/clobber races fixed under review; flag-off legacy room byte-pinned; compounded: cross-repo cap-alignment doc)
 
 **Goal:** the room edits and links to the real site; existing accounts get a claim path; unpublished/not-live states are visible everywhere they matter.
 
@@ -348,6 +348,7 @@ Publish lifecycle: `unclaimed → claimed (not published) → published ⇄ unpu
 - Verify on a live preview: client-IP header, Deployment Protection OFF (or bypass token) for crawler-path testing, link previews in at least one real messaging app.
 - Launch order (corrected so nothing is user-visible before sign-off — `VITE_` flags are baked into the one production bundle, so "enable" is global): migration (Unit 1, with schema reload + verify) → the120 endpoints deployed but gated OFF → FP production deploy with `vercel.json` + function (dark: no claims exist) → verify SPA routes → delete dashboard catchall → **Cedric test family end-to-end on a PREVIEW deployment** (flag enabled in the preview env only, the120 gate opened for the preview/test window; Deployment Protection off or bypass token for crawler-path checks) → **COPPA policy check sign-off** → only then enable `VITE_ENABLE_PUBLIC_SITE` in production + open the the120 gate for all accounts. If the120's gate can allowlist accounts, the Cedric test may run in production scoped to the test family instead of a preview — decide when building the gate; either mechanism satisfies the ordering constraint.
 - Reserved-word list: initial curated list committed with rationale comments (Unit 1 seed + `vercel.json` exclusions cross-referenced); owner named in the solution doc.
+- Add `your-name` to the reserved-handle list (the120 seed + `vercel.json` exclusions + `api/_lib/reservedHandles.ts`) BEFORE claiming is enabled anywhere: the Landing hero mockup (Unit 6 truth-alignment) shows the literal URL `firstprofit.school/your-name`, which must never become a real child's page.
 
 **Test scenarios:** Test expectation: none — operational/config unit; verification is the live checklist above.
 

@@ -5,12 +5,20 @@
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
 import React from "react";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 
 vi.mock("../../state/GameContext", async () => {
   const R = await import("react");
   const Ctx = R.createContext<unknown>(null);
   return { __ctx: Ctx, useGame: () => R.useContext(Ctx) };
+});
+
+// Public-site flag (Unit 6 claim hint): default OFF so every pre-Unit-6 coach
+// scenario runs against the unchanged behavior; the hint describe flips it.
+let publicSiteFlag = false;
+vi.mock("../../config", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../config")>();
+  return { ...actual, isPublicSiteEnabled: () => publicSiteFlag };
 });
 
 import * as GameContext from "../../state/GameContext";
@@ -21,7 +29,10 @@ import type { Action, GameState } from "../../state/gameCore";
 
 const Ctx = (GameContext as unknown as { __ctx: React.Context<unknown> }).__ctx;
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  publicSiteFlag = false;
+});
 
 function mountCoach(seed: GameState) {
   const walks: WalkIntent[] = [];
@@ -69,6 +80,90 @@ describe("NextStepCoach — promote CTA + full-path walking (Unit 8)", () => {
     const s = { ...withIdeas(1), runnerOpen: true };
     mountCoach(s);
     expect(screen.queryByText("Next Step")).toBeNull();
+  });
+});
+
+describe("NextStepCoach — one-shot claim hint for handle-less accounts (Unit 6)", () => {
+  /** Seed with the registry read-back answering "no handle" (status none). */
+  function handleLess(seed: GameState): GameState {
+    return { ...seed, site: { handle: null, status: "none" } };
+  }
+
+  /** Mount the coach plus a dispatch probe (drives the REAL reducer). */
+  function mountWithDispatch(seed: GameState) {
+    const walks: WalkIntent[] = [];
+    let latest: { dispatch: (a: Action) => void } | null = null;
+    function Probe() {
+      latest = React.useContext(Ctx) as { dispatch: (a: Action) => void };
+      return null;
+    }
+    render(
+      <FloorHarness seed={seed} Ctx={Ctx}>
+        <NextStepCoach onWalk={(i) => walks.push(i)} />
+        <Probe />
+      </FloorHarness>,
+    );
+    const dispatch = (a: Action) => {
+      if (!latest) throw new Error("probe not mounted");
+      latest.dispatch(a);
+    };
+    return { walks, dispatch };
+  }
+
+  it("points a handle-less account with ideas at the Your Site room via the walk channel", () => {
+    publicSiteFlag = true;
+    const { walks } = mountWithDispatch(handleLess(withIdeas(1)));
+    expect(screen.getByText("Claim your page in Your Site")).toBeTruthy();
+    fireEvent.click(screen.getByText("Next Step"));
+    expect(walks).toEqual([{ kind: "openRoom", room: "website" }]);
+  });
+
+  it("is consumed ONCE the room opens (any route): the coach reverts to normal guidance", () => {
+    publicSiteFlag = true;
+    const { dispatch } = mountWithDispatch(handleLess(withIdeas(1)));
+    expect(screen.getByText("Claim your page in Your Site")).toBeTruthy();
+    // The room opens (button walk arrival or a pod tap — same reducer action);
+    // the coach hides behind the overlay and the hint is consumed.
+    act(() => dispatch({ type: "OPEN_ROOM", room: "website" }));
+    expect(screen.queryByText("Next Step")).toBeNull();
+    // Room closed WITHOUT claiming: normal next-step guidance, no re-nag.
+    act(() => dispatch({ type: "CLOSE_ROOM" }));
+    expect(screen.queryByText("Claim your page in Your Site")).toBeNull();
+    expect(screen.getByText(/Take me to /)).toBeTruthy();
+  });
+
+  it("never fires on the neutral 'unknown' status (failed read is not a nudge)", () => {
+    publicSiteFlag = true;
+    const seed = { ...withIdeas(1), site: { handle: null, status: "unknown" as const } };
+    mountWithDispatch(seed);
+    expect(screen.queryByText("Claim your page in Your Site")).toBeNull();
+    expect(screen.getByText(/Take me to /)).toBeTruthy();
+  });
+
+  it("never preempts a brand-new account's first-idea guidance (no ideas yet)", () => {
+    publicSiteFlag = true;
+    const seed = handleLess({ ...withIdeas(0) });
+    mountWithDispatch(seed);
+    expect(screen.queryByText("Claim your page in Your Site")).toBeNull();
+    expect(screen.getByText("Take me to The Idea Room")).toBeTruthy();
+  });
+
+  it.each(["claimed", "offline", "published"] as const)(
+    "never fires once the account holds a handle (status %s)",
+    (status) => {
+      publicSiteFlag = true;
+      const seed = { ...withIdeas(1), site: { handle: "maya", status } };
+      mountWithDispatch(seed);
+      expect(screen.queryByText("Claim your page in Your Site")).toBeNull();
+      expect(screen.getByText(/Take me to /)).toBeTruthy();
+    },
+  );
+
+  it("flag off: no hint even for a handle-less account (pre-Unit-6 behavior)", () => {
+    publicSiteFlag = false;
+    mountWithDispatch(handleLess(withIdeas(1)));
+    expect(screen.queryByText("Claim your page in Your Site")).toBeNull();
+    expect(screen.getByText(/Take me to /)).toBeTruthy();
   });
 });
 

@@ -322,8 +322,17 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
   // ONE session (hydrate's fire-and-forget + a room-open refresh) — resolved
   // out of order, a stale 'none'/'unknown' would overwrite a newer
   // 'published'. Each call takes a sequence number; only the LATEST-started
-  // call may dispatch.
+  // call may dispatch. claimSite/publishSite ALSO bump it when they adopt a
+  // newer status (Unit 6 review, P2): a refresh that was in flight when a
+  // claim/publish landed carries pre-claim state, and resolving late it would
+  // clobber 'claimed'/'published' — the bump makes it unconditionally stale.
   const siteFetchSeqRef = useRef(0);
+  // In-flight memo for publish (Unit 6 review, P1): concurrent callers (a
+  // room-remount race, onboarding completion beside a room retry) share ONE
+  // request/outcome instead of double-POSTing — same shape as the sync
+  // engine's flushPending reentrancy guard. Publish is idempotent server-side
+  // via first_published_at; this just keeps the client honest too.
+  const publishInFlightRef = useRef<Promise<PublishSiteResult> | null>(null);
 
   const refreshSiteStatus = useCallback(async (): Promise<void> => {
     const gen = sessionGenRef.current;
@@ -355,28 +364,47 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
       return { ok: false, reason: "outage" };
     }
     if (result.ok) {
+      // Invalidate any in-flight status read (Unit 6 review, P2): it was
+      // issued before this claim and would clobber the fresher slice.
+      siteFetchSeqRef.current++;
       dispatch({ type: "SET_SITE", handle: result.handle, status: result.status });
     }
     return result;
   }, []);
 
-  const publishSiteNow = useCallback(async (): Promise<PublishSiteResult> => {
-    const gen = sessionGenRef.current;
-    // Capture the handle BEFORE the await (Unit 4 review, P3): a slice
-    // rewrite mid-flight (a racing refresh/claim in the Unit 5/6 flows) must
-    // not be read back through stateRef after the network round-trip — the
-    // dispatch below stamps the handle this publish was issued for.
-    const handleAtCall = stateRef.current.site.handle;
-    const result = await publishSiteApi();
-    if (gen !== sessionGenRef.current) return { ok: false, reason: "outage" };
-    if (result.ok) {
-      dispatch({ type: "SET_SITE", handle: handleAtCall, status: "published" });
-    } else if (result.reason === "locked") {
-      // Operator-locked: nothing became visible — the slice reflects offline
-      // so no surface can render "live" while locked (R19's never-mislead).
-      dispatch({ type: "SET_SITE", handle: handleAtCall, status: "offline" });
-    }
-    return result;
+  const publishSiteNow = useCallback((): Promise<PublishSiteResult> => {
+    // Reentrancy memo (Unit 6 review, P1): while a publish is in flight,
+    // every caller awaits the SAME promise — one network request, one shared
+    // outcome (see publishInFlightRef).
+    const inFlight = publishInFlightRef.current;
+    if (inFlight) return inFlight;
+    const run = (async (): Promise<PublishSiteResult> => {
+      const gen = sessionGenRef.current;
+      // Capture the handle BEFORE the await (Unit 4 review, P3): a slice
+      // rewrite mid-flight (a racing refresh/claim in the Unit 5/6 flows) must
+      // not be read back through stateRef after the network round-trip — the
+      // dispatch below stamps the handle this publish was issued for.
+      const handleAtCall = stateRef.current.site.handle;
+      const result = await publishSiteApi();
+      if (gen !== sessionGenRef.current) return { ok: false, reason: "outage" };
+      if (result.ok) {
+        // Invalidate any in-flight status read (Unit 6 review, P2), as in
+        // claimSite: a pre-publish refresh must not clobber 'published'.
+        siteFetchSeqRef.current++;
+        dispatch({ type: "SET_SITE", handle: handleAtCall, status: "published" });
+      } else if (result.reason === "locked") {
+        // Operator-locked: nothing became visible — the slice reflects offline
+        // so no surface can render "live" while locked (R19's never-mislead).
+        siteFetchSeqRef.current++;
+        dispatch({ type: "SET_SITE", handle: handleAtCall, status: "offline" });
+      }
+      return result;
+    })();
+    const memo = run.finally(() => {
+      publishInFlightRef.current = null;
+    });
+    publishInFlightRef.current = memo;
+    return memo;
   }, []);
 
   const flushNow = useCallback(async (): Promise<FlushOutcome> => {

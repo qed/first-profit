@@ -57,11 +57,10 @@
  * and full-width below it. The shared screens own the founder copy and CTAs;
  * this shell owns the parchment card, the logo row, and the progress bar.
  */
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useRef } from "react";
 import { useGame } from "../state/GameContext";
 import { isPublicSiteEnabled } from "../config";
-import { checkHandleAvailability } from "../lib/auth";
-import { HANDLE_MIN_CHARS, isValidHandle, normalizeHandleInput } from "../lib/handleRules";
+import { useClaimFlow } from "../lib/useClaimFlow";
 import {
   LogoMark,
   ProgressBar,
@@ -69,13 +68,8 @@ import {
   WebsiteReveal,
   MoneyBooth,
   ThePath,
-  type ClaimBadge,
-  type ClaimNotice,
   type FounderProfileClaim,
 } from "./onboarding/screens";
-
-/** Debounce for the as-you-type availability check (R1). */
-const AVAILABILITY_DEBOUNCE_MS = 350;
 
 export function Onboarding() {
   const game = useGame();
@@ -92,127 +86,25 @@ export function Onboarding() {
     site.handle !== null &&
     (site.status === "claimed" || site.status === "published" || site.status === "offline");
 
-  // ── Claim-step state (all ABOVE the conditional screen mounts, so a pending
-  // claim survives any resize/breakpoint swap — breakpoint-crossing learning).
-  /** The learner's explicit handle edit, or null while untouched (the input
-   *  then previews the normalized first-name slug per R15's nudge). */
-  const [handleTyped, setHandleTyped] = useState<string | null>(null);
-  const [badge, setBadge] = useState<ClaimBadge>("none");
-  const [suggestions, setSuggestions] = useState<string[]>([]);
-  const [notice, setNotice] = useState<ClaimNotice>(null);
-  const [claiming, setClaiming] = useState(false);
-  /** Synchronous in-flight guard: double-tap → ONE claim request (the
-   *  client-minted-idempotency-key learning — state flags render too late). */
-  const claimInFlightRef = useRef(false);
   /** One-shot completion guard (screen 5 CTA). */
   const completeRef = useRef(false);
-  /** Monotonic sequence for availability responses: only the latest-started
-   *  check may write the badge (a slow stale response is dropped). */
-  const checkSeqRef = useRef(0);
 
-  /** The candidate handle the claim/availability paths act on. */
-  const effectiveHandle = useMemo(() => {
-    if (alreadyClaimed) return site.handle ?? "";
-    return handleTyped ?? normalizeHandleInput(profile.firstName);
-  }, [alreadyClaimed, site.handle, handleTyped, profile.firstName]);
+  // ── Claim wiring: the SHARED claim state machine (src/lib/useClaimFlow —
+  // one implementation with the Your Site room's in-room claim). It lives in
+  // this container, ABOVE the conditional screen mounts, so a pending claim
+  // survives any resize/breakpoint swap (breakpoint-crossing learning) and
+  // any screen unmount/remount. Availability checks run only on screen 2
+  // while unclaimed and flag-on (`active`); success/already-claimed advance
+  // to screen 3 via `onClaimed`.
+  const flow = useClaimFlow({
+    game,
+    firstName: profile.firstName,
+    active: siteEnabled && !alreadyClaimed && screen === 2,
+    onClaimed: () => dispatch({ type: "SET_OB", ob: 3 }),
+  });
 
-  // ── Debounced live availability (R1): pending badge immediately, one
-  // cancellable check per settled input, failed check → silent (never blocks
-  // typing; the claim re-validates server-side at submit anyway). The fetch
-  // itself is not aborted (no AbortController — accepted residual: at most one
-  // ~350ms-debounced request completes wasted); staleness is handled entirely
-  // by the sequence guard below.
-  useEffect(() => {
-    // Every effect run — INCLUDING the early-return branches (screen change,
-    // claimed resume, flag off) — bumps the sequence, so any response still in
-    // flight from a previous run is unconditionally stale.
-    const seq = ++checkSeqRef.current;
-    if (!siteEnabled || alreadyClaimed || screen !== 2) return;
-    const handle = effectiveHandle;
-    if (handle.length < HANDLE_MIN_CHARS) {
-      setBadge("short");
-      setSuggestions([]);
-      return;
-    }
-    setBadge("pending");
-    const timer = setTimeout(() => {
-      void checkHandleAvailability(handle).then((result) => {
-        if (seq !== checkSeqRef.current) return; // superseded: drop stale answer
-        if (!result.ok) {
-          // Failed check (offline/outage): say nothing, keep typing (R1).
-          setBadge("none");
-          return;
-        }
-        setBadge(result.verdict);
-        setSuggestions(result.verdict === "taken" ? result.suggestions : []);
-      });
-    }, AVAILABILITY_DEBOUNCE_MS);
-    return () => clearTimeout(timer);
-  }, [siteEnabled, alreadyClaimed, screen, effectiveHandle]);
-
-  const onHandleChange = useCallback((value: string) => {
-    // R15: auto-lowercase, invalid characters dropped, length clamped — the
-    // input always displays the normalized candidate the server would see.
-    setHandleTyped(normalizeHandleInput(value));
-    setNotice(null);
-  }, []);
-
-  /** The real claim (screen 2 CTA + one-tap suggestion picks). */
-  const claimNow = useCallback(
-    async (rawHandle: string) => {
-      if (claimInFlightRef.current) return; // second tap in the burst: drop
-      const handle = normalizeHandleInput(rawHandle);
-      if (handle.length < HANDLE_MIN_CHARS || !isValidHandle(handle)) {
-        setBadge("short");
-        return;
-      }
-      // R23 screening happens SERVER-side on this request (blocklist +
-      // reserved words); the `invalid` refusal below renders the kid-friendly
-      // inline message. The client deliberately holds no term list.
-      claimInFlightRef.current = true;
-      setClaiming(true);
-      setNotice(null);
-      try {
-        const result = await game.claimSite(handle);
-        if (result.ok) {
-          // GameContext already adopted the canonical handle into the slice.
-          dispatch({ type: "SET_OB", ob: 3 });
-          return;
-        }
-        switch (result.reason) {
-          case "taken":
-            // The R3 race branch: an "available" badge lost at submit. Inline
-            // explanation + the server's refreshed suggestions — never a dead
-            // end; manual entry stays open.
-            setBadge("taken");
-            setSuggestions(result.suggestions);
-            setNotice("race");
-            break;
-          case "invalid":
-            // The server's R23/format refusal (blocklisted, reserved, or
-            // format-invalid — deliberately not distinguished): badge plus the
-            // full-sentence kid-friendly inline message.
-            setBadge("invalid");
-            setNotice("invalid");
-            break;
-          case "already-claimed":
-            // The account holds a handle this slice had not adopted yet (a
-            // stale read-back). Adopt via the registry read and advance —
-            // never a second claim.
-            void game.refreshSiteStatus();
-            dispatch({ type: "SET_OB", ob: 3 });
-            break;
-          case "outage":
-            setNotice("outage");
-            break;
-        }
-      } finally {
-        claimInFlightRef.current = false;
-        setClaiming(false);
-      }
-    },
-    [game, dispatch],
-  );
+  /** The handle the screens display: the canonical claimed handle wins. */
+  const effectiveHandle = alreadyClaimed ? (site.handle ?? "") : flow.handleValue;
 
   const onFounderNext = useCallback(() => {
     if (!siteEnabled || alreadyClaimed) {
@@ -220,18 +112,8 @@ export function Onboarding() {
       dispatch({ type: "SET_OB", ob: 3 });
       return;
     }
-    void claimNow(effectiveHandle);
-  }, [siteEnabled, alreadyClaimed, dispatch, claimNow, effectiveHandle]);
-
-  const onPickSuggestion = useCallback(
-    (suggestion: string) => {
-      // One-tap pick claims immediately (R2); the input adopts the pick so a
-      // lost race keeps it as the editable starting point.
-      setHandleTyped(normalizeHandleInput(suggestion));
-      void claimNow(suggestion);
-    },
-    [claimNow],
-  );
+    void flow.claimNow(flow.handleValue);
+  }, [siteEnabled, alreadyClaimed, dispatch, flow]);
 
   const onComplete = useCallback(() => {
     if (completeRef.current) return;
@@ -290,13 +172,13 @@ export function Onboarding() {
   const claimProps: FounderProfileClaim | undefined = siteEnabled
     ? {
         handleValue: effectiveHandle,
-        onHandleChange,
-        badge: alreadyClaimed ? "yours" : badge,
-        suggestions: alreadyClaimed ? [] : suggestions,
-        onPickSuggestion,
-        notice: alreadyClaimed ? null : notice,
+        onHandleChange: flow.onHandleChange,
+        badge: alreadyClaimed ? "yours" : flow.badge,
+        suggestions: alreadyClaimed ? [] : flow.suggestions,
+        onPickSuggestion: flow.onPickSuggestion,
+        notice: alreadyClaimed ? null : flow.notice,
         claimed: alreadyClaimed,
-        claiming,
+        claiming: flow.claiming,
       }
     : undefined;
 

@@ -493,3 +493,88 @@ describe("getSessionGen (screen-layer async guard input, Unit 5 review, P1)", ()
     expect(getApi().getSessionGen()).toBeGreaterThan(captured);
   });
 });
+
+describe("publish reentrancy memo (Unit 6 review, P1)", () => {
+  it("two concurrent publishSite() calls share ONE network request and one outcome", async () => {
+    await bootToApp();
+    const gate = deferred<{ ok: true; status: string; firstPublish: boolean; parentNotified: boolean }>();
+    authMock.publishSite.mockReturnValue(gate.promise);
+    let first: unknown;
+    let second: unknown;
+    await act(async () => {
+      const p1 = getApi().publishSite();
+      const p2 = getApi().publishSite();
+      gate.resolve({ ok: true, status: "published", firstPublish: true, parentNotified: true });
+      [first, second] = await Promise.all([p1, p2]);
+    });
+    expect(authMock.publishSite).toHaveBeenCalledTimes(1);
+    expect(first).toEqual(second);
+    expect(getApi().site.status).toBe("published");
+    // The memo clears after settle: a LATER publish issues a fresh request.
+    authMock.publishSite.mockResolvedValue({
+      ok: true,
+      status: "published",
+      firstPublish: false,
+      parentNotified: false,
+    });
+    await act(async () => {
+      await getApi().publishSite();
+    });
+    expect(authMock.publishSite).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe("claim/publish invalidate an in-flight status refresh (Unit 6 review, P2)", () => {
+  it("a refresh resolving AFTER a claim carries pre-claim state and is dropped", async () => {
+    await bootToApp();
+    // A room-open refresh goes out and hangs...
+    const refreshGate = deferred<{ ok: true; handle: null; status: string }>();
+    authMock.fetchSiteStatus.mockReturnValue(refreshGate.promise);
+    let refreshDone: Promise<void> | null = null;
+    act(() => {
+      refreshDone = getApi().refreshSiteStatus();
+    });
+    // ...the claim lands and adopts the fresher status...
+    authMock.claimHandle.mockResolvedValue({ ok: true, handle: "cedric", status: "claimed" });
+    await act(async () => {
+      await getApi().claimSite("cedric");
+    });
+    expect(getApi().site).toEqual({ handle: "cedric", status: "claimed" });
+    // ...then the STALE refresh resolves with pre-claim state: dropped.
+    await act(async () => {
+      refreshGate.resolve({ ok: true, handle: null, status: "none" });
+      await refreshDone;
+    });
+    expect(getApi().site).toEqual({ handle: "cedric", status: "claimed" });
+  });
+
+  it("a refresh resolving AFTER a publish cannot clobber 'published'", async () => {
+    await bootToApp();
+    authMock.claimHandle.mockResolvedValue({ ok: true, handle: "cedric", status: "claimed" });
+    await act(async () => {
+      await getApi().claimSite("cedric");
+    });
+    const refreshGate = deferred<{ ok: true; handle: string; status: string }>();
+    authMock.fetchSiteStatus.mockReturnValue(refreshGate.promise);
+    let refreshDone: Promise<void> | null = null;
+    act(() => {
+      refreshDone = getApi().refreshSiteStatus();
+    });
+    authMock.publishSite.mockResolvedValue({
+      ok: true,
+      status: "published",
+      firstPublish: true,
+      parentNotified: true,
+    });
+    await act(async () => {
+      await getApi().publishSite();
+    });
+    expect(getApi().site).toEqual({ handle: "cedric", status: "published" });
+    await act(async () => {
+      refreshGate.resolve({ ok: true, handle: "cedric", status: "claimed" });
+      await refreshDone;
+    });
+    // The pre-publish 'claimed' answer is stale: the slice keeps 'published'.
+    expect(getApi().site).toEqual({ handle: "cedric", status: "published" });
+  });
+});

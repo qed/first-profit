@@ -33,6 +33,7 @@
  */
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useGame } from "../state/GameContext";
+import { isPublicSiteEnabled } from "../config";
 import { firstIncompleteTaskIndex, ideaOneLiner, ideaProgressLabel, ideaSummaryName, nextCoachTarget, roomEntryFor } from "../state/floorSelectors";
 import { stepById, type RoomId } from "../data/path";
 import { FactoryFloor, type FloorView, type WalkIntent } from "../components/FactoryFloor";
@@ -103,7 +104,16 @@ function RoomDialog() {
   if (!room) return null;
   const meta = ROOM_META[room];
   if (!meta) return null;
-  const { sign, name, tagline, Body } = meta;
+  const { sign, name, Body } = meta;
+  // Truthful chrome (Unit 6, R19): the website room's static "Live already."
+  // tagline is only honest for the mock. With the real public site enabled the
+  // room body renders the actual state (live / going live / offline /
+  // unclaimed), so the tagline stays state-neutral. Flag off keeps the
+  // original string byte-for-byte.
+  const tagline =
+    room === "website" && isPublicSiteEnabled()
+      ? "Your real page on the internet."
+      : meta.tagline;
   const close = () => dispatch({ type: "CLOSE_ROOM" });
 
   return (
@@ -204,7 +214,39 @@ export function NextStepCoach({
   overlayOpen?: boolean;
 }) {
   const game = useGame();
+  // ── One-shot claim hint (real-public-site plan, Unit 6; R13/R16). With the
+  // public site enabled, a HANDLE-LESS established account (status "none" from
+  // the registry read-back, and at least one idea — a brand-new account's
+  // first-task guidance is never preempted) is pointed at the Your Site room
+  // ONCE: the coach button targets the room through the same onWalk intent
+  // channel as every other coach action (no new interstitial machinery). The
+  // hint is CONSUMED the moment the room opens by ANY route (this button, a
+  // pod tap), then the coach reverts to normal next-step guidance for the
+  // session — claiming stays an invitation, never a gate. In-memory only (the
+  // gradeAskDone precedent): it reappears next session while the account
+  // remains handle-less. `unknown` (failed read) deliberately shows NO hint —
+  // never nudge a claim on state we could not confirm.
+  const [siteHintUsed, setSiteHintUsed] = useState(false);
+  const roomOpen = game.room;
+  useEffect(() => {
+    if (roomOpen === "website") setSiteHintUsed(true);
+  }, [roomOpen]);
   if (overlayOpen || game.runnerOpen || game.room || game.celebrate || game.pickFor) return null;
+
+  const siteHint =
+    isPublicSiteEnabled() &&
+    !siteHintUsed &&
+    game.site?.status === "none" &&
+    game.ideas.length > 0;
+  if (siteHint) {
+    return (
+      <CoachButton
+        label={`Claim your page in ${ROOM_META.website?.name ?? "Your Site"}`}
+        onClick={() => onWalk({ kind: "openRoom", room: "website" })}
+      />
+    );
+  }
+
   const target = nextCoachTarget(game);
   if (!target) return null;
 
@@ -223,11 +265,17 @@ export function NextStepCoach({
         ? { kind: "createIdea" }
         : { kind: "enterCriterion", stepId: target.stepId };
 
+  return <CoachButton label={label} onClick={() => onWalk(intent)} />;
+}
+
+/** The coach's docked green button chrome, shared by the normal next-step
+ *  target and the Unit 6 one-shot claim hint (identical markup either way). */
+function CoachButton({ label, onClick }: { label: string; onClick: () => void }) {
   return (
     <div className="pointer-events-none absolute inset-x-0 bottom-7 z-40 flex justify-center px-4 lg:bottom-11">
       <button
         type="button"
-        onClick={() => onWalk(intent)}
+        onClick={onClick}
         className="pointer-events-auto flex min-h-[52px] items-center gap-3 rounded-2xl bg-verified px-5 py-3 text-left text-white shadow-[0_6px_0_hsl(150_52%_26%)] transition hover:-translate-y-0.5 active:translate-y-0.5 active:shadow-[0_3px_0_hsl(150_52%_26%)] focus:outline-none focus-visible:ring-4 focus-visible:ring-verified/40"
       >
         <span>
