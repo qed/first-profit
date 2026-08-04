@@ -217,6 +217,13 @@ export function GlobalNav({ onOpenSwitcher }: { onOpenSwitcher?: () => void } = 
           </span>
         ) : stage !== "login" ? (
           <span className="flex items-center gap-2 sm:gap-2.5">
+            <button
+              type="button"
+              onClick={() => dispatch({ type: "SET_STAGE", stage: "login" })}
+              className="inline-flex min-h-[44px] items-center whitespace-nowrap rounded-full border-2 border-[hsl(25_34%_20%/0.15)] px-3 font-mono text-[11px] uppercase tracking-[0.06em] text-ink hover:border-[hsl(25_34%_20%/0.4)] sm:px-4"
+            >
+              Log in
+            </button>
             {stage === "landing" && (
               <button
                 type="button"
@@ -231,13 +238,6 @@ export function GlobalNav({ onOpenSwitcher }: { onOpenSwitcher?: () => void } = 
                 Start Building
               </button>
             )}
-            <button
-              type="button"
-              onClick={() => dispatch({ type: "SET_STAGE", stage: "login" })}
-              className="inline-flex min-h-[44px] items-center whitespace-nowrap rounded-full border-2 border-[hsl(25_34%_20%/0.15)] px-3 font-mono text-[11px] uppercase tracking-[0.06em] text-ink hover:border-[hsl(25_34%_20%/0.4)] sm:px-4"
-            >
-              Log in
-            </button>
           </span>
         ) : null}
       </div>
