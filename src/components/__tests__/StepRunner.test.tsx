@@ -217,6 +217,9 @@ describe("StepRunner", () => {
     // viewport — so the GlobalNav above it stays visible and usable.
     expect(view.className).toContain("absolute inset-0");
     expect(view.className).not.toMatch(/\bfixed\b/);
+    // Change 30: BELOW the nav bar (z-50), so the bar's dropdowns open over
+    // the room; still above the floor's dock and GradeAsk (both z-40).
+    expect(view.className).toContain("z-[45]");
     // It wears the floor's own rounded red border, so it lands inside it.
     expect(view.className).toContain("rounded-[22px]");
     expect(view.className).toContain("border-[hsl(14_78%_54%/0.5)]");

@@ -434,7 +434,7 @@ export function StepRunner() {
       role="dialog"
       aria-labelledby="fp-runner-title"
       tabIndex={-1}
-      className="fp-rise fp-grid absolute inset-0 z-[55] rounded-[22px] border-2 border-[hsl(14_78%_54%/0.5)] bg-[hsl(38_40%_92%)] p-4 outline-none sm:p-7"
+      className="fp-rise fp-grid absolute inset-0 z-[45] rounded-[22px] border-2 border-[hsl(14_78%_54%/0.5)] bg-[hsl(38_40%_92%)] p-4 outline-none sm:p-7"
       style={{ animation: "fp-rise .3s cubic-bezier(.22,1,.36,1) both" }}
     >
       {/* The room's own FLOOR shows through around this panel (owner spec
