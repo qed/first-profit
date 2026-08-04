@@ -40,8 +40,7 @@ import {
   taskBodyForBand,
   taskTitleForBand,
 } from "../data/path";
-import { activeBusiness, criterionIdsForPhase, phaseOfCriterion } from "../state/gameCore";
-import { ideaOneLiner, ideaSummaryName } from "../state/floorSelectors";
+import { criterionIdsForPhase, phaseOfCriterion } from "../state/gameCore";
 import { getDraft, setDraft, getLastUserId } from "../lib/draftCache";
 import { AvatarSprite } from "./Avatar";
 import { MoreToolsModal } from "./MoreToolsModal";
@@ -118,6 +117,48 @@ const SECTIONS: { id: RunnerSection; label: string }[] = [
 
 /** The one thing the Tools section says until real per-task tools land. */
 export const TOOLS_PLACEHOLDER = "Tools to help you complete the unit task will go here.";
+
+/** What the Inputs section says when the task authors no fields. */
+export const NO_INPUTS_LINE = "This task has nothing to type in.";
+
+/** First Profit blue / purple - the criterion and task blocks in the header. */
+const CRITERION_BLUE = "hsl(217 74% 56%)";
+const TASK_PURPLE = "hsl(265 52% 58%)";
+
+/**
+ * ONE headline style, used by EVERY section (owner spec 2026-08-04: every
+ * section gets a headline, so each one opens with something readable rather
+ * than a label or a wall of body copy).
+ */
+const SECTION_HEADLINE =
+  "font-display text-[22px] font-black leading-[1.2] text-[hsl(25_34%_20%)]";
+
+/**
+ * A numbered block in the room header: phase, criterion, task. `dark` carries
+ * ink text instead of white - phase 5 (scale) is amber, where white text is
+ * unreadable (1.97:1), so it is the one block that flips.
+ */
+function NumberBlock({ n, bg, dark }: { n: number; bg: string; dark?: boolean }) {
+  return (
+    <span
+      className={`flex h-[26px] min-w-[26px] shrink-0 items-center justify-center rounded-lg px-1 font-mono text-xs font-bold ${
+        dark ? "text-[hsl(25_34%_20%)]" : "text-white"
+      }`}
+      style={{ background: bg }}
+    >
+      {n}
+    </span>
+  );
+}
+
+/** The "Criterion" / "Task" words between the blocks. */
+function BlockLabel({ children }: { children: React.ReactNode }) {
+  return (
+    <span className="shrink-0 font-mono text-[10.5px] uppercase tracking-[0.08em] text-[hsl(25_20%_38%)]">
+      {children}
+    </span>
+  );
+}
 
 export function StepRunner() {
   const game = useGame();
@@ -210,11 +251,8 @@ export function StepRunner() {
   const phaseId = phaseOfCriterion(runnerStep);
   const phase = phaseId ? phaseById(phaseId) : undefined;
   const accent = phase?.accent ?? "hsl(14 78% 54%)";
-  const accentText = phase?.text ?? "hsl(14 78% 44%)";
-  const accentWash = phase?.wash ?? "hsl(14 78% 54% / .09)";
   const phaseCriteria = phaseId ? criterionIdsForPhase(phaseId) : [];
   const critNum = phaseCriteria.indexOf(runnerStep) + 1 || 1;
-  const critTotal = phaseCriteria.length || 1;
 
   // Band-resolved task content (P0: the words the child reads must come from
   // the generated content at the session's band, per task — never the
@@ -232,22 +270,6 @@ export function StepRunner() {
   const taskDoneWhen = doneWhenForBand(currentTaskId, band) ?? step.doneWhen;
   const allBandsNote = displayAllBandsNote(currentTaskId);
 
-  // Idea/business context for the header (Unit 8; origin IA decision): phases
-  // 1-3 name the idea being worked (one-liner when authored); phases 4-5 name
-  // THE BUSINESS — the promoted idea's one-liner (a business IS a promoted
-  // idea, never a separate name).
-  const isBusinessPhase = phaseId === "grow" || phaseId === "scale";
-  let ideaContext: string;
-  if (isBusinessPhase) {
-    const business = activeBusiness(game);
-    const bizIndex = business ? ideas.findIndex((i) => i.id === business.ideaId) : -1;
-    ideaContext = `Your business · ${bizIndex >= 0 ? ideaSummaryName(game, bizIndex) : `Idea #${activeIdea + 1}`}`;
-  } else {
-    const liner = ideaOneLiner(game, activeIdea);
-    ideaContext = liner
-      ? `Idea #${activeIdea + 1} · ${ideaSummaryName(game, activeIdea)}`
-      : `Idea #${activeIdea + 1}`;
-  }
   const alreadyDone = isTaskDone(activeIdea, runnerStep, idx);
   const isLast = idx + 1 >= total;
 
@@ -326,23 +348,24 @@ export function StepRunner() {
           pads its cards (p-4 at 390px, p-7 from sm) — so a unit task sits ON
           the floor of the room instead of covering it wall to wall. */}
       <div className="flex h-full w-full flex-col overflow-hidden rounded-[16px] border-2 border-[hsl(25_34%_20%/0.15)] bg-[hsl(40_55%_97%)] shadow-[0_6px_0_rgba(120,80,40,.1)]">
-      {/* The accessible name for the whole view. The visible criterion title
-          lives in the Overview section, which is not always mounted, so the
-          labelledby target is this always-present heading. */}
-      <h1 id="fp-runner-title" className="sr-only">
-        {step.title} · Task {idx + 1} of {total}
-      </h1>
-
-      {/* Top bar: where you are + the ✕ that returns you to the room. Keeps
-          the phase wash the old dialog header carried (sell = the exact
-          pre-Unit-8 value). */}
-      <header
-        className="flex items-center justify-between gap-4 px-5 py-2.5 sm:px-6"
-        style={{ background: accentWash }}
-      >
-        <p className="truncate font-mono text-[10px] uppercase tracking-[0.2em]" style={{ color: accentText }}>
-          {runnerStep} · Task {idx + 1} of {total}
-        </p>
+      {/* The room header (owner spec 2026-08-04): NO background, and it states
+          the whole address in one line - which phase, which criterion, which
+          task, and the criterion's headline - so you always know which room
+          you are in and where you are on The Path. It carries the view's
+          accessible name, so no separate sr-only heading is needed. */}
+      <header className="flex items-start justify-between gap-3 px-5 py-3 sm:px-6">
+        <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1.5">
+          {/* Phase: the phase's own color. Phase 5 (scale) is amber, so it
+              takes ink text where the other four take white. */}
+          <NumberBlock n={phase?.index ?? 1} bg={accent} dark={phaseId === "scale"} />
+          <BlockLabel>Criterion</BlockLabel>
+          <NumberBlock n={critNum} bg={CRITERION_BLUE} />
+          <BlockLabel>Task</BlockLabel>
+          <NumberBlock n={idx + 1} bg={TASK_PURPLE} />
+          <h1 id="fp-runner-title" className={`${SECTION_HEADLINE} min-w-0 basis-full sm:basis-auto`}>
+            {step.title}
+          </h1>
+        </div>
         <button
           type="button"
           onClick={close}
@@ -428,38 +451,19 @@ export function StepRunner() {
         <div className="min-h-0 flex-1 overflow-y-auto px-5 py-5 sm:px-6">
           {section === "overview" ? (
             <div>
-              {/* Wraps (never truncates) so the idea/business context stays
-                  visible at 390px. */}
-              <p className="font-mono text-[10px] uppercase tracking-[0.2em]" style={{ color: accentText }}>
-                Phase {phase?.index ?? 1} · {phase?.name ?? "Sell"} · Criterion {critNum} of {critTotal} ·{" "}
-                {ideaContext}
-              </p>
-              <h2 className="mt-1 font-display text-xl font-black leading-tight text-[hsl(25_34%_20%)]">
-                {step.title}
-              </h2>
-              {/* Criterion intro chrome (STEP_META brief) — the per-TASK words
-                  live in Instructions. */}
-              <p className="mt-1 text-[12.5px] leading-[1.5] text-[hsl(25_20%_38%)]">{step.brief}</p>
+              {/* The eyebrow and the criterion title both moved INTO the room
+                  header, so what is left - the criterion's description - is
+                  promoted to this section's headline rather than sitting under
+                  chrome that repeats what the header already says. */}
+              <h2 className={SECTION_HEADLINE}>{step.brief}</h2>
             </div>
           ) : null}
 
           {section === "instructions" ? (
             <div>
-              <div className="flex items-center gap-2">
-                <span
-                  className="flex h-[26px] w-[26px] items-center justify-center rounded-lg font-mono text-xs font-bold text-white"
-                  style={{ background: accent }}
-                >
-                  {idx + 1}
-                </span>
-                <span className="font-mono text-[10.5px] uppercase tracking-[0.08em] text-[hsl(25_20%_38%)]">
-                  Task {idx + 1} of {total}
-                </span>
-              </div>
-
-              <h3 className="mt-3 font-display text-[26px] font-black leading-[1.15] text-[hsl(25_34%_20%)]">
-                {taskLabel}
-              </h3>
+              {/* No eyebrow: the header already states phase, criterion and
+                  task, so repeating "Task N of M" here was pure duplication. */}
+              <h3 className={SECTION_HEADLINE}>{taskLabel}</h3>
               {/* Banded instruction body: the shared body plus the session
                   band's variant line (taskBodyForBand joins them with a
                   newline; pre-line keeps the variant on its own line).
@@ -491,9 +495,7 @@ export function StepRunner() {
           {section === "inputs" ? (
             <div>
               {taskFields.length === 0 ? (
-                <p className="text-[13.5px] leading-[1.55] text-[hsl(25_20%_38%)]">
-                  This task has nothing to type in. Instructions has what to do.
-                </p>
+                <h3 className={SECTION_HEADLINE}>{NO_INPUTS_LINE}</h3>
               ) : null}
               {/* maxLength caps (2000 single-line / 4000 textarea) keep the
                   aggregate save doc well under the server's 256KiB cap even at
@@ -553,7 +555,7 @@ export function StepRunner() {
           ) : null}
 
           {section === "tools" ? (
-            <p className="text-[13.5px] leading-[1.55] text-[hsl(25_20%_38%)]">{TOOLS_PLACEHOLDER}</p>
+            <h3 className={SECTION_HEADLINE}>{TOOLS_PLACEHOLDER}</h3>
           ) : null}
         </div>
       </div>

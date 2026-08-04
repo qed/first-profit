@@ -64,11 +64,6 @@ function cssBackground(value: string): string {
   el.style.background = value;
   return el.style.background;
 }
-function cssColor(value: string): string {
-  const el = document.createElement("div");
-  el.style.color = value;
-  return el.style.color;
-}
 
 function Harness({
   seed,
@@ -135,6 +130,23 @@ afterEach(() => {
  * now lives behind a section button. Every test that reads task words or
  * fields opens its section first. Overview is the default on open.
  */
+/**
+ * The room header states the whole address as number blocks (2026-08-04):
+ * [phase] Criterion [n] Task [n] + the criterion headline. Returns the three
+ * numbers in order so tests can assert position on The Path directly.
+ */
+function headerBlocks() {
+  const header = document.querySelector("header") as HTMLElement;
+  return Array.from(header.querySelectorAll("span[style*='background']")).map(
+    (el) => (el.textContent || "").trim(),
+  );
+}
+
+function headerPhaseBlock() {
+  const header = document.querySelector("header") as HTMLElement;
+  return header.querySelector("span[style*='background']") as HTMLElement;
+}
+
 function openSection(label: "Overview" | "Instructions" | "Inputs" | "Tools") {
   fireEvent.click(screen.getByRole("button", { name: label }));
 }
@@ -142,10 +154,15 @@ function openSection(label: "Overview" | "Instructions" | "Inputs" | "Tools") {
 describe("StepRunner", () => {
   it("shows the criterion header, task rail count, and done-when for 1.1", () => {
     render(<Harness seed={seedAtLastTaskOf11()} />);
-    // Overview is the landing section and carries the criterion chrome.
-    expect(screen.getByText("Phase 1 · Sell · Criterion 1 of 5 · Idea #1")).toBeTruthy();
+    // The header states the whole address: phase 1, criterion 1, task 5.
+    expect(headerBlocks()).toEqual(["1", "1", "5"]);
+    expect(screen.getByText("Criterion")).toBeTruthy();
+    expect(screen.getByText("Task")).toBeTruthy();
+    // ...plus the criterion headline, which is the view's accessible name.
+    expect(document.getElementById("fp-runner-title")?.textContent).toBe(
+      "Pitch a product in 60 seconds, no notes",
+    );
     openSection("Instructions");
-    expect(screen.getByText("Task 5 of 5")).toBeTruthy();
     expect(screen.getByText("Done when")).toBeTruthy();
     // Real path.ts copy, em-dash free.
     expect(document.body.textContent).not.toMatch(/—/);
@@ -159,8 +176,11 @@ describe("StepRunner", () => {
     for (const label of ["Overview", "Instructions", "Inputs", "Tools"]) {
       expect(screen.getByRole("button", { name: label })).toBeTruthy();
     }
-    // Overview by default; its content is present and Instructions' is not.
-    expect(screen.getByText("Phase 1 · Sell · Criterion 1 of 5 · Idea #1")).toBeTruthy();
+    // Overview by default: its headline is the criterion DESCRIPTION now (the
+    // title moved into the header), and Instructions' content is not mounted.
+    expect(
+      screen.getByText(/Pick the thing you want to sell/),
+    ).toBeTruthy();
     expect(screen.queryByText("Done when")).toBeNull();
 
     openSection("Tools");
@@ -168,11 +188,19 @@ describe("StepRunner", () => {
       screen.getByText("Tools to help you complete the unit task will go here."),
     ).toBeTruthy();
     // Switching sections shows one at a time.
-    expect(screen.queryByText("Phase 1 · Sell · Criterion 1 of 5 · Idea #1")).toBeNull();
+    expect(screen.queryByText(/Pick the thing you want to sell/)).toBeNull();
 
-    // This task (index 4) has no authored fields, so Inputs says so plainly.
+    // This task (index 4) has no authored fields, so Inputs says so plainly —
+    // as a HEADLINE, like every other section (owner spec 2026-08-04).
     openSection("Inputs");
-    expect(screen.getByText(/nothing to type in/i)).toBeTruthy();
+    const noInputs = screen.getByText(/nothing to type in/i);
+    expect(noInputs.tagName).toBe("H3");
+    expect(noInputs.className).toContain("font-black");
+    // Tools' placeholder is a headline too.
+    openSection("Tools");
+    const tools = screen.getByText(/Tools to help you complete/);
+    expect(tools.tagName).toBe("H3");
+    expect(tools.className).toContain("font-black");
   });
 
   it("fills the FLOOR box, not the viewport, and is not a floating modal card", () => {
@@ -283,7 +311,7 @@ describe("StepRunner", () => {
       runnerIndex: 0,
     };
     render(<Harness seed={seed} />);
-    expect(screen.getByText("Phase 2 · Build · Criterion 1 of 5 · Idea #1")).toBeTruthy();
+    expect(headerBlocks()).toEqual(["2", "1", "1"]);
     expect(screen.getByText("Ship the smallest thing that works")).toBeTruthy();
   });
 
@@ -300,40 +328,12 @@ describe("StepRunner", () => {
     };
     const { container } = render(<Harness seed={seed} />);
     // Criterion position derives from the phase's ordered ids, not the raw id digit.
-    expect(screen.getByText("Phase 2 · Build · Criterion 3 of 5 · Idea #1")).toBeTruthy();
-    openSection("Instructions");
-    expect(screen.getByText("Task 1 of 6")).toBeTruthy();
+    expect(headerBlocks()).toEqual(["2", "3", "1"]);
     // One rail segment bar per REAL task: 2.3 carries six.
     expect(container.querySelectorAll(".h-1\\.5").length).toBe(6);
   });
 
-  it("shows the idea one-liner in the header once authored (idea context, Unit 8)", () => {
-    const s = seedAtLastTaskOf11();
-    render(
-      <Harness
-        seed={{ ...s, ideas: [{ fields: { oneLiner: "Bracelets" }, done: s.ideas[0].done }] }}
-      />,
-    );
-    expect(screen.getByText("Phase 1 · Sell · Criterion 1 of 5 · Idea #1 · Bracelets")).toBeTruthy();
-  });
 
-  it("shows the BUSINESS name in the header on a Grow criterion (4.1)", () => {
-    const s = initialState();
-    const seed: GameState = {
-      ...s,
-      stage: "app",
-      ideas: [{ id: "idea-a", fields: { oneLiner: "Slime kits" }, done: {} }],
-      activeIdea: 0,
-      businesses: [{ id: "biz-1", ideaId: "idea-a", archived: false }],
-      runnerOpen: true,
-      runnerStep: "4.1",
-      runnerIndex: 0,
-    };
-    render(<Harness seed={seed} />);
-    expect(
-      screen.getByText("Phase 4 · Grow · Criterion 1 of 5 · Your business · Slime kits"),
-    ).toBeTruthy();
-  });
 
   it("themes the runner chrome in PHASE COLORS on a Build criterion (2.1)", () => {
     const s = initialState();
@@ -350,10 +350,12 @@ describe("StepRunner", () => {
     const build = phaseById("build");
     // Header wash + label text carry the Build hsl chrome from PHASES (jsdom
     // normalizes hsl to rgba, so compare via the same normalization).
+    // The header carries NO background of its own now; the phase color lives
+    // in its numbered phase block instead.
     const header = container.querySelector("header") as HTMLElement;
-    expect(header.style.background).toBe(cssBackground(build.wash));
-    const label = screen.getByText(/Phase 2 · Build · Criterion 1 of 5/) as HTMLElement;
-    expect(label.style.color).toBe(cssColor(build.text));
+    expect(header.style.background).toBe("");
+    expect(headerPhaseBlock().style.background).toBe(cssBackground(build.accent));
+    expect(headerPhaseBlock().className).toContain("text-white");
     // The primary CTA takes the Build ctaFill (non-sell phases only) — the
     // WCAG-safe deepened fill, never the raw accent (unit review FIX 4).
     const cta = screen.getByText("✓ I did it") as HTMLElement;
@@ -366,13 +368,34 @@ describe("StepRunner", () => {
   it("keeps the SELL runner exactly as before Unit 8 (verified-green CTA, sell wash)", () => {
     const { container } = render(<Harness seed={seedAtLastTaskOf11()} />);
     const header = container.querySelector("header") as HTMLElement;
-    // The exact pre-Unit-8 header wash: hsl(14 78% 54% / 0.09).
-    expect(header.style.background).toBe(cssBackground("hsl(14 78% 54% / 0.09)"));
-    expect(header.style.background).toBe(cssBackground(phaseById("sell").wash));
+    expect(header.style.background).toBe("");
+    // Sell's phase block carries the sell accent, white text.
+    expect(headerPhaseBlock().style.background).toBe(cssBackground(phaseById("sell").accent));
+    expect(headerPhaseBlock().className).toContain("text-white");
     // Sell's CTA keeps the bg-verified class with NO inline phase override.
     const cta = screen.getByText("✓ I did it") as HTMLElement;
     expect(cta.className).toContain("bg-verified");
     expect(cta.style.background).toBe("");
+  });
+
+  it("phase 5 (scale) takes INK text on its header block, where white is unreadable", () => {
+    // Scale's accent is amber: white on it is 1.97:1. It is the ONE phase
+    // block that flips to ink (owner spec 2026-08-04).
+    const s = initialState();
+    const seed: GameState = {
+      ...s,
+      stage: "app",
+      ideas: [{ fields: {}, done: {} }],
+      activeIdea: 0,
+      runnerOpen: true,
+      runnerStep: "5.1",
+      runnerIndex: 0,
+    };
+    render(<Harness seed={seed} />);
+    expect(headerBlocks()[0]).toBe("5");
+    expect(headerPhaseBlock().style.background).toBe(cssBackground(phaseById("scale").accent));
+    expect(headerPhaseBlock().className).toContain("text-[hsl(25_34%_20%)]");
+    expect(headerPhaseBlock().className).not.toContain("text-white");
   });
 
   it("renders BAND-RESOLVED copy: the same task shows different words for g3_5 vs g9_12", () => {
@@ -469,9 +492,8 @@ describe("StepRunner", () => {
     expect(next.className).toContain("min-h-[44px]");
     fireEvent.click(next);
     expect(actions).toContainEqual({ type: "OPEN_RUNNER", stepId: "1.1", index: 1 });
-    // Advancing resets the view to Overview, so read the counter in Instructions.
-    openSection("Instructions");
-    expect(screen.getByText("Task 2 of 5")).toBeTruthy();
+    // The header's task block is the counter now.
+    expect(headerBlocks()).toEqual(["1", "1", "2"]);
   });
 
   it("review mode on the DONE last task: ✓ Done is LIVE and returns to the floor", () => {
@@ -548,7 +570,7 @@ describe("More tools please modal (Change #8)", () => {
     expect(document.body.textContent).toContain(taskTitleForBand("1.1.5", "g6_8")!);
     // The runner is not rendered underneath (completely separate overlay).
     expect(screen.queryByText("✓ I did it")).toBeNull();
-    expect(screen.queryByText("Task 5 of 5")).toBeNull();
+    expect(screen.queryByRole("navigation", { name: "Task sections" })).toBeNull();
     // Kid copy stays em-dash free.
     expect(Object.values(MORE_TOOLS_COPY).join(" ")).not.toMatch(/—/);
   });
@@ -582,8 +604,7 @@ describe("More tools please modal (Change #8)", () => {
     fireEvent.click(screen.getByLabelText(MORE_TOOLS_COPY.close));
     expect(submit).not.toHaveBeenCalled();
     // The runner is back exactly as it was: same task index, CTA present.
-    openSection("Instructions");
-    expect(screen.getByText("Task 5 of 5")).toBeTruthy();
+    expect(headerBlocks()).toEqual(["1", "1", "5"]);
     expect(screen.getByText("✓ I did it")).toBeTruthy();
     expect(screen.queryByText(MORE_TOOLS_COPY.title)).toBeNull();
   });
@@ -595,8 +616,7 @@ describe("More tools please modal (Change #8)", () => {
     expect(submit).not.toHaveBeenCalled();
     expect(screen.queryByText(MORE_TOOLS_COPY.title)).toBeNull();
     // The Escape closed only the modal, never the runner underneath.
-    openSection("Instructions");
-    expect(screen.getByText("Task 5 of 5")).toBeTruthy();
+    expect(headerBlocks()).toEqual(["1", "1", "5"]);
   });
 });
 
