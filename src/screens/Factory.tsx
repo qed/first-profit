@@ -32,6 +32,7 @@
  * tab focus. Idea identity lives in the GlobalNav's chip (App-level), not here.
  */
 import { useCallback, useEffect, useRef, useState } from "react";
+import { Pencil } from "lucide-react";
 import { useGame } from "../state/GameContext";
 import { isPublicSiteEnabled } from "../config";
 import { firstIncompleteTaskIndex, ideaOneLiner, ideaProgressLabel, ideaSummaryName, NAMING_STEP_ID, nextCoachTarget, roomEntryFor } from "../state/floorSelectors";
@@ -379,14 +380,23 @@ export function SwitcherDialog({
 export const IDEA_NAME_MAX_CHARS = 60;
 
 /**
- * The idea summary dialog (2026-08-03 rule 2): tapping a FILLED slot in the
- * Sell floor's "Your Ideas" row opens THIS summary instead of path entry —
- * the idea's name and one-liner (both editable; SET_FIELD with an EXPLICIT
- * ideaIndex, never assumed active) plus the progress line. Edits commit on
- * blur/save and flush immediately (game.flushNow, the Step Runner's
- * public-page freshness discipline — both strings reach the live public page
- * through the projection). Naming here also moves the coach off 1.1.1: the
- * floor selectors re-derive from the same fields (ideaNeedsNaming).
+ * The idea summary dialog (2026-08-03 rule 2; edit-in-place rework same day):
+ * tapping a FILLED slot in the Sell floor's "Your Ideas" row opens THIS
+ * summary instead of path entry.
+ *
+ * READ MODE by default: the name and the one-liner render as fully-wrapping
+ * text bubbles (never truncated here — cards elsewhere truncate for handoff),
+ * with muted kid-friendly placeholders when empty. Each section has a pencil
+ * icon button (lucide, the Login.tsx eye-toggle convention) that flips JUST
+ * that section into an input. NOTHING writes until the learner presses Save:
+ * the Save CTA exists only while a draft differs from the stored value,
+ * docked bottom-right. Save commits the changed field(s) via SET_FIELD with
+ * the EXPLICIT ideaIndex (never assumed active) plus ONE flushNow (the Step
+ * Runner's public-page freshness discipline — both strings reach the live
+ * public page through the projection), then returns to read mode. The X (and
+ * Escape, same semantics) always closes and simply discards unsaved drafts —
+ * they are local state, and the dialog remounts fresh per open. Naming here
+ * also moves the coach off 1.1.1 (floorSelectors.ideaNeedsNaming re-derives).
  *
  * Shell matches the other overlays: full-screen below sm, floating dialog
  * from sm up. Open-state lives in Factory's useState (above the breakpoint
@@ -404,8 +414,12 @@ export function IdeaSummaryDialog({
   const { dispatch } = game;
   const panelRef = useRef<HTMLDivElement>(null);
   const idea = game.ideas[ideaIndex];
-  const [name, setName] = useState(idea?.fields.productName ?? "");
-  const [liner, setLiner] = useState(idea?.fields.oneLiner ?? "");
+  const storedName = idea?.fields.productName ?? "";
+  const storedLiner = idea?.fields.oneLiner ?? "";
+  const [name, setName] = useState(storedName);
+  const [liner, setLiner] = useState(storedLiner);
+  const [editingName, setEditingName] = useState(false);
+  const [editingLiner, setEditingLiner] = useState(false);
 
   useEffect(() => {
     panelRef.current?.focus();
@@ -426,23 +440,35 @@ export function IdeaSummaryDialog({
   const nameMeta = namingFields.find((f) => f.key === "productName");
   const linerMeta = namingFields.find((f) => f.key === "oneLiner");
 
+  // Dirty = a draft differs from the stored value. The Save CTA exists ONLY
+  // then; committing (below) makes stored catch up, so it disappears again.
+  const dirty = name !== storedName || liner !== storedLiner;
+
   /** Dispatch SET_FIELD for THIS idea if the draft differs; true when it did. */
   const commitField = (key: "productName" | "oneLiner", value: string): boolean => {
     if ((idea.fields[key] ?? "") === value) return false;
     dispatch({ type: "SET_FIELD", ideaIndex, key, value });
     return true;
   };
-  /** Blur commit: land the edit now (flushNow is optional-called defensively —
-   *  test harnesses that stub the context may omit it). */
-  const commitOnBlur = (key: "productName" | "oneLiner", value: string) => {
-    if (commitField(key, value)) void game.flushNow?.();
-  };
-  const saveAndClose = () => {
+  /** Save is the ONLY writer (no blur commits): changed field(s) + one flush,
+   *  then back to read mode. flushNow is optional-called defensively — test
+   *  harnesses that stub the context may omit it. */
+  const save = () => {
     const changedName = commitField("productName", name);
     const changedLiner = commitField("oneLiner", liner);
     if (changedName || changedLiner) void game.flushNow?.();
-    onClose();
+    setEditingName(false);
+    setEditingLiner(false);
   };
+
+  const sectionLabel =
+    "mb-1.5 block font-mono text-[10.5px] uppercase tracking-[0.08em] text-[hsl(25_20%_38%)]";
+  const bubble =
+    "min-h-[44px] flex-1 whitespace-normal break-words rounded-[10px] border-2 border-[hsl(25_34%_20%/0.12)] bg-white px-3.5 py-3 text-sm leading-relaxed";
+  const inputClass =
+    "w-full rounded-[10px] border-2 border-[hsl(25_34%_20%/0.15)] bg-white px-3.5 py-3 text-sm text-[hsl(25_34%_20%)] outline-none focus:border-sell";
+  const editButton =
+    "flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border-2 border-[hsl(25_34%_20%/0.15)] bg-[hsl(40_55%_97%)] text-[hsl(25_20%_38%)] hover:border-[hsl(25_34%_20%/0.4)] hover:text-[hsl(25_34%_20%)]";
 
   return (
     <div className="fixed inset-0 z-[55] flex bg-[hsl(25_34%_20%/0.55)] sm:items-center sm:justify-center sm:p-4">
@@ -477,51 +503,105 @@ export function IdeaSummaryDialog({
           </button>
         </header>
 
-        <div className="px-5 pb-7 pt-5 sm:px-6">
-          <label
-            htmlFor="fp-idea-summary-name"
-            className="mb-1.5 block font-mono text-[10.5px] uppercase tracking-[0.08em] text-[hsl(25_20%_38%)]"
-          >
-            {nameMeta?.label ?? "Product name"}
-          </label>
-          <input
-            id="fp-idea-summary-name"
-            maxLength={IDEA_NAME_MAX_CHARS}
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            onBlur={() => commitOnBlur("productName", name)}
-            placeholder={nameMeta?.placeholder}
-            className="min-h-[44px] w-full rounded-[10px] border-2 border-[hsl(25_34%_20%/0.15)] bg-white px-3.5 py-3 text-sm text-[hsl(25_34%_20%)] outline-none focus:border-sell"
-          />
+        <div className="flex flex-1 flex-col px-5 pb-7 pt-5 sm:px-6">
+          {/* ── Name ─────────────────────────────────────────────────── */}
+          {editingName ? (
+            <>
+              <label htmlFor="fp-idea-summary-name" className={sectionLabel}>
+                {nameMeta?.label ?? "Product name"}
+              </label>
+              <input
+                id="fp-idea-summary-name"
+                maxLength={IDEA_NAME_MAX_CHARS}
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                placeholder={nameMeta?.placeholder}
+                autoFocus
+                className={`min-h-[44px] ${inputClass}`}
+              />
+            </>
+          ) : (
+            <>
+              <p className={sectionLabel}>{nameMeta?.label ?? "Product name"}</p>
+              <div className="flex items-start gap-2">
+                <p
+                  data-testid="fp-idea-name-bubble"
+                  className={bubble}
+                  style={{ color: name ? "hsl(25 34% 20%)" : "hsl(25 34% 20% / .45)" }}
+                >
+                  {name || "Not named yet"}
+                </p>
+                <button
+                  type="button"
+                  aria-label="Edit name"
+                  onClick={() => setEditingName(true)}
+                  className={editButton}
+                >
+                  <Pencil size={18} aria-hidden />
+                </button>
+              </div>
+            </>
+          )}
 
-          <label
-            htmlFor="fp-idea-summary-liner"
-            className="mb-1.5 mt-[18px] block font-mono text-[10.5px] uppercase tracking-[0.08em] text-[hsl(25_20%_38%)]"
-          >
-            {linerMeta?.label ?? "Your one-liner"}
-          </label>
-          <input
-            id="fp-idea-summary-liner"
-            maxLength={SITE_ONE_LINER_MAX_CHARS}
-            value={liner}
-            onChange={(e) => setLiner(e.target.value)}
-            onBlur={() => commitOnBlur("oneLiner", liner)}
-            placeholder={linerMeta?.placeholder}
-            className="min-h-[44px] w-full rounded-[10px] border-2 border-[hsl(25_34%_20%/0.15)] bg-white px-3.5 py-3 text-sm text-[hsl(25_34%_20%)] outline-none focus:border-sell"
-          />
-          {isPublicSiteEnabled() ? (
-            <p className="mt-1.5 text-[12px] text-[hsl(25_20%_38%)]">
-              This goes on your public page. No phone numbers, addresses, or last names.
-            </p>
+          {/* ── One-liner ("idea") ───────────────────────────────────── */}
+          {editingLiner ? (
+            <>
+              <label htmlFor="fp-idea-summary-liner" className={`mt-[18px] ${sectionLabel}`}>
+                {linerMeta?.label ?? "Your one-liner"}
+              </label>
+              <textarea
+                id="fp-idea-summary-liner"
+                rows={3}
+                maxLength={SITE_ONE_LINER_MAX_CHARS}
+                value={liner}
+                onChange={(e) => setLiner(e.target.value)}
+                placeholder={linerMeta?.placeholder}
+                autoFocus
+                className={`resize-y ${inputClass}`}
+              />
+              {isPublicSiteEnabled() ? (
+                <p className="mt-1.5 text-[12px] text-[hsl(25_20%_38%)]">
+                  This goes on your public page. No phone numbers, addresses, or last names.
+                </p>
+              ) : null}
+            </>
+          ) : (
+            <>
+              <p className={`mt-[18px] ${sectionLabel}`}>{linerMeta?.label ?? "Your one-liner"}</p>
+              <div className="flex items-start gap-2">
+                <p
+                  data-testid="fp-idea-liner-bubble"
+                  className={bubble}
+                  style={{ color: liner ? "hsl(25 34% 20%)" : "hsl(25 34% 20% / .45)" }}
+                >
+                  {liner || "No description yet"}
+                </p>
+                <button
+                  type="button"
+                  aria-label="Edit idea"
+                  onClick={() => setEditingLiner(true)}
+                  className={editButton}
+                >
+                  <Pencil size={18} aria-hidden />
+                </button>
+              </div>
+            </>
+          )}
+
+          {/* Dirty-gated Save: exists only while a draft differs from the
+              stored value, docked bottom-right (sticky so it stays reachable
+              while the full-screen mobile dialog scrolls). */}
+          {dirty ? (
+            <div className="pointer-events-none sticky bottom-4 mt-6 flex justify-end">
+              <button
+                type="button"
+                onClick={save}
+                className="pointer-events-auto min-h-[48px] rounded-2xl bg-verified px-7 font-display text-lg font-black text-white shadow-[0_5px_0_hsl(150_52%_26%)] transition hover:-translate-y-0.5 active:translate-y-0.5 active:shadow-[0_2px_0_hsl(150_52%_26%)] focus:outline-none focus-visible:ring-4 focus-visible:ring-verified/40"
+              >
+                Save
+              </button>
+            </div>
           ) : null}
-
-          <button
-            type="button"
-            onClick={saveAndClose}
-            className="mt-6 min-h-[48px] w-full rounded-2xl bg-verified px-5 font-display text-lg font-black text-white shadow-[0_5px_0_hsl(150_52%_26%)] transition hover:-translate-y-0.5 active:translate-y-0.5 active:shadow-[0_2px_0_hsl(150_52%_26%)] focus:outline-none focus-visible:ring-4 focus-visible:ring-verified/40"
-          >
-            Save my idea
-          </button>
         </div>
       </div>
     </div>
