@@ -28,7 +28,7 @@ import {
 } from "../state/gameCore";
 import { phaseById, type PhaseId } from "../data/path";
 import { ideaProgressLabel, ideaSummaryName } from "../state/floorSelectors";
-import { CompanyCard, DashedSlot, PhaseCard, ProductCard, ProductEmpty, SectionTitle } from "./PodCardContent";
+import { CompanyCard, DashedSlot, IdeaSlot, PhaseCard, ProductCard, SectionTitle } from "./PodCardContent";
 import type { WalkIntent } from "./FactoryFloor";
 
 const GRID = "mt-3 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5";
@@ -127,7 +127,12 @@ export function PhasesFloor({ onWalk }: { onWalk: (intent: WalkIntent) => void }
                 }}
               />
             ) : (
-              <ProductEmpty key={n} num={n + 1} />
+              // EVERY empty slot is a live "New idea" card (2026-08-04). This
+              // is the SAME IdeaSlot the Sell floor's Your Ideas row uses, on
+              // purpose: this row previously had its own inert ProductEmpty
+              // placeholder, so making the Sell row clickable silently left
+              // THIS floor — the one the child actually lands on — dead.
+              <IdeaSlot key={n} kind="create" onClick={() => onWalk({ kind: "createIdea" })} />
             ),
           )}
         </div>

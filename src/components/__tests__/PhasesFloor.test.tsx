@@ -59,9 +59,22 @@ describe("PhasesFloor — real phase cards (Unit 8)", () => {
     expect(walks).toEqual([{ kind: "openIdea", ideaId: "idea-1" }]);
   });
 
-  it("empty Products slots stay inert (no button, no intent)", () => {
-    mount(withIdeas(1));
-    expect(screen.queryByRole("button", { name: /Open Idea #3/i })).toBeNull();
+  it("EVERY empty Products slot is a clickable grey New idea card", () => {
+    // Regression pin (2026-08-04): this row used to render inert placeholders,
+    // so making the Sell floor's Your Ideas row clickable left THIS floor —
+    // the one the child actually lands on — dead. Both floors now render the
+    // same IdeaSlot, and slots 3-5 must be as live as slot 2.
+    const { walks } = mount(withIdeas(2));
+    const empties = screen.getAllByRole("button", { name: "Start a new idea" });
+    expect(empties).toHaveLength(3); // 2 filled + 3 empty = MAX_IDEAS
+    for (const card of empties) {
+      expect(card.textContent).toContain("New idea");
+      expect(card.className).toMatch(/min-h-\[84px\]/);
+      expect(card.className).toMatch(/bg-\[hsl\(40_8%_94%\)\]/);
+    }
+    // The LAST slot (#5) is live, not just the next one up.
+    fireEvent.click(empties[2]);
+    expect(walks).toEqual([{ kind: "createIdea" }]);
   });
 
   it("unlocks Build for the ACTIVE idea once its Sell phase completes; tap opens the Build floor", () => {

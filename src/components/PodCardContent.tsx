@@ -243,15 +243,8 @@ export function ProductCard({
   );
 }
 
-export function ProductEmpty({ num }: { num: number }) {
-  return (
-    <div className="flex min-h-[84px] items-center justify-center rounded-[14px] border-2 border-dashed border-[hsl(25_34%_20%/0.1)] bg-[hsl(25_34%_20%/0.015)] p-3">
-      <span className="font-mono text-[9px] uppercase tracking-[0.06em]" style={{ color: "hsl(25 20% 38% / .5)" }}>
-        Idea #{num}
-      </span>
-    </div>
-  );
-}
+// ProductEmpty (the inert "Idea #N" placeholder) was deleted 2026-08-04: both
+// floors now render the clickable grey IdeaSlot `create` card for empty slots.
 
 // ── Criterion floor · room cards (phase-colored, Unit 8) ────────────────────
 
