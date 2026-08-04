@@ -113,7 +113,13 @@ export function PhasesFloor({ onWalk }: { onWalk: (intent: WalkIntent) => void }
         <div className={GRID}>
           {Array.from({ length: MAX_IDEAS }).map((_, n) =>
             n < ideas.length ? (
-              <ProductCard key={n} num={n + 1} name={ideaSummaryName(game, n)} progress={ideaProgressLabel(game, n)} />
+              <ProductCard
+                key={n}
+                num={n + 1}
+                name={ideaSummaryName(game, n)}
+                progress={ideaProgressLabel(game, n)}
+                onOpen={() => onWalk({ kind: "openIdea", ideaIndex: n })}
+              />
             ) : (
               <ProductEmpty key={n} num={n + 1} />
             ),

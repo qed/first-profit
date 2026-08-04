@@ -50,6 +50,18 @@ describe("PhasesFloor — real phase cards (Unit 8)", () => {
     expect(walks).toEqual([{ kind: "openPhaseFloor", phase: "sell" }]);
   });
 
+  it("a saved idea's Products card is a button that opens the idea summary (openIdea intent)", () => {
+    const { walks } = mount(withIdeas(2));
+    const card = screen.getByRole("button", { name: /Open Idea #2/i });
+    fireEvent.click(card);
+    expect(walks).toEqual([{ kind: "openIdea", ideaIndex: 1 }]);
+  });
+
+  it("empty Products slots stay inert (no button, no intent)", () => {
+    mount(withIdeas(1));
+    expect(screen.queryByRole("button", { name: /Open Idea #3/i })).toBeNull();
+  });
+
   it("unlocks Build for the ACTIVE idea once its Sell phase completes; tap opens the Build floor", () => {
     const { walks } = mount(completePhase(withIdeas(1), 0, "sell"));
     expect(screen.queryByText("Complete Sell first")).toBeNull();
