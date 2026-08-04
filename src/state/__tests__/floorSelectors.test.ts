@@ -11,6 +11,7 @@ import {
 import { BUILT_CRITERIA, stepById, type PhaseId } from "../../data/path";
 import {
   currentPhaseFor,
+  ideaNeedsNaming,
   ideaProgressLabel,
   ideaSummaryName,
   nextCoachTarget,
@@ -45,6 +46,23 @@ const ONLY_11_12: ReadonlySet<string> = new Set(["1.1", "1.2"]);
 function withIdeas(n: number): GameState {
   let s = initialState();
   for (let i = 0; i < n; i++) s = apply(s, { type: "CREATE_IDEA" }, { type: "CLOSE_RUNNER" });
+  return s;
+}
+
+/** Give one idea BOTH naming fields (productName + oneLiner), so the naming
+ *  redirect (unnamed idea → 1.1.1) stays out of the way of what a test pins. */
+function nameIdea(state: GameState, ideaIndex: number): GameState {
+  return apply(
+    state,
+    { type: "SET_FIELD", ideaIndex, key: "productName", value: `Product ${ideaIndex + 1}` },
+    { type: "SET_FIELD", ideaIndex, key: "oneLiner", value: `One-liner ${ideaIndex + 1}` },
+  );
+}
+
+/** Base state with N ideas, every one fully named. */
+function withNamedIdeas(n: number): GameState {
+  let s = withIdeas(n);
+  for (let i = 0; i < n; i++) s = nameIdea(s, i);
   return s;
 }
 
@@ -116,12 +134,12 @@ describe("floorSelectors — progress + next task id", () => {
   });
 
   it("advances the next-task id as tasks complete", () => {
-    const s = apply(withIdeas(1), { type: "COMPLETE_TASK", ideaIndex: 0, stepId: "1.1", index: 0 });
+    const s = apply(withNamedIdeas(1), { type: "COMPLETE_TASK", ideaIndex: 0, stepId: "1.1", index: 0 });
     expect(nextTaskId(s, 0)).toBe("1.1.2");
   });
 
   it("keeps walking the Sell phase past 1.2 (Unit 6: no more two-criterion dead end)", () => {
-    let s = withIdeas(1);
+    let s = withNamedIdeas(1);
     s = completeStep(s, 0, "1.1");
     s = completeStep(s, 0, "1.2");
     expect(nextTaskId(s, 0)).toBe("1.3.1");
@@ -129,14 +147,14 @@ describe("floorSelectors — progress + next task id", () => {
   });
 
   it("rolls onto phase 2 with phase-scoped counts once Sell is complete", () => {
-    const s = completePhase(withIdeas(1), 0, "sell");
+    const s = completePhase(withNamedIdeas(1), 0, "sell");
     expect(currentPhaseFor(s, 0)).toBe("build");
     expect(nextTaskId(s, 0)).toBe("2.1.1");
     expect(ideaProgressLabel(s, 0)).toBe(`0/${phaseTaskTotal("build")} tasks · next 2.1.1`);
   });
 
   it("reports 'ready for Grow' at the gated frontier (phases 1-3 done, no business)", () => {
-    let s = withIdeas(1);
+    let s = withNamedIdeas(1);
     s = completePhase(s, 0, "sell");
     s = completePhase(s, 0, "build");
     s = completePhase(s, 0, "validate");
@@ -175,12 +193,12 @@ describe("floorSelectors — room-entry routing (core multi-idea mechanic)", () 
   });
 
   it("enters at the first incomplete task index within the criterion", () => {
-    const s = apply(withIdeas(1), { type: "COMPLETE_TASK", ideaIndex: 0, stepId: "1.1", index: 0 });
+    const s = apply(withNamedIdeas(1), { type: "COMPLETE_TASK", ideaIndex: 0, stepId: "1.1", index: 0 });
     expect(roomEntryFor(s, "1.1")).toEqual({ action: "enter", ideaIndex: 0, index: 1 });
   });
 
   it("excludes an idea that already finished the criterion", () => {
-    let s = withIdeas(2);
+    let s = withNamedIdeas(2);
     s = completeStep(s, 0, "1.1"); // idea 0 done 1.1 → eligible for 1.2, not 1.1
     // For 1.1: only idea 1 is still eligible → direct enter of idea 1.
     expect(roomEntryFor(s, "1.1")).toEqual({ action: "enter", ideaIndex: 1, index: 0 });
@@ -190,12 +208,12 @@ describe("floorSelectors — room-entry routing (core multi-idea mechanic)", () 
 
   it("re-enters a COMPLETED criterion in review mode (task 1) when no idea is in progress", () => {
     // Completing 1.1 must never orphan the authored productName/oneLiner fields.
-    const s = completeStep(withIdeas(1), 0, "1.1");
+    const s = completeStep(withNamedIdeas(1), 0, "1.1");
     expect(roomEntryFor(s, "1.1")).toEqual({ action: "enter", ideaIndex: 0, index: 0 });
   });
 
   it("keeps in-progress priority: a done idea never displaces one mid-criterion", () => {
-    let s = withIdeas(2);
+    let s = withNamedIdeas(2);
     s = completeStep(s, 0, "1.1");
     s = apply(s, { type: "COMPLETE_TASK", ideaIndex: 1, stepId: "1.1", index: 0 });
     // Idea 1 is mid-1.1 → direct enter of idea 1 at its frontier, exactly as before.
@@ -203,7 +221,7 @@ describe("floorSelectors — room-entry routing (core multi-idea mechanic)", () 
   });
 
   it("offers the picker when several DONE ideas could review a criterion", () => {
-    let s = withIdeas(2);
+    let s = withNamedIdeas(2);
     s = completeStep(s, 0, "1.1");
     s = completeStep(s, 1, "1.1");
     expect(roomEntryFor(s, "1.1")).toEqual({ action: "pick", eligible: [0, 1] });
@@ -220,20 +238,20 @@ describe("floorSelectors — Next Step coach target", () => {
   });
 
   it("advances to 1.2 (the market) once 1.1 is done", () => {
-    const s = completeStep(withIdeas(1), 0, "1.1");
+    const s = completeStep(withNamedIdeas(1), 0, "1.1");
     expect(nextCoachTarget(s)).toEqual({ kind: "criterion", stepId: "1.2", room: "market" });
   });
 
   it("prefers the ACTIVE idea's next criterion over other ideas", () => {
     // Two ideas: idea 0 has finished 1.1; idea 1 (active after CREATE_IDEA) has not.
-    let s = withIdeas(2);
+    let s = withNamedIdeas(2);
     s = completeStep(s, 0, "1.1");
     expect(s.activeIdea).toBe(1);
     expect(nextCoachTarget(s)).toEqual({ kind: "criterion", stepId: "1.1", room: "idea" });
   });
 
   it("STOPS at an unbuilt frontier under a RESTRICTED allowlist (gate machinery pinned)", () => {
-    let s = withIdeas(2);
+    let s = withNamedIdeas(2);
     s = completeStep(completeStep(s, 1, "1.1"), 1, "1.2"); // active idea 1 through 1.2
     // The ENGINE's frontier for the active idea is 1.3 (the curriculum walks on)...
     expect(nextUpFor(s, 1)).toBe("1.3");
@@ -246,14 +264,14 @@ describe("floorSelectors — Next Step coach target", () => {
   });
 
   it("hides entirely at an unbuilt frontier with no other built work (restricted allowlist)", () => {
-    const s = completeStep(completeStep(withIdeas(1), 0, "1.1"), 0, "1.2");
+    const s = completeStep(completeStep(withNamedIdeas(1), 0, "1.1"), 0, "1.2");
     expect(nextUpFor(s, 0)).toBe("1.3"); // engine walks
     expect(nextCoachTarget(s, ONLY_11_12)).toBeNull(); // coach stops at the built frontier
     expect(nextCoachTarget(s)).toEqual({ kind: "criterion", stepId: "1.3", room: "market" });
   });
 
   it("crosses the phase boundary UNDER THE DEFAULT ALLOWLIST: Sell complete -> 2.1 in the Build Room", () => {
-    const s = completePhase(withIdeas(1), 0, "sell");
+    const s = completePhase(withNamedIdeas(1), 0, "sell");
     expect(nextUpFor(s, 0)).toBe("2.1");
     // Unit 8: 2.1 is a shipped surface, so the DEFAULT coach targets it; the
     // restricted list still hides it (gate proof).
@@ -268,7 +286,7 @@ describe("floorSelectors — Next Step coach target", () => {
   });
 
   it("targets the PROMOTION seam once the active idea completes phase 3 (business gate)", () => {
-    let s = withIdeas(1);
+    let s = withNamedIdeas(1);
     s = completePhase(s, 0, "sell");
     s = completePhase(s, 0, "build");
     s = completePhase(s, 0, "validate");
@@ -278,7 +296,7 @@ describe("floorSelectors — Next Step coach target", () => {
   });
 
   it("the promotion seam WINS over another idea's remaining work for the active idea", () => {
-    let s = withIdeas(2);
+    let s = withNamedIdeas(2);
     // Active idea (1) validated end-to-end; idea 0 untouched.
     s = completePhase(s, 1, "sell");
     s = completePhase(s, 1, "build");
@@ -289,6 +307,7 @@ describe("floorSelectors — Next Step coach target", () => {
 
   it("the promote target CARRIES the eligible idea's stable id (Unit 7)", () => {
     let s = apply(initialState(), { type: "CREATE_IDEA", ideaId: "idea-a" }, { type: "CLOSE_RUNNER" });
+    s = nameIdea(s, 0);
     s = completePhase(s, 0, "sell");
     s = completePhase(s, 0, "build");
     s = completePhase(s, 0, "validate");
@@ -336,7 +355,7 @@ describe("floorSelectors — content-readiness gate on room entry (BUILT_CRITERI
     // FIX-4 coverage: the exact selector the floor uses to open the runner is
     // exercised across the deep sequence (samples span 1.3-3.5 with variable
     // task counts: 2.3 has six tasks, 3.4 has four), not just the built pair.
-    let s = withIdeas(1);
+    let s = withNamedIdeas(1);
     let guard = 0;
     const entered: string[] = [];
     for (;;) {
@@ -354,5 +373,93 @@ describe("floorSelectors — content-readiness gate on room entry (BUILT_CRITERI
     for (const sample of ["1.3", "1.5", "2.3", "3.4", "3.5"]) {
       expect(entered).toContain(sample);
     }
+  });
+});
+
+describe("floorSelectors — naming redirect (an unnamed idea always routes to 1.1.1)", () => {
+  it("ideaNeedsNaming: true while EITHER field is missing, false once both are set", () => {
+    let s = withIdeas(1);
+    expect(ideaNeedsNaming(s, 0)).toBe(true);
+    s = apply(s, { type: "SET_FIELD", ideaIndex: 0, key: "productName", value: "Recess Bracelets" });
+    expect(ideaNeedsNaming(s, 0)).toBe(true); // one-liner still missing
+    s = apply(s, { type: "SET_FIELD", ideaIndex: 0, key: "oneLiner", value: "Bracelets for recess" });
+    expect(ideaNeedsNaming(s, 0)).toBe(false);
+  });
+
+  it("trimmed-empty fields count as missing (whitespace is not a name)", () => {
+    const s = apply(
+      withNamedIdeas(1),
+      { type: "SET_FIELD", ideaIndex: 0, key: "productName", value: "   " },
+    );
+    expect(ideaNeedsNaming(s, 0)).toBe(true);
+    expect(nextTaskId(s, 0)).toBe("1.1.1");
+  });
+
+  it("is false for an absent idea (no phantom redirects)", () => {
+    expect(ideaNeedsNaming(withIdeas(1), 9)).toBe(false);
+    expect(ideaNeedsNaming(initialState(), 0)).toBe(false);
+  });
+
+  it("nextTaskId pins 1.1.1 for an unnamed idea EVEN WITH 1.1 complete", () => {
+    const s = completeStep(withIdeas(1), 0, "1.1");
+    expect(nextUpFor(s, 0)).toBe("1.2"); // the ENGINE frontier is untouched
+    expect(nextTaskId(s, 0)).toBe("1.1.1"); // the floor redirect wins
+  });
+
+  it("nextTaskId pins 1.1.1 for an unnamed idea deep in Sell; naming releases the frontier", () => {
+    let s = completeStep(completeStep(withIdeas(1), 0, "1.1"), 0, "1.2");
+    expect(nextTaskId(s, 0)).toBe("1.1.1");
+    s = nameIdea(s, 0);
+    expect(nextTaskId(s, 0)).toBe("1.3.1"); // normal frontier the moment both fields exist
+  });
+
+  it("nextTaskId pins 1.1.1 even at the gated business seam (unnamed validated idea)", () => {
+    let s = withIdeas(1);
+    for (const phase of ["sell", "build", "validate"] as const) s = completePhase(s, 0, phase);
+    expect(nextTaskId(s, 0)).toBe("1.1.1"); // named variant reports null (pinned above)
+  });
+
+  it("ideaProgressLabel counts Sell and says 'next 1.1.1' for an unnamed idea with 1.1 done", () => {
+    const s = completeStep(withIdeas(1), 0, "1.1");
+    expect(ideaProgressLabel(s, 0)).toBe(`5/${phaseTaskTotal("sell")} tasks · next 1.1.1`);
+    // Named, the same idea reads the normal frontier label.
+    expect(ideaProgressLabel(nameIdea(s, 0), 0)).toBe(`5/${phaseTaskTotal("sell")} tasks · next 1.2.1`);
+  });
+
+  it("nextCoachTarget sends an unnamed idea to 1.1 (Idea Room) even with 1.1 complete", () => {
+    const s = completeStep(withIdeas(1), 0, "1.1");
+    expect(nextCoachTarget(s)).toEqual({ kind: "criterion", stepId: "1.1", room: "idea" });
+    expect(nextCoachTarget(nameIdea(s, 0))).toEqual({ kind: "criterion", stepId: "1.2", room: "market" });
+  });
+
+  it("the naming redirect WINS over the promotion seam for an unnamed validated idea", () => {
+    let s = withIdeas(1);
+    for (const phase of ["sell", "build", "validate"] as const) s = completePhase(s, 0, phase);
+    expect(nextCoachTarget(s)).toEqual({ kind: "criterion", stepId: "1.1", room: "idea" });
+    expect(nextCoachTarget(nameIdea(s, 0))).toEqual({ kind: "promote", ideaIndex: 0 });
+  });
+
+  it("the coach redirect honors the content-readiness gate like every target", () => {
+    const s = completeStep(withIdeas(1), 0, "1.1");
+    // 1.1 built (restricted pair) → redirect target; nothing built → no target.
+    expect(nextCoachTarget(s, ONLY_11_12)).toEqual({ kind: "criterion", stepId: "1.1", room: "idea" });
+    expect(nextCoachTarget(s, new Set())).toBeNull();
+  });
+
+  it("roomEntryFor(1.1) enters the ONE unnamed idea at task index 0, even when its 1.1 is done", () => {
+    let s = completeStep(withNamedIdeas(2), 0, "1.1");
+    // Un-name idea 0 (it finished 1.1 but lost its one-liner to an edit).
+    s = apply(s, { type: "SET_FIELD", ideaIndex: 0, key: "oneLiner", value: "" });
+    expect(roomEntryFor(s, "1.1")).toEqual({ action: "enter", ideaIndex: 0, index: 0 });
+  });
+
+  it("roomEntryFor(1.1) offers the picker when SEVERAL ideas still need naming", () => {
+    const s = completeStep(withIdeas(2), 0, "1.1"); // both unnamed, one done
+    expect(roomEntryFor(s, "1.1")).toEqual({ action: "pick", eligible: [0, 1] });
+  });
+
+  it("roomEntryFor for criteria other than 1.1 is untouched by the redirect", () => {
+    const s = completeStep(withIdeas(1), 0, "1.1"); // unnamed, eligible for 1.2
+    expect(roomEntryFor(s, "1.2")).toEqual({ action: "enter", ideaIndex: 0, index: 0 });
   });
 });

@@ -1,11 +1,19 @@
 // @vitest-environment jsdom
 /**
- * Your Site room (real-public-site plan, Unit 6) — the three real URL-bar
- * states (published link / offline disabled / unclaimed claim UI), the honest
- * neutral render on a failed status read, headline cap + commit→flush, the
- * room-open registry refresh, the claimed-not-published go-live retry (and its
- * hard boundary: NEVER for offline), the in-room claim → publish flow, and the
- * flag-off byte-stability of the legacy mock room.
+ * Your Site room (your-site-room-simplification, 2026-08-03): the room no
+ * longer simulates a website. These tests pin the per-state render table
+ * (published link / offline plain text / claimed going-live / none claim UI /
+ * unknown neutral), the Coming Soon note's normative presence, the flag-off
+ * note-only render, the go-live retry sequencing (and its hard boundary:
+ * NEVER for offline), the in-room claim → publish flow, and the absence of
+ * every removed simulated-site string.
+ *
+ * DELETED BY DESIGN: the legacy flag-off byte-pin block ("renders the
+ * pre-Unit-6 mock exactly"). The requirements doc explicitly retires the
+ * "flag-off byte-identical legacy room" stability contract — flag-off now
+ * renders ONLY the Coming Soon note. This is a designed removal, not a
+ * regression (docs/brainstorms/2026-08-03-your-site-room-simplification-
+ * requirements.md, decision 6).
  *
  * Harness: GameContext is mocked as a plain context; a stateful Harness stands
  * in for the provider, mimicking exactly the slice adoptions GameContext
@@ -13,10 +21,10 @@
  * so the room is exercised against realistic slice transitions.
  *
  * MOBILE GATE (CLAUDE.md ~390px): the room renders inside RoomDialog's
- * full-screen-below-sm overlay (unchanged by this unit); the structure
- * assertions below pin the >=44px tap targets on the claim chips and visit
- * affordances. The live 390px pixel pass against a real backend is a Unit 7
- * launch-checklist item (same posture as Unit 5's claim UI).
+ * full-screen-below-sm overlay (unchanged here); the structure assertions
+ * below pin the >=44px tap targets on the open-site link and claim chips and
+ * the truncation classes on the URL text, so nothing can overflow a ~390px
+ * viewport.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import React from "react";
@@ -53,8 +61,7 @@ const flushNow = vi.fn();
 const publishSite = vi.fn();
 const claimSite = vi.fn();
 
-/** Seed shape: `projected` optional (defaults null) so the many pre-Unit-7
- *  literals stay untouched; the divergence tests pass it explicitly. */
+/** Seed shape: `projected` optional (defaults null). */
 type SiteSeed = Omit<SiteState, "projected"> & { projected?: SiteState["projected"] };
 const withProjected = (s: SiteSeed): SiteState => ({ projected: null, ...s });
 
@@ -70,27 +77,15 @@ async function drain() {
   });
 }
 
-function Harness({
-  initialSite,
-  headline = "",
-}: {
-  initialSite: SiteSeed;
-  headline?: string;
-}) {
+function Harness({ initialSite }: { initialSite: SiteSeed }) {
   const [site, setSiteState] = React.useState(withProjected(initialSite));
-  const [siteHeadline, setHeadline] = React.useState(headline);
   setSite = (s) => setSiteState(withProjected(s));
   const value = {
-    profile: { firstName: "Maya", handle: "", siteHeadline, grade: null },
+    profile: { firstName: "Maya", handle: "", siteHeadline: "", grade: null },
     ideas: [] as unknown[],
     activeIdea: 0,
     site,
-    dispatch: (a: { type: string; patch?: { siteHeadline?: string } }) => {
-      dispatchSpy(a);
-      if (a.type === "SET_PROFILE" && a.patch?.siteHeadline !== undefined) {
-        setHeadline(a.patch.siteHeadline);
-      }
-    },
+    dispatch: dispatchSpy,
     refreshSiteStatus,
     flushNow,
     publishSite,
@@ -104,12 +99,8 @@ function Harness({
   );
 }
 
-function mount(initialSite: SiteSeed, headline = "") {
-  return render(<Harness initialSite={initialSite} headline={headline} />);
-}
-
-function headlineInput(): HTMLInputElement {
-  return screen.getByLabelText("Your headline") as HTMLInputElement;
+function mount(initialSite: SiteSeed) {
+  return render(<Harness initialSite={initialSite} />);
 }
 
 /** All anchors pointing at a public site URL. */
@@ -118,6 +109,8 @@ function siteLinks(): HTMLAnchorElement[] {
     (a.getAttribute("href") ?? "").startsWith("https://firstprofit.school/"),
   );
 }
+
+const COMING_SOON = "Changing your First Profit website is coming soon.";
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -144,20 +137,43 @@ afterEach(() => {
 // ── Published ────────────────────────────────────────────────────────────────
 
 describe("published", () => {
-  it("the URL bar is a real link with target=_blank and rel noopener noreferrer", () => {
+  it("renders the open-site link: constructed href, new tab, rel-hardened", () => {
     mount({ handle: "maya", status: "published" });
     const links = siteLinks();
-    expect(links.length).toBeGreaterThanOrEqual(1);
-    for (const a of links) {
-      expect(a.getAttribute("href")).toBe("https://firstprofit.school/maya");
-      expect(a.getAttribute("target")).toBe("_blank");
-      const rel = a.getAttribute("rel") ?? "";
-      expect(rel).toContain("noopener");
-      expect(rel).toContain("noreferrer");
-    }
-    expect(screen.getByText("● live")).toBeTruthy();
-    // The visit affordance keeps the >=44px tap target (mobile gate).
-    expect(screen.getByText("Visit your site ↗").className).toContain("min-h-[44px]");
+    expect(links).toHaveLength(1);
+    const a = links[0];
+    expect(a.getAttribute("href")).toBe("https://firstprofit.school/maya");
+    expect(a.getAttribute("target")).toBe("_blank");
+    const rel = a.getAttribute("rel") ?? "";
+    expect(rel).toContain("noopener");
+    expect(rel).toContain("noreferrer");
+  });
+
+  it("the link's accessible name says it opens in a new tab (not just the glyph)", () => {
+    mount({ handle: "maya", status: "published" });
+    const a = screen.getByRole("link", { name: /opens in a new tab/i });
+    expect(a.getAttribute("href")).toBe("https://firstprofit.school/maya");
+    // The glyph itself is decorative, hidden from the accessible name.
+    const glyph = a.querySelector('[aria-hidden="true"]');
+    expect(glyph?.textContent).toBe("↗");
+  });
+
+  it("keeps the >=44px tap target and truncating URL text (mobile gate, ~390px)", () => {
+    mount({ handle: "maya", status: "published" });
+    const a = siteLinks()[0];
+    expect(a.className).toContain("min-h-[44px]");
+    expect(a.className).toContain("max-w-full");
+    const urlSpan = Array.from(a.querySelectorAll("span")).find((s) =>
+      (s.textContent ?? "").includes("firstprofit.school/maya"),
+    );
+    expect(urlSpan).toBeTruthy();
+    expect(urlSpan?.className).toContain("truncate");
+    expect(urlSpan?.className).toContain("min-w-0");
+  });
+
+  it("shows the Coming Soon note", () => {
+    mount({ handle: "maya", status: "published" });
+    expect(screen.getByText(COMING_SOON)).toBeTruthy();
   });
 
   it("does not run the go-live retry (nothing to publish)", async () => {
@@ -170,31 +186,19 @@ describe("published", () => {
 // ── Offline (parent-unpublished OR operator-locked, undistinguished) ─────────
 
 describe("offline", () => {
-  it("plain-text URL, disabled visit affordance with a visible reason, never 'live'", () => {
+  it("plain-text URL (no clickable link), the reason caption, and the note", () => {
     mount({ handle: "maya", status: "offline" });
     expect(siteLinks()).toHaveLength(0);
-    expect(screen.getByText("firstprofit.school/maya")).toBeTruthy();
-    expect(screen.getByText("offline")).toBeTruthy();
-    expect(screen.queryByText("● live")).toBeNull();
-    // The reason is VISIBLE (not a warn-on-click) and the affordance disabled.
-    const visit = screen.getByText("Visit your site ↗");
-    expect(visit.getAttribute("aria-disabled")).toBe("true");
+    expect(document.querySelectorAll("a")).toHaveLength(0);
+    const url = screen.getByText("firstprofit.school/maya");
+    expect(url.tagName).toBe("P");
+    expect(url.className).toContain("truncate");
     expect(
       screen.getByText(
         "Your page is offline right now. A grown-up turned it off, and a grown-up can turn it back on. Your edits still save for when it comes back.",
       ),
     ).toBeTruthy();
-  });
-
-  it("editing still saves (SET_PROFILE + commit flush) while offline", () => {
-    mount({ handle: "maya", status: "offline" });
-    fireEvent.change(headlineInput(), { target: { value: "Maya's slime lab" } });
-    expect(dispatchSpy).toHaveBeenCalledWith({
-      type: "SET_PROFILE",
-      patch: { siteHeadline: "Maya's slime lab" },
-    });
-    fireEvent.blur(headlineInput());
-    expect(flushNow).toHaveBeenCalledTimes(1);
+    expect(screen.getByText(COMING_SOON)).toBeTruthy();
   });
 
   it("NEVER auto-retries publish for offline (a parent takedown is not auto-reversed)", async () => {
@@ -208,7 +212,21 @@ describe("offline", () => {
 // ── Claimed but not yet published (R19 parked state) ─────────────────────────
 
 describe("claimed (not yet published)", () => {
-  it("retries flush→publish on room open and flips live on success", async () => {
+  it("shows the going-live caption + the note, no link, no claim UI", async () => {
+    flushNow.mockResolvedValue("parked");
+    mount({ handle: "maya", status: "claimed" });
+    expect(
+      screen.getByText(
+        "Your page isn't live yet. It goes live as soon as your latest work reaches us. Check back in a minute.",
+      ),
+    ).toBeTruthy();
+    expect(screen.getByText(COMING_SOON)).toBeTruthy();
+    expect(siteLinks()).toHaveLength(0);
+    expect(screen.queryByText("Claim my page →")).toBeNull();
+    await drain();
+  });
+
+  it("retries flush→publish on room open and flips to the published body on success", async () => {
     mount({ handle: "maya", status: "claimed" });
     await waitFor(() => expect(publishSite).toHaveBeenCalledTimes(1));
     expect(flushNow).toHaveBeenCalledTimes(1);
@@ -216,9 +234,9 @@ describe("claimed (not yet published)", () => {
     expect(flushNow.mock.invocationCallOrder[0]).toBeLessThan(
       publishSite.mock.invocationCallOrder[0],
     );
-    // The mimicked slice adoption flips the room to the live state.
-    await waitFor(() => expect(screen.getByText("● live")).toBeTruthy());
-    expect(siteLinks().length).toBeGreaterThanOrEqual(1);
+    // The mimicked slice adoption flips the room to the published body.
+    await waitFor(() => expect(siteLinks()).toHaveLength(1));
+    expect(siteLinks()[0].getAttribute("href")).toBe("https://firstprofit.school/maya");
   });
 
   it("a parked flush does NOT publish and keeps the honest going-live state", async () => {
@@ -227,11 +245,7 @@ describe("claimed (not yet published)", () => {
     await drain();
     expect(flushNow).toHaveBeenCalledTimes(1);
     expect(publishSite).not.toHaveBeenCalled();
-    expect(screen.getByText("going live…")).toBeTruthy();
-    expect(screen.queryByText("● live")).toBeNull();
     expect(siteLinks()).toHaveLength(0);
-    // The visit affordance is disabled with the visible reason.
-    expect(screen.getByText("Visit your site ↗").getAttribute("aria-disabled")).toBe("true");
   });
 
   it("retries at most once per room open (no publish-failure loop)", async () => {
@@ -244,15 +258,19 @@ describe("claimed (not yet published)", () => {
 
 // ── Unclaimed (in-room claim for existing accounts) ──────────────────────────
 
-describe("unclaimed", () => {
-  it("shows the placeholder bar + claim UI: no fake URL, no dead link, no 'live'", () => {
+describe("unclaimed (none)", () => {
+  it("shows the claim UI and its caption: no link, no note, nothing simulated", () => {
     mount({ handle: null, status: "none" });
-    expect(screen.getByText("firstprofit.school/ …")).toBeTruthy();
-    expect(document.body.textContent).not.toContain("school/you");
     expect(siteLinks()).toHaveLength(0);
-    expect(screen.queryByText("● live")).toBeNull();
+    expect(
+      screen.getByText("Claim your page name below and your page goes live on the real internet."),
+    ).toBeTruthy();
     expect(screen.getByText("Claim your page name")).toBeTruthy();
     expect(screen.getByText("Claim my page →")).toBeTruthy();
+    // Placeholder URL text in the shared block is allowed; nothing simulated.
+    expect(document.body.textContent).not.toContain("school/you");
+    // The note is published/offline/claimed only (per the render table).
+    expect(screen.queryByText(COMING_SOON)).toBeNull();
     // The claim input is the shared onboarding block (keyboard-focusable).
     const input = screen.getByLabelText("Page name") as HTMLInputElement;
     input.focus();
@@ -271,7 +289,7 @@ describe("unclaimed", () => {
     expect(checkHandleAvailability).toHaveBeenCalledWith("maya");
   });
 
-  it("successful in-room claim → immediate flush→publish → room flips live (claim IS go-live)", async () => {
+  it("successful in-room claim → immediate flush→publish → room flips to the published body (claim IS go-live)", async () => {
     mount({ handle: null, status: "none" });
     fireEvent.click(screen.getByText("Claim my page →"));
     await waitFor(() => expect(claimSite).toHaveBeenCalledWith("maya"));
@@ -281,10 +299,10 @@ describe("unclaimed", () => {
     expect(flushNow.mock.invocationCallOrder[0]).toBeLessThan(
       publishSite.mock.invocationCallOrder[0],
     );
-    // The room now renders the live link and the claim UI is gone.
-    await waitFor(() => expect(screen.getByText("● live")).toBeTruthy());
-    expect(siteLinks().length).toBeGreaterThanOrEqual(1);
+    // The room now renders the real open-site link and the claim UI is gone.
+    await waitFor(() => expect(siteLinks()).toHaveLength(1));
     expect(screen.queryByText("Claim my page →")).toBeNull();
+    expect(screen.getByText(COMING_SOON)).toBeTruthy();
   });
 
   it("a taken claim shows the race notice + suggestion chips with >=44px targets", async () => {
@@ -332,122 +350,101 @@ describe("unclaimed", () => {
   });
 });
 
-// ── Status fetch failure → neutral (never a false "live") ────────────────────
+// ── Status fetch failure → neutral (never a false link) ──────────────────────
 
 describe("unknown (failed status read)", () => {
-  it("renders neutrally: no link, no 'live', no claim UI, editing still saves", () => {
+  it("renders the neutral caption ONLY: no link, no claim UI, no note", () => {
     mount({ handle: null, status: "unknown" });
     expect(siteLinks()).toHaveLength(0);
-    expect(screen.queryByText("● live")).toBeNull();
     expect(screen.queryByText("Claim my page →")).toBeNull();
     expect(
       screen.getByText("We can't check on your page right now, so no link yet. Your edits still save."),
     ).toBeTruthy();
-    fireEvent.change(headlineInput(), { target: { value: "Still editing" } });
-    expect(dispatchSpy).toHaveBeenCalledWith({
-      type: "SET_PROFILE",
-      patch: { siteHeadline: "Still editing" },
-    });
+    expect(screen.queryByText(COMING_SOON)).toBeNull();
   });
 });
 
 // ── Shared room behavior (flag on) ───────────────────────────────────────────
 
-describe("room open + headline editor", () => {
+describe("room open", () => {
   it("room open refreshes the site status (bounded staleness for parent unpublish)", () => {
     mount({ handle: "maya", status: "published" });
     expect(refreshSiteStatus).toHaveBeenCalledTimes(1);
   });
-
-  it("headline input caps at 120 and commit (blur) forces an immediate flush", () => {
-    mount({ handle: "maya", status: "published" });
-    expect(headlineInput().getAttribute("maxlength")).toBe("120");
-    fireEvent.change(headlineInput(), { target: { value: "New headline" } });
-    fireEvent.blur(headlineInput());
-    expect(flushNow).toHaveBeenCalledTimes(1);
-  });
-
-  it("shows the PII nudge and the active-idea one-liner note", () => {
-    mount({ handle: "maya", status: "published" });
-    expect(
-      screen.getByText(
-        "Your page is public. Don't put your phone number, address, school, or last name on it.",
-      ),
-    ).toBeTruthy();
-    expect(
-      screen.getByText(
-        "Your page shows your headline plus the one-liner from the idea you are working on right now. Switch ideas and the page follows.",
-      ),
-    ).toBeTruthy();
-  });
 });
 
-// ── Honest-divergence note (Unit 7 review): blocked text stored empty ────────
+// ── The simulated site is gone (every state, both flags) ─────────────────────
 
-describe("blocked-text divergence note", () => {
-  const NOTE = "Part of your page text can't be shown on your public page. Try different words.";
+describe("removed simulated-site content appears NOWHERE", () => {
+  const REMOVED_STRINGS = [
+    "Edits publish instantly",
+    "Your parent",
+    "Back me",
+    "● live",
+    "firstprofit.school/you",
+    "Your headline",
+    "Visit your site",
+  ];
+  const STATES: SiteSeed[] = [
+    { handle: "maya", status: "published" },
+    { handle: "maya", status: "offline" },
+    { handle: "maya", status: "claimed" },
+    { handle: null, status: "none" },
+    { handle: null, status: "unknown" },
+  ];
 
-  it("shows the note when the typed headline is non-empty but the server's projected headline is EMPTY", () => {
-    mount(
-      { handle: "maya", status: "published", projected: { headline: "", oneLiner: "" } },
-      "f-u-c-k the rules",
-    );
-    expect(screen.getByText(NOTE)).toBeTruthy();
-    // The softened parity copy no longer claims the preview IS what goes live.
-    expect(screen.queryByText(/Your parent sees everything that goes live/)).toBeNull();
-  });
+  it.each(STATES.map((s) => [s.status, s] as const))(
+    "flag on, %s: no mock frame, no editor, no parent-visibility copy",
+    async (_status, seed) => {
+      flushNow.mockResolvedValue("parked"); // keep claimed from flipping live
+      mount(seed);
+      const text = document.body.textContent ?? "";
+      for (const removed of REMOVED_STRINGS) {
+        expect(text).not.toContain(removed);
+      }
+      // No headline input (or any text input outside the claim block).
+      expect(screen.queryByLabelText("Your headline")).toBeNull();
+      await drain();
+    },
+  );
 
-  it("no note when the projected content matches the typed text", () => {
-    mount(
-      {
-        handle: "maya",
-        status: "published",
-        projected: { headline: "Dog walking for busy neighbors", oneLiner: "" },
-      },
-      "Dog walking for busy neighbors",
-    );
-    expect(screen.queryByText(NOTE)).toBeNull();
-  });
-
-  it("no note without projection data (null): a block is never inferred from data we do not have", () => {
-    mount({ handle: "maya", status: "published", projected: null }, "f-u-c-k the rules");
-    expect(screen.queryByText(NOTE)).toBeNull();
-    // And an untyped (empty) local headline never trips it either.
-    cleanup();
-    mount({ handle: "maya", status: "published", projected: { headline: "", oneLiner: "" } }, "");
-    expect(screen.queryByText(NOTE)).toBeNull();
-  });
-});
-
-// ── Flag off: the legacy mock room, byte-stable ──────────────────────────────
-
-describe("flag off", () => {
-  it("renders the pre-Unit-6 mock exactly: fake /you URL, '● live', no cap, no network", async () => {
+  it("flag off: none of the removed strings either", () => {
     publicSiteFlag = false;
     mount({ handle: null, status: "none" });
-    // The mock frame with the profile-handle fallback and hardcoded chip.
-    expect(screen.getByText("firstprofit.school/you")).toBeTruthy();
-    expect(screen.getByText("● live")).toBeTruthy();
-    expect(screen.getByText("Edits publish instantly. Your parent sees everything that goes live.")).toBeTruthy();
-    // No claim UI, no visit affordance, no real link.
+    const text = document.body.textContent ?? "";
+    for (const removed of REMOVED_STRINGS) {
+      expect(text).not.toContain(removed);
+    }
+  });
+});
+
+// ── Flag off: the Coming Soon note ONLY ──────────────────────────────────────
+// (The legacy byte-pin block that lived here is deleted by design; see the
+// module doc comment.)
+
+describe("flag off", () => {
+  it("renders ONLY the Coming Soon note: no claim UI, no link, no mock, no network", async () => {
+    publicSiteFlag = false;
+    mount({ handle: null, status: "none" });
+    expect(screen.getByText(COMING_SOON)).toBeTruthy();
+    // No claim UI even though the slice would show `none` with the flag on.
     expect(screen.queryByText("Claim my page →")).toBeNull();
-    expect(screen.queryByText("Visit your site ↗")).toBeNull();
-    expect(siteLinks()).toHaveLength(0);
-    // No input cap and no commit flush (legacy behavior untouched).
-    expect(headlineInput().getAttribute("maxlength")).toBeNull();
-    fireEvent.blur(headlineInput());
-    expect(flushNow).not.toHaveBeenCalled();
+    expect(screen.queryByLabelText("Page name")).toBeNull();
+    // No links, no inputs, nothing simulated.
+    expect(document.querySelectorAll("a")).toHaveLength(0);
+    expect(document.querySelectorAll("input")).toHaveLength(0);
     // Zero network / registry traffic.
     await drain();
     expect(refreshSiteStatus).not.toHaveBeenCalled();
     expect(checkHandleAvailability).not.toHaveBeenCalled();
     expect(publishSite).not.toHaveBeenCalled();
+    expect(flushNow).not.toHaveBeenCalled();
   });
 });
 
-// ── Unit 6 review fixes: live re-checks around the go-live await ─────────────
+// ── Go-live sequencing under mid-flight state changes (review P0/P1) ─────────
 
-describe("go-live sequencing under mid-flight state changes (review P0/P1)", () => {
+describe("go-live sequencing under mid-flight state changes", () => {
   it("a parent takedown resolving mid-flush BLOCKS the publish (live status re-check)", async () => {
     let resolveFlush!: (v: string) => void;
     flushNow.mockReturnValue(new Promise((r) => (resolveFlush = r)));
@@ -461,8 +458,9 @@ describe("go-live sequencing under mid-flight state changes (review P0/P1)", () 
       resolveFlush("landed");
     });
     expect(publishSite).not.toHaveBeenCalled();
-    expect(screen.getByText("offline")).toBeTruthy();
-    expect(screen.queryByText("● live")).toBeNull();
+    // The room shows the honest offline body.
+    expect(siteLinks()).toHaveLength(0);
+    expect(screen.getByText("firstprofit.school/maya").tagName).toBe("P");
   });
 
   it("closing the room mid-flush cancels the orphaned continuation (no publish)", async () => {
@@ -477,39 +475,5 @@ describe("go-live sequencing under mid-flight state changes (review P0/P1)", () 
     // The orphaned continuation must not publish; a reopen runs its own
     // fresh attempt (and the provider's in-flight memo dedupes overlap).
     expect(publishSite).not.toHaveBeenCalled();
-  });
-});
-
-// ── Unit 6 review P3 batch ───────────────────────────────────────────────────
-
-describe("review P3 pins", () => {
-  it("the disabled visit affordance is keyboard-inert: a BUTTON with no href, so Enter/Space cannot navigate", () => {
-    mount({ handle: "maya", status: "offline" });
-    const visit = screen.getByText("Visit your site ↗");
-    expect(visit.tagName).toBe("BUTTON");
-    expect(visit.getAttribute("href")).toBeNull();
-    expect(visit.closest("a")).toBeNull();
-    // Keyboard activation on a button dispatches click; the handler is a
-    // preventDefault no-op and there is no URL anywhere to navigate to.
-    fireEvent.keyDown(visit, { key: "Enter" });
-    fireEvent.keyUp(visit, { key: "Enter" });
-    fireEvent.keyDown(visit, { key: " " });
-    fireEvent.keyUp(visit, { key: " " });
-    fireEvent.click(visit);
-    expect(siteLinks()).toHaveLength(0);
-  });
-
-  it("closing without blur skips the best-effort flush; the edit is already saved (normal debounce fallback)", () => {
-    const view = mount({ handle: "maya", status: "published" });
-    fireEvent.change(headlineInput(), { target: { value: "Changed then closed" } });
-    // ✕/Escape closes (unmounts) the room without a blur event firing.
-    view.unmount();
-    expect(flushNow).not.toHaveBeenCalled();
-    // Nothing is lost: the value went into the reducer per keystroke and
-    // lands on the sync engine's normal 3s debounce (documented fallback).
-    expect(dispatchSpy).toHaveBeenCalledWith({
-      type: "SET_PROFILE",
-      patch: { siteHeadline: "Changed then closed" },
-    });
   });
 });

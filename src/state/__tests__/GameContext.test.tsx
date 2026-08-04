@@ -246,6 +246,31 @@ describe("GameProvider boot", () => {
     expect(api?.profile.grade).toBe(6);
   });
 
+  it("answering the grade ask updates the cached profile so a reload never re-asks", async () => {
+    // The ask-once gate is `grade === null`; the cache captured at login held
+    // the stale null, so every reload re-armed the popup even after the roster
+    // had the answer. A server-confirmed answer must refresh the cache.
+    const { setDraft, getDraft } = await import("../../lib/draftCache");
+    setDraft("user-A", "profileCache", { firstName: "Cedric", handle: "cedric", grade: null });
+    draftMock.getLastUserId.mockReturnValue("user-A");
+    authMock.getCurrentUserId.mockResolvedValue("user-A");
+    authMock.submitBirthYear.mockResolvedValue({ ok: true, grade: 6 });
+    syncMock.loadSave.mockResolvedValue({
+      doc: { docVersion: 1, ideas: [{ fields: {}, done: {} }], activeIdea: 0, siteHeadline: "", onboardingComplete: true },
+      revision: 3,
+    });
+    renderProvider();
+    await waitFor(() => expect(api?.stage).toBe("app"));
+    await act(async () => {
+      await getApi().submitGradeAnswer(2014);
+    });
+    expect(api?.profile.grade).toBe(6);
+    const cached = getDraft<{ grade?: number | null }>("user-A", "profileCache");
+    expect(cached?.grade).toBe(6);
+    // The restore path with the refreshed cache adopts the non-null grade.
+    expect(cached && typeof cached === "object" && "firstName" in cached).toBe(true);
+  });
+
   it("a corrupt or missing profile cache is harmless on restore (fallback chip only)", async () => {
     const { setDraft } = await import("../../lib/draftCache");
     setDraft("user-A", "profileCache", { firstName: 42, handle: null });
@@ -567,6 +592,10 @@ describe("promoteIdea / archiveBusiness / unarchiveBusiness (caller boundary)", 
     act(() => {
       getApi().dispatch({ type: "CREATE_IDEA", ideaId: "idea-a" });
       getApi().dispatch({ type: "CLOSE_RUNNER" });
+      // Name the idea: an unnamed idea is redirected to 1.1 by the floor
+      // selectors (naming rule, 2026-08-03), which would mask the seam here.
+      getApi().dispatch({ type: "SET_FIELD", ideaIndex: 0, key: "productName", value: "Slime Kits" });
+      getApi().dispatch({ type: "SET_FIELD", ideaIndex: 0, key: "oneLiner", value: "DIY slime kits" });
     });
     completeThroughValidate(0);
 
