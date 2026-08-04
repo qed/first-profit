@@ -30,7 +30,7 @@ vi.mock("../../state/GameContext", async () => {
 import * as GameContext from "../../state/GameContext";
 import { Factory } from "../Factory";
 import { FloorHarness, completeStep, validatedIdea, withIdeas, withNamedIdeas } from "../../testSupport/floorHarness";
-import { stepById } from "../../data/path";
+import { stepById, taskTitleForBand } from "../../data/path";
 import type { Action, GameState } from "../../state/gameCore";
 import type { GameApi } from "../../state/GameContext";
 
@@ -191,7 +191,9 @@ describe("Factory — walk-race proofing (unit review FIX 1)", () => {
     fireEvent.click(screen.getByText("Next Step"));
     arrive();
     const dialog = screen.getByRole("dialog");
-    expect(dialog.textContent).toContain("Pitch a product in 60 seconds, no notes");
+    // The room header names the UNIT TASK (change 28), not the criterion, so
+    // the coach's target is proved by 1.1's FIRST task title.
+    expect(dialog.textContent).toContain(taskTitleForBand("1.1.1", "g6_8"));
   });
 });
 
