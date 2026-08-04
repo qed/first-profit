@@ -44,6 +44,7 @@ import { StepRunner } from "../components/StepRunner";
 import { Celebration } from "../components/Celebration";
 import { GradeAsk } from "../components/GradeAsk";
 import { PromoteBusiness } from "../components/PromoteBusiness";
+import { ImproveAppModal } from "../components/ImproveAppModal";
 import { useFocusTrap } from "../lib/useFocusTrap";
 import { YourSite } from "../components/rooms/YourSite";
 import { CheckoutBooth } from "../components/rooms/CheckoutBooth";
@@ -282,26 +283,49 @@ export function NextStepCoach({
 }
 
 /** The coach's docked green button chrome, shared by the normal next-step
- *  target and the Unit 6 one-shot claim hint (identical markup either way). */
+ *  target and the Unit 6 one-shot claim hint (identical markup either way).
+ *  Positioning note (Change #9): the button no longer carries its own absolute
+ *  dock — Factory owns ONE bottom-right dock (see CoachDock) that stacks the
+ *  blue Improve First Profit CTA above this green button, so the pair can
+ *  never overlap and both stay tappable at every viewport. */
 function CoachButton({ label, onClick }: { label: string; onClick: () => void }) {
   return (
-    <div className="pointer-events-none absolute inset-x-0 bottom-7 z-40 flex justify-end px-4 lg:bottom-11 lg:px-6">
-      <button
-        type="button"
-        onClick={onClick}
-        className="pointer-events-auto flex min-h-[52px] items-center gap-3 rounded-2xl bg-verified px-5 py-3 text-left text-white shadow-[0_6px_0_hsl(150_52%_26%)] transition hover:-translate-y-0.5 active:translate-y-0.5 active:shadow-[0_3px_0_hsl(150_52%_26%)] focus:outline-none focus-visible:ring-4 focus-visible:ring-verified/40"
-      >
-        <span>
-          <span className="block font-display text-lg font-black leading-none">Next Step</span>
-          <span className="mt-1 block font-mono text-[10px] uppercase tracking-wider text-white/85">
-            {label}
-          </span>
+    <button
+      type="button"
+      onClick={onClick}
+      className="pointer-events-auto flex min-h-[52px] items-center gap-3 rounded-2xl bg-verified px-5 py-3 text-left text-white shadow-[0_6px_0_hsl(150_52%_26%)] transition hover:-translate-y-0.5 active:translate-y-0.5 active:shadow-[0_3px_0_hsl(150_52%_26%)] focus:outline-none focus-visible:ring-4 focus-visible:ring-verified/40"
+    >
+      <span>
+        <span className="block font-display text-lg font-black leading-none">Next Step</span>
+        <span className="mt-1 block font-mono text-[10px] uppercase tracking-wider text-white/85">
+          {label}
         </span>
-        <span aria-hidden className="text-xl">
-          →
-        </span>
-      </button>
-    </div>
+      </span>
+      <span aria-hidden className="text-xl">
+        →
+      </span>
+    </button>
+  );
+}
+
+/**
+ * The compact blue "Improve First Profit" CTA (Change #9): the secondary,
+ * always-available suggestion entry point on EVERY floor view (phases overview
+ * and each criterion floor, mobile and desktop). Rendered inside Factory's
+ * shared bottom-right dock directly ABOVE the green coach; hidden while any
+ * overlay is open, exactly like the coach. Blue = the house `build` token
+ * (hsl(217 74% 56%)), white text, >= 44px target.
+ */
+function ImproveFpCta({ onOpen }: { onOpen: () => void }) {
+  return (
+    <button
+      type="button"
+      data-testid="fp-improve-cta"
+      onClick={onOpen}
+      className="pointer-events-auto inline-flex min-h-[44px] items-center rounded-xl bg-build px-4 font-display text-sm font-bold text-white shadow-[0_4px_0_hsl(217_74%_36%)] transition hover:-translate-y-0.5 active:translate-y-0.5 active:shadow-[0_2px_0_hsl(217_74%_36%)] focus:outline-none focus-visible:ring-4 focus-visible:ring-build/40"
+    >
+      Improve First Profit
+    </button>
   );
 }
 
@@ -628,6 +652,9 @@ export function Factory({
   // survives the breakpoint swap; the slots inside CriterionFloor reach it
   // through the SAME onWalk intent channel as every other card tap.
   const [ideaSummary, setIdeaSummary] = useState<number | null>(null);
+  // The "Improve First Profit" suggestion modal (Change #9): pure UI
+  // open-state, same placement rule as promoteOpen (survives the lg swap).
+  const [improveOpen, setImproveOpen] = useState(false);
   const [internalSwitcherOpen, setInternalSwitcherOpen] = useState(false);
   const switcherOpen = controlledSwitcherOpen ?? internalSwitcherOpen;
   const setSwitcherOpen = onSwitcherOpenChange ?? setInternalSwitcherOpen;
@@ -691,6 +718,7 @@ export function Factory({
     Boolean(game.runnerOpen || game.room || game.celebrate || game.pickFor) ||
     promoteOpen ||
     ideaSummary !== null ||
+    improveOpen ||
     switcherOpen;
   // React 18's types don't know the `inert` attribute yet; apply it through a
   // spread so the DOM gets the real attribute without a ts-expect-error.
@@ -711,7 +739,16 @@ export function Factory({
             setFloorView("phases");
           }}
         />
-        <NextStepCoach onWalk={setWalkTo} overlayOpen={anyOverlayOpen} />
+        {/* The ONE bottom-right dock (Change #9): the former CoachButton dock
+            classes, now flex-col so the blue Improve CTA stacks above the green
+            coach with a small gap — both visible, both tappable, never
+            overlapping, on every floor view (this mounts above the floorView
+            switch AND the lg breakpoint conditional). Both hide while any
+            overlay is open, same rule as before. */}
+        <div className="pointer-events-none absolute inset-x-0 bottom-7 z-40 flex flex-col items-end gap-2 px-4 lg:bottom-11 lg:px-6">
+          {!anyOverlayOpen ? <ImproveFpCta onOpen={() => setImproveOpen(true)} /> : null}
+          <NextStepCoach onWalk={setWalkTo} overlayOpen={anyOverlayOpen} />
+        </div>
         {/* Ask-once birth-year card (Unit 3): non-modal, above the breakpoint
             conditional like the coach, so it survives the lg variant swap. */}
         <GradeAsk overlayOpen={anyOverlayOpen} />
@@ -727,6 +764,7 @@ export function Factory({
         onClose={() => setSwitcherOpen(false)}
         onSwitched={cancelWalk}
       />
+      {improveOpen ? <ImproveAppModal onClose={() => setImproveOpen(false)} /> : null}
       {ideaSummary !== null && game.ideas[ideaSummary] ? (
         // Keyed per idea so the local drafts reset when a different slot opens.
         <IdeaSummaryDialog

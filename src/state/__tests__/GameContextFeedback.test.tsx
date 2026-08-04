@@ -166,6 +166,24 @@ describe("GameContext.submitFeedback (real feedback plumbing)", () => {
     expect(feedbackCountForDay("user-A", utcDayToday())).toBe(1);
   });
 
+  it("CHANGE #9 KIND SEAM: the default (no kind arg) row carries NO kind key — the pre-#9 task lane is byte-identical", async () => {
+    await loginAs("user-A");
+    expect(await submit("1.1.2", "help me")).toBe("sent");
+    const row = typedEngines[0].notifyFeedback.mock.calls[0][0] as Record<string, unknown>;
+    expect("kind" in row).toBe(false);
+  });
+
+  it("CHANGE #9 KIND SEAM: the app lane ('Improve First Profit') stamps kind 'app' on the row", async () => {
+    await loginAs("user-A");
+    let outcome: string | undefined;
+    await act(async () => {
+      outcome = await getApi().submitFeedback("1.1.2", "make the floor 3D", undefined, "app");
+    });
+    expect(outcome).toBe("sent");
+    const row = typedEngines[0].notifyFeedback.mock.calls[0][0] as Record<string, unknown>;
+    expect(row).toMatchObject({ taskId: "1.1.2", body: "make the floor 3D", kind: "app" });
+  });
+
   it("UNIT 3 BAND SEAM: a known roster grade stamps the RESOLVED band on the row", async () => {
     await loginAs("user-A", 4); // grade 4 -> g3_5
 

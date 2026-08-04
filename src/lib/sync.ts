@@ -91,6 +91,16 @@ export const FEEDBACK_TASK_ID_MAX = 16;
 export const FEEDBACK_BODY_MAX = 1000;
 
 /**
+ * What a feedback row is ABOUT (Change #9). FP-side mirror of The120's
+ * fp-task-feedback-rules kind vocabulary (byte-for-byte): 'task' = the original
+ * "More tools please" report about the unit task the child is on; 'app' = the
+ * floor-level "Improve First Profit" suggestion about the product as a whole.
+ */
+export type FeedbackKind = "task" | "app";
+
+export const FEEDBACK_KINDS: readonly FeedbackKind[] = ["task", "app"];
+
+/**
  * Local mirror of the DB's per-profile daily-cap trigger (50 rows/UTC day).
  * The trigger's refusal is a P0001 raise — TERMINAL, a silent drop — so the
  * client refuses the 51st submission itself and the trigger stays unreachable.
@@ -118,6 +128,14 @@ export interface FeedbackInsertRow {
   band: FeedbackBand;
   /** Empty string allowed — a tap with no words is valid "I'm stuck" signal. */
   body: string;
+  /**
+   * OPTIONAL, default 'task' (Change #9): absent on every pre-#9 row (incl.
+   * queued outbox entries from older builds) and on every task-kind submission
+   * — the wire payload OMITS the column for 'task' so the existing write path
+   * stays byte-identical and the DB default covers it. Only the app-kind
+   * "Improve First Profit" modal stamps 'app'.
+   */
+  kind?: FeedbackKind;
 }
 
 /**
@@ -577,6 +595,11 @@ export async function insertFeedback(
         task_id: row.taskId,
         band: row.band,
         body: row.body,
+        // `kind` rides only on non-default rows ('app'): the 'task' payload
+        // stays byte-identical to pre-#9 builds (the DB default is 'task'),
+        // so a mis-ordered deploy can never park the existing stuck-report
+        // lane behind a missing column.
+        ...(row.kind && row.kind !== "task" ? { kind: row.kind } : {}),
       })) as { error: PgError | null };
     if (!error) return { ok: true };
     if (pgCode(error) === DUPLICATE_CODE) return { ok: true };
@@ -669,7 +692,10 @@ export function isValidFeedbackRow(row: unknown): row is FeedbackInsertRow {
     typeof row.band === "string" &&
     (FEEDBACK_BANDS as readonly string[]).includes(row.band) &&
     typeof row.body === "string" &&
-    row.body.length <= FEEDBACK_BODY_MAX
+    row.body.length <= FEEDBACK_BODY_MAX &&
+    // `kind` is optional (absent = 'task', incl. every pre-#9 queued outbox
+    // entry); when present it must be in the FP-side kind vocabulary mirror.
+    (row.kind === undefined || (FEEDBACK_KINDS as readonly string[]).includes(row.kind as string))
   );
 }
 
@@ -992,6 +1018,9 @@ export function flushFeedbackViaKeepalive(
     task_id: row.taskId,
     band: row.band,
     body: row.body,
+    // Same omit-the-default rule as insertFeedback: 'task' payloads stay
+    // byte-identical to pre-#9 builds; only 'app' rows carry the column.
+    ...(row.kind && row.kind !== "task" ? { kind: row.kind } : {}),
   });
   if (byteLength(body) > KEEPALIVE_MAX_BYTES) return { sent: false, reason: "too-large" };
   void fetch(`${auth.supabaseUrl}/rest/v1/fp_task_feedback`, {

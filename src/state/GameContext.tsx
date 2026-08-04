@@ -71,6 +71,7 @@ import {
   FEEDBACK_DAILY_CAP,
   FEEDBACK_BODY_MAX,
   type FeedbackBand,
+  type FeedbackKind,
   type FeedbackSendOutcome,
   type FlushOutcome,
   type SyncEngine,
@@ -190,9 +191,16 @@ export interface GameApi extends GameState {
    * signal). When `band` is omitted it resolves from the session's grade via
    * bandForFeedback — the real band when the grade is known, the honest
    * "unknown" when it is not (never the defaulted display band, which would
-   * bias the owner's band analysis).
+   * bias the owner's band analysis). `kind` defaults to 'task' (the original
+   * stuck-report lane); the floor-level "Improve First Profit" modal passes
+   * 'app' (Change #9) — same channel, same cap, same outbox durability.
    */
-  submitFeedback: (taskId: string, body: string, band?: FeedbackBand) => Promise<FeedbackSubmitOutcome>;
+  submitFeedback: (
+    taskId: string,
+    body: string,
+    band?: FeedbackBand,
+    kind?: FeedbackKind,
+  ) => Promise<FeedbackSubmitOutcome>;
 
   // ── Grade / band (Unit 3; R9/R10) ────────────────────────────────────────
   /** The session's grade (roster-derived, adopted at login / ask-once), or null. */
@@ -790,6 +798,7 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
       taskId: string,
       body: string,
       band?: FeedbackBand,
+      kind?: FeedbackKind,
     ): Promise<FeedbackSubmitOutcome> => {
       // Band seam (Unit 3): when the caller does not pass one, stamp the
       // session's resolved band — bandForFeedback answers the real band when
@@ -806,6 +815,10 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
         taskId,
         band: stampedBand,
         body: body.slice(0, FEEDBACK_BODY_MAX),
+        // Default 'task' stays ABSENT from the row (and from the wire payload,
+        // see insertFeedback) so existing callers are byte-identical; only the
+        // app-kind "Improve First Profit" lane stamps the column.
+        ...(kind && kind !== "task" ? { kind } : {}),
       };
       // Validate BEFORE the day-counter bump so a row that would be refused at
       // enqueue (bad task id / band through the seam) never consumes any of the

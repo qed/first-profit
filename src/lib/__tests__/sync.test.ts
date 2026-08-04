@@ -1898,6 +1898,24 @@ describe("insertFeedback + classification", () => {
     expect("created_at" in (sent as unknown as Record<string, unknown>)).toBe(false);
   });
 
+  it("CHANGE #9 kind: an 'app' row carries kind on the wire; default AND explicit 'task' omit the column (byte-identical to pre-#9)", async () => {
+    let sent: Record<string, unknown> | null = null;
+    handlers.insert = (r) => {
+      sent = r as Record<string, unknown>;
+      return { error: null };
+    };
+    // app-kind rides the payload.
+    expect(await insertFeedback(PROFILE, { ...row, kind: "app" })).toEqual({ ok: true });
+    expect((sent as unknown as Record<string, unknown>).kind).toBe("app");
+    // Explicit 'task' is the default: omitted, so the existing lane can never
+    // park behind a missing column on a mis-ordered deploy.
+    expect(await insertFeedback(PROFILE, { ...row, kind: "task" })).toEqual({ ok: true });
+    expect("kind" in (sent as unknown as Record<string, unknown>)).toBe(false);
+    // Absent kind (every pre-#9 caller): omitted too.
+    expect(await insertFeedback(PROFILE, row)).toEqual({ ok: true });
+    expect("kind" in (sent as unknown as Record<string, unknown>)).toBe(false);
+  });
+
   it("classifies a duplicate-id insert (23505) as SUCCESS (already landed)", async () => {
     handlers.insert = () => ({ error: { code: "23505", message: "duplicate key" } });
     expect(await insertFeedback(PROFILE, row)).toEqual({ ok: true });
@@ -1988,6 +2006,19 @@ describe("feedback outbox (CHECK mirror + queue)", () => {
     // The happy shapes all pass.
     expect(isValidFeedbackRow({ id: "a", taskId: "1.2.5", band: "unknown", body: "" })).toBe(true);
     expect(isValidFeedbackRow({ id: "a", taskId: "5.5.5", band: "g9_12", body: "x".repeat(1000) })).toBe(true);
+  });
+
+  it("CHANGE #9 kind vocabulary mirror: absent / 'task' / 'app' pass; anything else is refused", () => {
+    expect(isValidFeedbackRow(row)).toBe(true); // absent = default 'task'
+    expect(isValidFeedbackRow({ ...row, kind: "task" })).toBe(true);
+    expect(isValidFeedbackRow({ ...row, kind: "app" })).toBe(true);
+    expect(isValidFeedbackRow({ ...row, kind: "banana" })).toBe(false);
+    expect(isValidFeedbackRow({ ...row, kind: 7 })).toBe(false);
+    const s = fakeStorage();
+    expect(enqueueFeedback(USER, { ...row, kind: "banana" as FeedbackInsertRow["kind"] }, s)).toBe(false);
+    expect(enqueueFeedback(USER, { ...row, kind: "app" }, s)).toBe(true);
+    // The queued app row keeps its kind for replay.
+    expect(readOutbox(USER, s).feedback[0].row.kind).toBe("app");
   });
 
   it("a REFUSED storage write (quota) makes enqueueFeedback report false — never throws, never claims durability", () => {
@@ -2193,6 +2224,22 @@ describe("flushFeedbackViaKeepalive", () => {
     // created_at is server-managed (excluded from the INSERT grant): sending it
     // would fail the whole insert. It must NEVER ride the keepalive body.
     expect("created_at" in body).toBe(false);
+    // CHANGE #9: the default-task body carries no kind column either.
+    expect("kind" in body).toBe(false);
+  });
+
+  it("CHANGE #9: an app-kind row carries kind on the keepalive body", () => {
+    global.fetch = vi.fn().mockResolvedValue({ ok: true }) as unknown as typeof fetch;
+    const auth = { supabaseUrl: "https://supabase.test", apikey: "anon-key", accessToken: "tok" };
+    flushFeedbackViaKeepalive(auth, PROFILE, {
+      id: "fb-k2",
+      taskId: "1.1.4",
+      band: "unknown",
+      body: "hi",
+      kind: "app",
+    });
+    const [, init] = (global.fetch as ReturnType<typeof vi.fn>).mock.calls[0];
+    expect(JSON.parse(init.body).kind).toBe("app");
   });
 });
 

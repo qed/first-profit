@@ -42,6 +42,8 @@ import {
 } from "./screens/signup/consentPolicy";
 import type { SignupSubmission } from "./screens/signup/validation";
 import { readVerifyToken, stripVerifyTokenFromUrl } from "./screens/signup/verifyLink";
+import { isAdminPath } from "./screens/admin/adminLink";
+import { AdminSuggestions } from "./screens/AdminSuggestions";
 
 function Boot() {
   return (
@@ -61,6 +63,14 @@ function Boot() {
 
 function StageRouter() {
   const { stage, dispatch, login } = useGame();
+
+  // The reserved /admin route (Change #9), read ONCE from the boot URL exactly
+  // like the verify-return token below (but never stripped — the path IS the
+  // page). It overrides ALL stage routing and renders the staff suggestions
+  // screen OUTSIDE the game shell (no GlobalNav): a child hitting /admin sees
+  // the staff sign-in, and their credential can never pass the server's staff
+  // gate (byte-identical 401 → the staff-only refusal).
+  const [adminRoute] = useState(() => isAdminPath());
 
   // The idea-switcher open-state lives HERE (above the stage render) because
   // its opener is the GlobalNav's idea chip while the dialog itself stays
@@ -177,6 +187,10 @@ function StageRouter() {
         return <Boot />;
     }
   })();
+
+  // /admin renders as a pre-stage route (the verify precedent): no GlobalNav,
+  // no stage content — the admin screen is not part of the game shell.
+  if (adminRoute) return <AdminSuggestions />;
 
   // The global nav mounts ABOVE the stage render (never remounts across stage
   // swaps); only the boot spinner stays chrome-free. Spec:

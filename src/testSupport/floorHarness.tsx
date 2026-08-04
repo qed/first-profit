@@ -91,6 +91,13 @@ export interface HarnessProps {
   onAction?: (a: Action) => void;
   /** Override the bound promoteIdea (e.g. a forced-refusal probe). */
   promoteIdea?: (ideaIndex: number) => boolean;
+  /** Override the stubbed submitFeedback (e.g. the Improve-app kind probe). */
+  submitFeedback?: (
+    taskId: string,
+    body: string,
+    band?: unknown,
+    kind?: unknown,
+  ) => Promise<unknown>;
 }
 
 /**
@@ -98,7 +105,7 @@ export interface HarnessProps {
  * selectors plus a REAL promoteIdea (mirrors GameContext's caller-boundary
  * refusal mirror + minted ids, deterministic here).
  */
-export function FloorHarness({ seed, Ctx, children, onAction, promoteIdea }: HarnessProps) {
+export function FloorHarness({ seed, Ctx, children, onAction, promoteIdea, submitFeedback }: HarnessProps) {
   const [state, rawDispatch] = React.useReducer(reducer, seed);
   const dispatch: typeof rawDispatch = (action) => {
     onAction?.(action);
@@ -132,7 +139,7 @@ export function FloorHarness({ seed, Ctx, children, onAction, promoteIdea }: Har
     gradeAskDone: true,
     skipGradeAsk: () => {},
     submitGradeAnswer: async () => ({ ok: true }),
-    submitFeedback: async () => "sent" as const,
+    submitFeedback: submitFeedback ?? (async () => "sent" as const),
   };
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }
