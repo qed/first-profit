@@ -301,18 +301,51 @@ describe("GlobalNav app stage — the one bar's game section", () => {
     expect(screen.queryByRole("menu", { name: "Switch idea" })).toBeNull();
   });
 
-  it("the idea name is the logo's FOURTH-BAR green (the grow token), in both chip states", () => {
+  it("the idea name is First Profit BLUE (the build token) in both chip states", () => {
     stage = "app";
-    // Single idea: plain text, still green.
+    // Single idea: plain text, blue.
     render(<GlobalNav />);
     expect((screen.getByText("Slime Kits").parentElement as HTMLElement).className).toMatch(
-      /text-grow/,
+      /text-build/,
     );
     cleanup();
-    // Multi idea: the dropdown trigger, same green.
+    // Multi idea: the dropdown trigger, same blue.
     game = twoIdeaGame();
     render(<GlobalNav />);
-    expect(screen.getByRole("button", { name: "Switch idea" }).className).toMatch(/text-grow/);
+    expect(screen.getByRole("button", { name: "Switch idea" }).className).toMatch(/text-build/);
+  });
+
+  it("the founder chip is GREEN with no bubble: no pill background, border, or rounding", () => {
+    stage = "app";
+    profile = { firstName: "Cedric", handle: "cedric" };
+    render(<GlobalNav />);
+    const chip = screen.getByRole("button", { name: /cedric/i });
+    expect(chip.className).toMatch(/text-grow/);
+    // The tinted red pill is gone entirely.
+    expect(chip.className).not.toMatch(/bg-\[/);
+    expect(chip.className).not.toMatch(/rounded-full/);
+    expect(chip.className).not.toMatch(/hsl\(14_78%/);
+    // Still a 44px tap target without the bubble.
+    expect(chip.className).toMatch(/min-h-\[44px\]/);
+  });
+
+  it("Sales and Profit sit at the FAR RIGHT, after the founder chip", () => {
+    stage = "app";
+    profile = { firstName: "Cedric", handle: "cedric" };
+    game = twoIdeaGame();
+    render(<GlobalNav />);
+    /** True when `a` comes before `b` in document order. */
+    const precedes = (a: Element, b: Element) =>
+      Boolean(a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING);
+
+    const ideaChip = screen.getByRole("button", { name: "Switch idea" });
+    const founder = screen.getByRole("button", { name: /cedric/i });
+    const sales = screen.getByText("Sales");
+    const profit = screen.getByText("Profit");
+    // idea chip … founder chip … Sales … Profit, money last in the bar.
+    expect(precedes(ideaChip, founder)).toBe(true);
+    expect(precedes(founder, sales)).toBe(true);
+    expect(precedes(sales, profit)).toBe(true);
   });
 
   it("the chip is NOT a button with a single idea (nothing to switch to)", () => {

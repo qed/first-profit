@@ -118,7 +118,7 @@ function IdeaSwitcherMenu({ onSwitched }: { onSwitched?: () => void }) {
         aria-label="Switch idea"
         aria-haspopup="menu"
         aria-expanded={open}
-        className={`${CHIP_CLASS} min-h-[44px] px-1 transition-colors hover:text-[hsl(150_52%_32%)]`}
+        className={`${CHIP_CLASS} min-h-[44px] px-1 transition-colors hover:text-[hsl(217_74%_44%)]`}
       >
         <ChipName />
         <ChevronDown size={14} aria-hidden className="shrink-0" />
@@ -162,12 +162,13 @@ function IdeaSwitcherMenu({ onSwitched }: { onSwitched?: () => void }) {
 
 /**
  * Regular bold text, no pill: no background, border, or rounding. Colored with
- * the FOURTH bar of the logo mark (the `grow` token, hsl(150 52% 42%) — the
- * same green LogoMark paints its fourth ascending step with, owner spec
- * 2026-08-04), so the current idea reads as the one branded thing in the bar.
+ * the First Profit BLUE (the `build` token, hsl(217 74% 56%) — the logo mark's
+ * second bar, the same blue the Improve CTA and the runner's More-tools button
+ * use). Owner spec 2026-08-04: the product name is blue and the founder name
+ * is green, so the two identities in the bar never read as the same thing.
  */
 const CHIP_CLASS =
-  "inline-flex items-center gap-1.5 font-mono text-[10px] font-bold uppercase tracking-[0.06em] text-grow";
+  "inline-flex items-center gap-1.5 font-mono text-[10px] font-bold uppercase tracking-[0.06em] text-build";
 
 /** The chip's label: business emoji when the active idea IS the promoted
  *  business, then the display name (productName preferred), truncated. */
@@ -185,14 +186,16 @@ function ChipName() {
 }
 
 /**
- * The app-stage game section (idea/business chip + stats + save indicator).
- * Mounted ONLY when stage === "app", so the other stages never touch the game
- * fields on the context. With more than one idea the chip is the dropdown
- * trigger above; a single idea renders as plain text with no chevron.
+ * The app-stage IDENTITY group: which idea/business you are on, plus the save
+ * indicator. Mounted ONLY when stage === "app", so the other stages never touch
+ * the game fields on the context. With more than one idea the chip is the
+ * dropdown trigger above; a single idea renders as plain text with no chevron.
+ *
+ * The money stats deliberately do NOT live here — see AppNavStats.
  */
-function AppNavSection({ onSwitched }: { onSwitched?: () => void }) {
+function AppNavIdentity({ onSwitched }: { onSwitched?: () => void }) {
   const game = useGame();
-  const { ideas, grossSalesSumCents, salesSumCents, syncStatus } = game;
+  const { ideas, syncStatus } = game;
   return (
     <>
       {ideas.length > 1 ? (
@@ -202,9 +205,24 @@ function AppNavSection({ onSwitched }: { onSwitched?: () => void }) {
           <ChipName />
         </span>
       ) : null}
+      <SaveIndicator status={syncStatus} />
+    </>
+  );
+}
+
+/**
+ * Sales and Profit, rendered LAST in the bar — past the founder chip — so they
+ * hold the far-right end position (owner spec 2026-08-04: the money is the
+ * most important thing here, so it gets the most prominent slot). Split out of
+ * the identity group purely so the ordering can put the account menu between
+ * them and the idea chip.
+ */
+function AppNavStats() {
+  const { grossSalesSumCents, salesSumCents } = useGame();
+  return (
+    <>
       <MoneyStat label="Sales" cents={grossSalesSumCents()} />
       <MoneyStat label="Profit" cents={salesSumCents()} />
-      <SaveIndicator status={syncStatus} />
     </>
   );
 }
@@ -248,7 +266,11 @@ function AccountMenu({ founder, onLogout }: { founder: string; onLogout: () => v
         aria-haspopup="menu"
         aria-expanded={open}
         onClick={() => setOpen((v) => !v)}
-        className="inline-flex min-h-[44px] items-center gap-1 rounded-full bg-[hsl(14_78%_54%/0.12)] px-3 font-mono text-[10.5px] font-semibold uppercase tracking-[0.06em] text-[hsl(14_78%_44%)] transition-colors hover:bg-[hsl(14_78%_54%/0.2)]"
+        // No bubble (2026-08-04): the tinted pill is gone — plain text in the
+        // First Profit green (the `grow` token, the logo's fourth bar), so the
+        // bar carries no filled chips at all. px-1 keeps the 44px tap target
+        // without reading as a button.
+        className="inline-flex min-h-[44px] items-center gap-1 px-1 font-mono text-[10.5px] font-semibold uppercase tracking-[0.06em] text-grow transition-colors hover:text-[hsl(150_52%_30%)]"
       >
         <span className="max-w-[5.5rem] truncate sm:max-w-[12rem]">{founder}</span>
         <ChevronDown size={14} aria-hidden className={`shrink-0 transition-transform ${open ? "rotate-180" : ""}`} />
@@ -308,10 +330,14 @@ export function GlobalNav({ onSwitched }: { onSwitched?: () => void } = {}) {
           </button>
         )}
 
+        {/* Logged-in order (owner spec 2026-08-04): idea chip · save · founder
+            chip · Sales · Profit. The money sits at the far right end of the
+            bar, the most important slot, so the account menu moves inboard. */}
         {loggedIn ? (
           <span className="flex flex-wrap items-center justify-end gap-x-2 gap-y-1 sm:gap-x-2.5">
-            {stage === "app" ? <AppNavSection onSwitched={onSwitched} /> : null}
+            {stage === "app" ? <AppNavIdentity onSwitched={onSwitched} /> : null}
             <AccountMenu founder={founder} onLogout={() => void logout()} />
+            {stage === "app" ? <AppNavStats /> : null}
           </span>
         ) : stage !== "login" ? (
           <span className="flex items-center gap-2 sm:gap-2.5">
