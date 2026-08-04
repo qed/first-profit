@@ -8,7 +8,7 @@
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
 import React from "react";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import {
   reducer,
   initialState,
@@ -48,24 +48,13 @@ vi.mock("../../config", async (importOriginal) => {
   return { ...actual, isPublicSiteEnabled: () => publicSiteFlag };
 });
 
-// Replace StuckBox with a prop-probe stub (its own behavior has its own suite);
-// taskIdFor stays REAL so StepRunner's synthesized task id is pinned here.
-vi.mock("../StuckBox", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("../StuckBox")>();
-  return {
-    ...actual,
-    StuckBox: ({ taskId }: { taskId: string }) => (
-      <div data-testid="fp-stuckbox" data-taskid={taskId} />
-    ),
-  };
-});
-
 import * as GameContext from "../../state/GameContext";
-import { StepRunner } from "../StepRunner";
+import { StepRunner, taskIdFor } from "../StepRunner";
+import { MORE_TOOLS_COPY } from "../MoreToolsModal";
 import { Celebration } from "../Celebration";
-import { taskIdFor } from "../StuckBox";
-import { phaseById, STEPS, taskById } from "../../data/path";
+import { PATH_CONTENT, phaseById, STEPS, taskById, taskTitleForBand } from "../../data/path";
 import type { Band } from "../../data/path";
+import { FEEDBACK_TASK_ID_RE, FEEDBACK_TASK_ID_MAX } from "../../lib/sync";
 
 const Ctx = (GameContext as unknown as { __ctx: React.Context<unknown> }).__ctx;
 
@@ -86,6 +75,7 @@ function Harness({
   onAction,
   band = "g6_8",
   flushNow,
+  submitFeedback,
 }: {
   seed: GameState;
   onAction?: (a: unknown) => void;
@@ -93,6 +83,8 @@ function Harness({
   band?: Band;
   /** GameApi.flushNow stand-in (Unit 6 one-liner commit → immediate flush). */
   flushNow?: () => Promise<string>;
+  /** GameApi.submitFeedback stand-in (the More-tools modal's send channel). */
+  submitFeedback?: (taskId: string, body: string) => Promise<unknown>;
 }) {
   const [state, rawDispatch] = React.useReducer(reducer, seed);
   const dispatch: typeof rawDispatch = (action) => {
@@ -104,6 +96,7 @@ function Harness({
     dispatch,
     band,
     flushNow,
+    submitFeedback: submitFeedback ?? (async () => "sent" as const),
     isTaskDone: (ideaIndex: number, stepId: string, index: number) =>
       isTaskDoneFn(state, ideaIndex, stepId, index),
   };
@@ -172,20 +165,30 @@ describe("StepRunner", () => {
     expect(Number.isFinite(complete.at as number)).toBe(true);
   });
 
-  it("renders StuckBox with taskId = taskIdFor(runnerStep, idx)", () => {
-    // 1.1 at task index 4 -> "1.1.5".
-    const first = render(<Harness seed={seedAtLastTaskOf11()} />);
-    expect(screen.getByTestId("fp-stuckbox").getAttribute("data-taskid")).toBe(
-      taskIdFor("1.1", 4),
-    );
-    first.unmount();
+  it("carries NONE of the retired affordances (Change #8): no Back to the floor, no Idea-Room link, no Stuck", () => {
+    render(<Harness seed={seedAtLastTaskOf11()} />);
+    expect(document.body.textContent).not.toMatch(/Back to the floor/i);
+    expect(document.body.textContent).not.toMatch(/Everything you need for this task/i);
+    expect(document.body.textContent).not.toMatch(/Stuck/i);
+    // The header ✕ is the one close control.
+    expect(screen.getByLabelText("Close")).toBeTruthy();
+  });
 
-    // 1.2 at task index 2 -> "1.2.3".
-    const s = seedAtLastTaskOf11();
-    render(<Harness seed={{ ...s, runnerStep: "1.2", runnerIndex: 2 }} />);
-    expect(screen.getByTestId("fp-stuckbox").getAttribute("data-taskid")).toBe(
-      taskIdFor("1.2", 2),
-    );
+  it("renders the compact bottom-right action row: More tools please beside the green CTA, both >= 44px", () => {
+    render(<Harness seed={seedAtLastTaskOf11()} />);
+    const more = screen.getByText("More tools please") as HTMLElement;
+    const cta = screen.getByText("✓ I did it") as HTMLElement;
+    // Same right-aligned row.
+    const row = more.parentElement as HTMLElement;
+    expect(row).toBe(cta.parentElement);
+    expect(row.className).toContain("justify-end");
+    // Compact but still kid-tappable (390px rule), quiet vs filled styles.
+    expect(more.className).toContain("min-h-[44px]");
+    expect(more.className).toContain("border-2");
+    expect(cta.className).toContain("min-h-[44px]");
+    expect(cta.className).toContain("bg-verified");
+    // The CTA no longer stretches to hero width.
+    expect(cta.className).not.toContain("flex-1");
   });
 
   it("renders PHASE-AWARE header chrome on a Build criterion (2.1)", () => {
@@ -275,7 +278,7 @@ describe("StepRunner", () => {
     const cta = screen.getByText("✓ I did it") as HTMLElement;
     expect(cta.style.background).toBe(cssBackground(build.ctaFill));
     const shadowProbe = document.createElement("div");
-    shadowProbe.style.boxShadow = `0 5px 0 ${build.ctaShadow}`;
+    shadowProbe.style.boxShadow = `0 3px 0 ${build.ctaShadow}`;
     expect(cta.style.boxShadow).toBe(shadowProbe.style.boxShadow);
   });
 
@@ -368,6 +371,134 @@ describe("StepRunner", () => {
     expect(screen.getByText("1.2 · The Sales Room")).toBeTruthy();
     // Only one modal: the runner's action button is gone.
     expect(screen.queryByText("✓ I did it")).toBeNull();
+  });
+
+  it("review mode on a DONE middle task: the compact CTA reads Next task and advances the index", () => {
+    const s = seedAtLastTaskOf11();
+    // Task index 0 is already done; the runner sits on it in review.
+    const actions: unknown[] = [];
+    render(
+      <Harness seed={{ ...s, runnerIndex: 0 }} onAction={(a) => actions.push(a)} />,
+    );
+    const next = screen.getByText("Next task →") as HTMLElement;
+    expect(next.className).toContain("min-h-[44px]");
+    fireEvent.click(next);
+    expect(actions).toContainEqual({ type: "OPEN_RUNNER", stepId: "1.1", index: 1 });
+    expect(screen.getByText("Task 2 of 5")).toBeTruthy();
+  });
+
+  it("review mode on the DONE last task: the compact CTA is the disabled ✓ Done", () => {
+    const s = seedAtLastTaskOf11();
+    const done = { ...s.ideas[0].done, [taskKey("1.1", 4)]: true };
+    render(<Harness seed={{ ...s, ideas: [{ fields: {}, done }] }} />);
+    const doneBtn = screen.getByText("✓ Done") as HTMLButtonElement;
+    expect(doneBtn.disabled).toBe(true);
+    expect(doneBtn.className).toContain("min-h-[44px]");
+  });
+});
+
+describe("taskIdFor (synthesized stable task id, moved from the retired StuckBox)", () => {
+  it("pins the 1:1 alignment: task index 4 of criterion 1.2 stamps 1.2.5", () => {
+    expect(taskIdFor("1.2", 4)).toBe("1.2.5");
+    expect(taskIdFor("1.1", 0)).toBe("1.1.1");
+  });
+
+  it("ALL-25 SYNTHESIS PIN: every criterion x index matches the GENERATED id", () => {
+    // The synthesis is only honest while the generated ids stay 1-based
+    // positional per criterion. Assert against PATH_CONTENT directly — a
+    // future id-scheme change fails here, not in a silent feedback-row
+    // mismatch.
+    const criteria = PATH_CONTENT.phases.flatMap((phase) => phase.criteria);
+    expect(criteria.length).toBe(25);
+    for (const criterion of criteria) {
+      expect(criterion.tasks.length).toBeGreaterThan(0);
+      criterion.tasks.forEach((task, index) => {
+        expect(taskIdFor(criterion.id, index)).toBe(task.id);
+      });
+    }
+  });
+
+  it("SWEEP: every (stepId x task index) id satisfies the DB CHECK mirror", () => {
+    // Every id the producer can mint across the full sequence must nest inside
+    // the acceptor pair (regex + 16-char bound).
+    for (const step of STEPS) {
+      expect(step.tasks.length).toBeGreaterThan(0);
+      for (let i = 0; i < step.tasks.length; i++) {
+        const id = taskIdFor(step.id, i);
+        expect(id).toMatch(FEEDBACK_TASK_ID_RE);
+        expect(id.length).toBeLessThanOrEqual(FEEDBACK_TASK_ID_MAX);
+      }
+    }
+  });
+});
+
+describe("More tools please modal (Change #8)", () => {
+  const flush = () => act(async () => Promise.resolve());
+
+  function openModal(submit?: (taskId: string, body: string) => Promise<unknown>) {
+    const view = render(<Harness seed={seedAtLastTaskOf11()} submitFeedback={submit} />);
+    fireEvent.click(screen.getByText("More tools please"));
+    return view;
+  }
+
+  it("opens from the runner as its OWN clean modal: title, unit task id + title, the question; the runner is hidden", () => {
+    openModal();
+    expect(screen.getByText(MORE_TOOLS_COPY.title)).toBeTruthy();
+    // The unit task id (x.x.x) and the band-resolved task title.
+    expect(screen.getByText(`Unit task ${taskIdFor("1.1", 4)}`)).toBeTruthy();
+    expect(screen.getByLabelText(MORE_TOOLS_COPY.question)).toBeTruthy();
+    // 1.1.5's band-resolved title (the same accessor the runner shows) renders
+    // in the modal header.
+    expect(document.body.textContent).toContain(taskTitleForBand("1.1.5", "g6_8")!);
+    // The runner is not rendered underneath (completely separate overlay).
+    expect(screen.queryByText("✓ I did it")).toBeNull();
+    expect(screen.queryByText("Task 5 of 5")).toBeNull();
+    // Kid copy stays em-dash free.
+    expect(Object.values(MORE_TOOLS_COPY).join(" ")).not.toMatch(/—/);
+  });
+
+  it("Send submits ONCE through submitFeedback with the task id and text, then shows the thanks state", async () => {
+    const submit = vi.fn(async () => "sent" as const);
+    openModal(submit);
+    fireEvent.change(screen.getByLabelText(MORE_TOOLS_COPY.question), {
+      target: { value: "A picture example would help" },
+    });
+    const send = screen.getByText(MORE_TOOLS_COPY.send);
+    // Two clicks in one synchronous burst: the in-flight guard permits one row.
+    fireEvent.click(send);
+    fireEvent.click(send);
+    await flush();
+    expect(submit).toHaveBeenCalledTimes(1);
+    expect(submit).toHaveBeenCalledWith("1.1.5", "A picture example would help");
+    expect(screen.getByText(MORE_TOOLS_COPY.sent)).toBeTruthy();
+  });
+
+  it("a parked (offline) outcome refines the thanks copy honestly", async () => {
+    openModal(vi.fn(async () => "queued" as const));
+    fireEvent.click(screen.getByText(MORE_TOOLS_COPY.send));
+    await flush();
+    expect(screen.getByText(MORE_TOOLS_COPY.queued)).toBeTruthy();
+  });
+
+  it("the X returns to the runner at the SAME task WITHOUT sending", () => {
+    const submit = vi.fn(async () => "sent" as const);
+    openModal(submit);
+    fireEvent.click(screen.getByLabelText(MORE_TOOLS_COPY.close));
+    expect(submit).not.toHaveBeenCalled();
+    // The runner is back exactly as it was: same task index, CTA present.
+    expect(screen.getByText("Task 5 of 5")).toBeTruthy();
+    expect(screen.getByText("✓ I did it")).toBeTruthy();
+    expect(screen.queryByText(MORE_TOOLS_COPY.title)).toBeNull();
+  });
+
+  it("Escape mirrors the X: back to the runner, nothing sent, runner stays open", () => {
+    const submit = vi.fn(async () => "sent" as const);
+    openModal(submit);
+    fireEvent.keyDown(window, { key: "Escape" });
+    expect(submit).not.toHaveBeenCalled();
+    expect(screen.queryByText(MORE_TOOLS_COPY.title)).toBeNull();
+    // The Escape closed only the modal, never the runner underneath.
+    expect(screen.getByText("Task 5 of 5")).toBeTruthy();
   });
 });
 

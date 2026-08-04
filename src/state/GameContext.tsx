@@ -86,7 +86,8 @@ const IDLE_TIMEOUT_MS = 45 * 60 * 1000;
 const PROFILE_CACHE_DRAFT = "profileCache";
 
 /**
- * The honest fate of a "Stuck? Tell us" submission, for the StuckBox UI:
+ * The honest fate of a task-feedback submission, for the runner's
+ * "More tools please" modal (MoreToolsModal):
  * `sent`/`queued`/`dropped`/`capped` from the sync engine (`capped` = the
  * server's FP429 daily-cap refusal), with `capped` also produced locally when
  * the mirror of the DB's 50-per-day cap refuses before anything is enqueued.
@@ -779,7 +780,7 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
     };
   }, [cacheConfirmedGrade]);
 
-  // ── "Stuck? Tell us" feedback submission ─────────────────────────────────
+  // ── Task feedback submission ("More tools please") ───────────────────────
   // Date.now()/crypto.randomUUID stay at this caller boundary (gameCore and
   // sync stay clock-free). The row is validated against the client-side CHECK
   // mirrors before enqueue; the local daily counter mirrors the DB's 50/day cap
