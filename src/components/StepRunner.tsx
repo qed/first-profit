@@ -96,6 +96,24 @@ function displayAllBandsNote(taskId: string): string | undefined {
   return stripEmphasis(note);
 }
 
+/**
+ * The runner's left-nav sections (2026-08-04). Overview carries the criterion
+ * chrome that used to sit above the progress rail; Instructions carries the
+ * per-task words; Inputs carries the authored fields; Tools is a declared
+ * placeholder for task helpers that do not exist yet.
+ */
+export type RunnerSection = "overview" | "instructions" | "inputs" | "tools";
+
+const SECTIONS: { id: RunnerSection; label: string }[] = [
+  { id: "overview", label: "Overview" },
+  { id: "instructions", label: "Instructions" },
+  { id: "inputs", label: "Inputs" },
+  { id: "tools", label: "Tools" },
+];
+
+/** The one thing the Tools section says until real per-task tools land. */
+export const TOOLS_PLACEHOLDER = "Tools to help you complete the unit task will go here.";
+
 export function StepRunner() {
   const game = useGame();
   const {
@@ -122,6 +140,15 @@ export function StepRunner() {
   useEffect(() => {
     if (!open) setMoreToolsOpen(false);
   }, [open]);
+
+  // Which left-nav section is showing (2026-08-04). Resets to Overview
+  // whenever the runner opens or the task changes, so every task starts on
+  // its orientation content instead of stranding the child on, say, Inputs
+  // for a task that has none.
+  const [section, setSection] = useState<RunnerSection>("overview");
+  useEffect(() => {
+    setSection("overview");
+  }, [open, runnerStep, runnerIndex]);
 
   // Focus the dialog on open and wire Escape → close (CLOSE_RUNNER). Guarded on
   // `open` (and suspended while the More-tools modal owns the screen — its own
@@ -267,231 +294,296 @@ export function StepRunner() {
   }
 
   return (
-    <div className="fixed inset-0 z-[55] flex bg-[hsl(25_34%_20%/0.55)] sm:items-center sm:justify-center sm:p-4">
-      <div
-        ref={panelRef}
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="fp-runner-title"
-        tabIndex={-1}
-        className="fp-rise flex h-full w-full flex-col overflow-y-auto bg-[hsl(40_55%_97%)] outline-none sm:h-auto sm:max-h-[calc(100dvh-2rem)] sm:w-full sm:max-w-[640px] sm:rounded-3xl sm:border-2 sm:border-[hsl(25_34%_20%/0.15)] sm:shadow-[0_8px_0_rgba(120,80,40,.1)]"
-        style={{ animation: "fp-rise .3s cubic-bezier(.22,1,.36,1) both" }}
-      >
-        {/* Header — phase tint/text from PHASES (sell values match pre-Unit-8) */}
-        <header
-          className="flex items-start justify-between gap-4 border-b-2 border-[hsl(25_34%_20%/0.1)] px-5 py-4 sm:px-6"
-          style={{ background: accentWash }}
-        >
-          <div className="min-w-0">
-            {/* Wraps (never truncates) so the idea/business context stays
-                visible at 390px. */}
-            <p className="font-mono text-[10px] uppercase tracking-[0.2em]" style={{ color: accentText }}>
-              Phase {phase?.index ?? 1} · {phase?.name ?? "Sell"} · Criterion {critNum} of {critTotal} · {ideaContext}
-            </p>
-            <h2
-              id="fp-runner-title"
-              className="mt-1 font-display text-xl font-black leading-tight text-[hsl(25_34%_20%)]"
-            >
-              {step.title}
-            </h2>
-            {/* Criterion intro chrome (STEP_META brief) — the per-TASK words
-                below come from the banded content accessors. */}
-            <p className="mt-1 text-[12.5px] leading-[1.5] text-[hsl(25_20%_38%)]">
-              {step.brief}
-            </p>
-          </div>
-          <button
-            type="button"
-            onClick={close}
-            aria-label="Close"
-            className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border-2 border-[hsl(25_34%_20%/0.15)] bg-[hsl(40_55%_97%)] text-sm text-[hsl(25_34%_20%)] hover:border-[hsl(25_34%_20%/0.4)]"
-          >
-            ✕
-          </button>
-        </header>
+    // A full-bleed VIEW, not a floating modal (2026-08-04): opaque background,
+    // no scrim, no rounded card at sm — it covers the room it was opened from
+    // edge to edge at every width, and the top-bar ✕ is still the way back.
+    // aria-modal stays true because it is still a focus-trapping takeover: the
+    // floor behind it is `inert` (Factory) and must not be tabbable.
+    <div
+      ref={panelRef}
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="fp-runner-title"
+      tabIndex={-1}
+      className="fp-rise fixed inset-0 z-[55] flex flex-col bg-[hsl(40_55%_97%)] outline-none"
+      style={{ animation: "fp-rise .3s cubic-bezier(.22,1,.36,1) both" }}
+    >
+      {/* The accessible name for the whole view. The visible criterion title
+          lives in the Overview section, which is not always mounted, so the
+          labelledby target is this always-present heading. */}
+      <h1 id="fp-runner-title" className="sr-only">
+        {step.title} · Task {idx + 1} of {total}
+      </h1>
 
-        {/* Task rail — one segment per REAL task (counts vary per criterion:
-            2.3 has six, 3.4 has four — always step.tasks.length).
-            Every segment is a BUTTON as of 2026-08-04: tapping one jumps
-            straight to that task, so the rail is navigation and not just a
-            progress readout. Jumping only moves `runnerIndex` (the same
-            OPEN_RUNNER the Back/Next CTAs dispatch) — it never completes or
-            un-completes anything, so a kid can read ahead and come back
-            without touching their record. The current segment is
-            aria-current and inert (tapping it is a no-op). */}
-        <div className="flex gap-1.5 border-b-2 border-[hsl(25_34%_20%/0.1)] px-5 py-3 sm:px-6">
-          {step.tasks.map((raw, i) => {
-            const done = isTaskDone(activeIdea, runnerStep, i);
-            // Rail: done stays the app-wide verified green; the CURRENT segment
-            // takes the phase accent (sell = the exact pre-Unit-8 value).
-            const color = done
-              ? "hsl(150 52% 40%)"
-              : i === idx
-                ? accent
-                : "hsl(25 34% 20% / .12)";
-            const title = taskTitleForBand(taskIdFor(runnerStep, i), band) ?? parseTask(raw).label;
+      {/* Top bar: where you are + the ✕ that returns you to the room. Keeps
+          the phase wash the old dialog header carried (sell = the exact
+          pre-Unit-8 value). */}
+      <header
+        className="flex items-center justify-between gap-4 px-5 py-2.5 sm:px-6"
+        style={{ background: accentWash }}
+      >
+        <p className="truncate font-mono text-[10px] uppercase tracking-[0.2em]" style={{ color: accentText }}>
+          {runnerStep} · Task {idx + 1} of {total}
+        </p>
+        <button
+          type="button"
+          onClick={close}
+          aria-label="Close"
+          className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border-2 border-[hsl(25_34%_20%/0.15)] bg-[hsl(40_55%_97%)] text-sm text-[hsl(25_34%_20%)] hover:border-[hsl(25_34%_20%/0.4)]"
+        >
+          ✕
+        </button>
+      </header>
+
+      {/* Task rail — one segment per REAL task (counts vary per criterion:
+          2.3 has six, 3.4 has four — always step.tasks.length). Same styling
+          as ever, still across the top of the view.
+          Every segment is a BUTTON as of 2026-08-04: tapping one jumps
+          straight to that task, so the rail is navigation and not just a
+          progress readout. Jumping only moves `runnerIndex` (the same
+          OPEN_RUNNER the Next CTA dispatches) — it never completes or
+          un-completes anything, so a kid can read ahead and come back
+          without touching their record. The current segment is aria-current
+          and inert (tapping it is a no-op). */}
+      <div className="flex gap-1.5 border-b-2 border-[hsl(25_34%_20%/0.1)] px-5 py-3 sm:px-6">
+        {step.tasks.map((raw, i) => {
+          const done = isTaskDone(activeIdea, runnerStep, i);
+          // Rail: done stays the app-wide verified green; the CURRENT segment
+          // takes the phase accent (sell = the exact pre-Unit-8 value).
+          const color = done
+            ? "hsl(150 52% 40%)"
+            : i === idx
+              ? accent
+              : "hsl(25 34% 20% / .12)";
+          const title = taskTitleForBand(taskIdFor(runnerStep, i), band) ?? parseTask(raw).label;
+          return (
+            <button
+              key={i}
+              type="button"
+              onClick={() => {
+                if (i !== idx) dispatch({ type: "OPEN_RUNNER", stepId: runnerStep, index: i });
+              }}
+              aria-current={i === idx ? "step" : undefined}
+              aria-label={`Task ${i + 1} of ${total}: ${title}`}
+              className="min-w-0 flex-1 rounded-md text-left focus:outline-none focus-visible:ring-2 focus-visible:ring-sell/40"
+            >
+              <span className="block h-1.5 rounded-full" style={{ background: color }} />
+              <span
+                className="mt-1.5 block text-[9.5px] leading-[1.3] text-[hsl(25_20%_38%)]"
+                style={{ fontWeight: i === idx ? 700 : 400 }}
+              >
+                {title}
+              </span>
+            </button>
+          );
+        })}
+      </div>
+
+      {/* Body: the section nav + the selected section. Below sm the "left nav"
+          is a horizontal strip above the content (the same sm overlay
+          breakpoint the rest of the app switches on — no new tier); from sm up
+          it is a real left rail. */}
+      <div className="flex min-h-0 flex-1 flex-col sm:flex-row">
+        <nav
+          aria-label="Task sections"
+          className="flex shrink-0 gap-1 overflow-x-auto border-b-2 border-[hsl(25_34%_20%/0.1)] px-3 py-2.5 sm:w-[184px] sm:flex-col sm:gap-1.5 sm:overflow-x-visible sm:border-b-0 sm:border-r-2 sm:px-3 sm:py-4"
+        >
+          {SECTIONS.map((s) => {
+            const selected = s.id === section;
             return (
               <button
-                key={i}
+                key={s.id}
                 type="button"
-                onClick={() => {
-                  if (i !== idx) dispatch({ type: "OPEN_RUNNER", stepId: runnerStep, index: i });
-                }}
-                aria-current={i === idx ? "step" : undefined}
-                aria-label={`Task ${i + 1} of ${total}: ${title}`}
-                className="min-w-0 flex-1 rounded-md text-left focus:outline-none focus-visible:ring-2 focus-visible:ring-sell/40"
+                onClick={() => setSection(s.id)}
+                aria-current={selected ? "true" : undefined}
+                className={`flex min-h-[44px] shrink-0 items-center whitespace-nowrap rounded-xl px-2.5 font-display text-[13px] font-bold transition-colors sm:w-full sm:px-3.5 sm:text-sm ${
+                  selected ? "text-white" : "text-[hsl(25_20%_38%)] hover:bg-[hsl(25_34%_20%/0.06)]"
+                }`}
+                style={selected ? { background: accent } : undefined}
               >
-                <span className="block h-1.5 rounded-full" style={{ background: color }} />
-                <span
-                  className="mt-1.5 block text-[9.5px] leading-[1.3] text-[hsl(25_20%_38%)]"
-                  style={{ fontWeight: i === idx ? 700 : 400 }}
-                >
-                  {title}
-                </span>
+                {s.label}
               </button>
             );
           })}
-        </div>
+        </nav>
 
-        {/* Body */}
-        <div className="px-5 pb-7 pt-5 sm:px-6">
-          <div className="flex items-center gap-2">
-            <span
-              className="flex h-[26px] w-[26px] items-center justify-center rounded-lg font-mono text-xs font-bold text-white"
-              style={{ background: accent }}
-            >
-              {idx + 1}
-            </span>
-            <span className="font-mono text-[10.5px] uppercase tracking-[0.08em] text-[hsl(25_20%_38%)]">
-              Task {idx + 1} of {total}
-            </span>
-          </div>
-
-          <h3 className="mt-3 font-display text-[26px] font-black leading-[1.15] text-[hsl(25_34%_20%)]">
-            {taskLabel}
-          </h3>
-          {/* Banded instruction body: the shared body plus the session band's
-              variant line (taskBodyForBand joins them with \n; pre-line keeps
-              the variant on its own line). break-words guards a long token at
-              390px. */}
-          <p className="mt-2.5 whitespace-pre-line break-words text-[14.5px] leading-[1.65] text-[hsl(25_20%_38%)]">
-            {taskBodyText}
-          </p>
-          {allBandsNote ? (
-            <p className="mt-2 break-words text-[13px] italic leading-[1.55] text-[hsl(25_20%_38%)]">
-              All bands: {allBandsNote}
-            </p>
+        <div className="min-h-0 flex-1 overflow-y-auto px-5 py-5 sm:px-6">
+          {section === "overview" ? (
+            <div>
+              {/* Wraps (never truncates) so the idea/business context stays
+                  visible at 390px. */}
+              <p className="font-mono text-[10px] uppercase tracking-[0.2em]" style={{ color: accentText }}>
+                Phase {phase?.index ?? 1} · {phase?.name ?? "Sell"} · Criterion {critNum} of {critTotal} ·{" "}
+                {ideaContext}
+              </p>
+              <h2 className="mt-1 font-display text-xl font-black leading-tight text-[hsl(25_34%_20%)]">
+                {step.title}
+              </h2>
+              {/* Criterion intro chrome (STEP_META brief) — the per-TASK words
+                  live in Instructions. */}
+              <p className="mt-1 text-[12.5px] leading-[1.5] text-[hsl(25_20%_38%)]">{step.brief}</p>
+            </div>
           ) : null}
 
-          {/* maxLength caps (2000 single-line / 4000 textarea) keep the aggregate
-              save doc well under the server's 256KiB cap even at MAX_IDEAS=5, so a
-              large paste can't trigger a terminal save failure that kills all future
-              saves. */}
-          {taskFields.map((f) => {
-            const value = idea?.fields[f.key] ?? "";
-            const inputId = `fp-runner-field-${f.key}`;
-            // Public-string treatment for the one-liner (see PUBLIC_ONE_LINER_KEY
-            // doc). game.flushNow is optional-called defensively: test harnesses
-            // that stub the context may omit it, and flag-off never calls it.
-            const isPublicString = isPublicSiteEnabled() && f.key === PUBLIC_ONE_LINER_KEY;
-            const onCommit = isPublicString ? () => void game.flushNow?.() : undefined;
-            return (
-              <div key={f.key} className="mt-[18px]">
-                <label
-                  htmlFor={inputId}
-                  className="mb-1.5 block font-mono text-[10.5px] uppercase tracking-[0.08em] text-[hsl(25_20%_38%)]"
+          {section === "instructions" ? (
+            <div>
+              <div className="flex items-center gap-2">
+                <span
+                  className="flex h-[26px] w-[26px] items-center justify-center rounded-lg font-mono text-xs font-bold text-white"
+                  style={{ background: accent }}
                 >
-                  {f.label}
-                </label>
-                {f.long ? (
-                  <textarea
-                    id={inputId}
-                    rows={4}
-                    maxLength={isPublicString ? SITE_ONE_LINER_MAX_CHARS : 4000}
-                    value={value}
-                    onChange={(e) => onFieldChange(f.key, e.target.value)}
-                    onBlur={onCommit}
-                    placeholder={f.placeholder}
-                    className="w-full resize-y rounded-[10px] border-2 border-[hsl(25_34%_20%/0.15)] bg-white px-3.5 py-3 text-sm text-[hsl(25_34%_20%)] outline-none focus:border-sell"
-                  />
-                ) : (
-                  <input
-                    id={inputId}
-                    maxLength={isPublicString ? SITE_ONE_LINER_MAX_CHARS : 2000}
-                    value={value}
-                    onChange={(e) => onFieldChange(f.key, e.target.value)}
-                    onBlur={onCommit}
-                    placeholder={f.placeholder}
-                    className="w-full rounded-[10px] border-2 border-[hsl(25_34%_20%/0.15)] bg-white px-3.5 py-3 text-sm text-[hsl(25_34%_20%)] outline-none focus:border-sell"
-                  />
-                )}
-                {isPublicString ? (
-                  // R23 accepted-limit nudge: this string renders on the PUBLIC
-                  // page, and a blocklist cannot catch self-disclosure.
-                  <p className="mt-1.5 text-[12px] text-[hsl(25_20%_38%)]">
-                    This goes on your public page. No phone numbers, addresses, or last names.
-                  </p>
-                ) : null}
+                  {idx + 1}
+                </span>
+                <span className="font-mono text-[10.5px] uppercase tracking-[0.08em] text-[hsl(25_20%_38%)]">
+                  Task {idx + 1} of {total}
+                </span>
               </div>
-            );
-          })}
 
-          {/* Done-when callout — phase-accent left border */}
-          <div
-            className="mt-[18px] rounded-r-[10px] border-l-2 bg-[hsl(40_30%_99%)] px-3.5 py-2.5"
-            style={{ borderLeftColor: accent }}
-          >
-            <p className="font-mono text-[9.5px] font-semibold uppercase tracking-[0.06em] text-[hsl(25_20%_38%)]">
-              Done when
-            </p>
-            <p className="mt-0.5 break-words text-[13.5px] leading-[1.55] text-[hsl(25_34%_20%)]">{taskDoneWhen}</p>
-          </div>
+              <h3 className="mt-3 font-display text-[26px] font-black leading-[1.15] text-[hsl(25_34%_20%)]">
+                {taskLabel}
+              </h3>
+              {/* Banded instruction body: the shared body plus the session
+                  band's variant line (taskBodyForBand joins them with a
+                  newline; pre-line keeps the variant on its own line).
+                  break-words guards a long token at 390px. */}
+              <p className="mt-2.5 whitespace-pre-line break-words text-[14.5px] leading-[1.65] text-[hsl(25_20%_38%)]">
+                {taskBodyText}
+              </p>
+              {allBandsNote ? (
+                <p className="mt-2 break-words text-[13px] italic leading-[1.55] text-[hsl(25_20%_38%)]">
+                  All bands: {allBandsNote}
+                </p>
+              ) : null}
 
-          {/* Actions row (Change #8), rebalanced 2026-08-04 for beta testing:
-              "More tools please" sits at the BOTTOM LEFT in the First Profit
-              logo blue (the `build` token) with white text, so the route for
-              telling us what is missing is impossible to miss; `mr-auto`
-              pushes it left while the green CTA stays right. The CTA keeps the
-              exact done/advance/complete semantics it always had. Closing is
-              the header ✕ only. */}
-          <div className="mt-6 flex flex-wrap items-center justify-end gap-3">
-            <button
-              type="button"
-              onClick={() => setMoreToolsOpen(true)}
-              className="mr-auto inline-flex min-h-[44px] items-center justify-center rounded-xl bg-build px-4 font-display text-sm font-bold text-white shadow-[0_3px_0_hsl(217_74%_36%)] transition active:translate-y-px active:shadow-[0_1px_0_hsl(217_74%_36%)] focus:outline-none focus-visible:ring-4 focus-visible:ring-build/40"
-            >
-              More tools please
-            </button>
-            {alreadyDone && isLast ? (
-              <button
-                type="button"
-                disabled
-                className="inline-flex min-h-[44px] items-center justify-center gap-1.5 rounded-xl bg-verified px-4 font-display text-sm font-bold text-white opacity-60 shadow-[0_3px_0_hsl(150_52%_26%)]"
-                style={ctaStyle}
+              {/* Done-when callout — phase-accent left border */}
+              <div
+                className="mt-[18px] rounded-r-[10px] border-l-2 bg-[hsl(40_30%_99%)] px-3.5 py-2.5"
+                style={{ borderLeftColor: accent }}
               >
-                ✓ Done
-              </button>
-            ) : alreadyDone ? (
-              <button
-                type="button"
-                onClick={advance}
-                className="inline-flex min-h-[44px] items-center justify-center gap-1.5 rounded-xl bg-verified px-4 font-display text-sm font-bold text-white shadow-[0_3px_0_hsl(150_52%_26%)]"
-                style={ctaStyle}
-              >
-                Next task →
-              </button>
-            ) : (
-              <button
-                type="button"
-                onClick={doIt}
-                className="inline-flex min-h-[44px] items-center justify-center gap-1.5 rounded-xl bg-verified px-4 font-display text-sm font-bold text-white shadow-[0_3px_0_hsl(150_52%_26%)]"
-                style={ctaStyle}
-              >
-                ✓ I did it
-              </button>
-            )}
-          </div>
+                <p className="font-mono text-[9.5px] font-semibold uppercase tracking-[0.06em] text-[hsl(25_20%_38%)]">
+                  Done when
+                </p>
+                <p className="mt-0.5 break-words text-[13.5px] leading-[1.55] text-[hsl(25_34%_20%)]">
+                  {taskDoneWhen}
+                </p>
+              </div>
+            </div>
+          ) : null}
+
+          {section === "inputs" ? (
+            <div>
+              {taskFields.length === 0 ? (
+                <p className="text-[13.5px] leading-[1.55] text-[hsl(25_20%_38%)]">
+                  This task has nothing to type in. Instructions has what to do.
+                </p>
+              ) : null}
+              {/* maxLength caps (2000 single-line / 4000 textarea) keep the
+                  aggregate save doc well under the server's 256KiB cap even at
+                  MAX_IDEAS=5, so a large paste can't trigger a terminal save
+                  failure that kills all future saves. */}
+              {taskFields.map((f, fi) => {
+                const value = idea?.fields[f.key] ?? "";
+                const inputId = `fp-runner-field-${f.key}`;
+                // Public-string treatment for the one-liner (see
+                // PUBLIC_ONE_LINER_KEY doc). game.flushNow is optional-called
+                // defensively: test harnesses that stub the context may omit
+                // it, and flag-off never calls it.
+                const isPublicString = isPublicSiteEnabled() && f.key === PUBLIC_ONE_LINER_KEY;
+                const onCommit = isPublicString ? () => void game.flushNow?.() : undefined;
+                return (
+                  <div key={f.key} className={fi === 0 ? "" : "mt-[18px]"}>
+                    <label
+                      htmlFor={inputId}
+                      className="mb-1.5 block font-mono text-[10.5px] uppercase tracking-[0.08em] text-[hsl(25_20%_38%)]"
+                    >
+                      {f.label}
+                    </label>
+                    {f.long ? (
+                      <textarea
+                        id={inputId}
+                        rows={4}
+                        maxLength={isPublicString ? SITE_ONE_LINER_MAX_CHARS : 4000}
+                        value={value}
+                        onChange={(e) => onFieldChange(f.key, e.target.value)}
+                        onBlur={onCommit}
+                        placeholder={f.placeholder}
+                        className="w-full resize-y rounded-[10px] border-2 border-[hsl(25_34%_20%/0.15)] bg-white px-3.5 py-3 text-sm text-[hsl(25_34%_20%)] outline-none focus:border-sell"
+                      />
+                    ) : (
+                      <input
+                        id={inputId}
+                        maxLength={isPublicString ? SITE_ONE_LINER_MAX_CHARS : 2000}
+                        value={value}
+                        onChange={(e) => onFieldChange(f.key, e.target.value)}
+                        onBlur={onCommit}
+                        placeholder={f.placeholder}
+                        className="w-full rounded-[10px] border-2 border-[hsl(25_34%_20%/0.15)] bg-white px-3.5 py-3 text-sm text-[hsl(25_34%_20%)] outline-none focus:border-sell"
+                      />
+                    )}
+                    {isPublicString ? (
+                      // R23 accepted-limit nudge: this string renders on the
+                      // PUBLIC page, and a blocklist cannot catch
+                      // self-disclosure.
+                      <p className="mt-1.5 text-[12px] text-[hsl(25_20%_38%)]">
+                        This goes on your public page. No phone numbers, addresses, or last names.
+                      </p>
+                    ) : null}
+                  </div>
+                );
+              })}
+            </div>
+          ) : null}
+
+          {section === "tools" ? (
+            <p className="text-[13.5px] leading-[1.55] text-[hsl(25_20%_38%)]">{TOOLS_PLACEHOLDER}</p>
+          ) : null}
         </div>
+      </div>
+
+      {/* Actions row (Change #8), rebalanced 2026-08-04 for beta testing:
+          "More tools please" sits at the BOTTOM LEFT in the First Profit logo
+          blue (the `build` token) with white text, so the route for telling us
+          what is missing is impossible to miss; `mr-auto` pushes it left while
+          the green CTA stays right. The CTA keeps the exact
+          done/advance/complete semantics it always had. Closing is the top-bar
+          ✕ only. The row is pinned OUTSIDE the scrolling section pane, so
+          completing a task never needs a scroll hunt. */}
+      <div className="flex flex-wrap items-center justify-end gap-3 border-t-2 border-[hsl(25_34%_20%/0.1)] px-5 py-4 sm:px-6">
+        <button
+          type="button"
+          onClick={() => setMoreToolsOpen(true)}
+          className="mr-auto inline-flex min-h-[44px] items-center justify-center rounded-xl bg-build px-4 font-display text-sm font-bold text-white shadow-[0_3px_0_hsl(217_74%_36%)] transition active:translate-y-px active:shadow-[0_1px_0_hsl(217_74%_36%)] focus:outline-none focus-visible:ring-4 focus-visible:ring-build/40"
+        >
+          More tools please
+        </button>
+        {alreadyDone && isLast ? (
+          <button
+            type="button"
+            disabled
+            className="inline-flex min-h-[44px] items-center justify-center gap-1.5 rounded-xl bg-verified px-4 font-display text-sm font-bold text-white opacity-60 shadow-[0_3px_0_hsl(150_52%_26%)]"
+            style={ctaStyle}
+          >
+            ✓ Done
+          </button>
+        ) : alreadyDone ? (
+          <button
+            type="button"
+            onClick={advance}
+            className="inline-flex min-h-[44px] items-center justify-center gap-1.5 rounded-xl bg-verified px-4 font-display text-sm font-bold text-white shadow-[0_3px_0_hsl(150_52%_26%)]"
+            style={ctaStyle}
+          >
+            Next task →
+          </button>
+        ) : (
+          <button
+            type="button"
+            onClick={doIt}
+            className="inline-flex min-h-[44px] items-center justify-center gap-1.5 rounded-xl bg-verified px-4 font-display text-sm font-bold text-white shadow-[0_3px_0_hsl(150_52%_26%)]"
+            style={ctaStyle}
+          >
+            ✓ I did it
+          </button>
+        )}
       </div>
     </div>
   );
