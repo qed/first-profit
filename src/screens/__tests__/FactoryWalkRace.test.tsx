@@ -7,20 +7,19 @@
  *  - arrival always computes against LIVE state (ref-backed onArrived), so an
  *    intent whose eligibility evaporated mid-walk dispatches NOTHING;
  *  - onBack cancels an in-flight walk (walkTo → null clears the variant timer);
- *  - an explicit idea switch (SwitcherDialog, opened through the CONTROLLED
- *    switcher props the way App's GlobalNav chip does) cancels an in-flight
- *    walk — the kid's choice wins over a pending arrival;
+ *  - an explicit idea switch cancels an in-flight walk (the kid's choice wins
+ *    over a pending arrival);
  *  - the coach's walk still lands normally (the happy path is unchanged);
- *  - while the promote/switcher overlays are open the coach hides and the
- *    floor container is `inert`.
+ *  - while the promote overlay is open the coach hides and the floor container
+ *    is `inert` — and a SWITCH never inerts anything.
  *
- * The switcher opener lives in the GlobalNav now (UI consolidation), so these
- * tests mount Factory with the controlled switcher props and open the dialog
- * through them — the exact production wiring App uses.
+ * The switcher is a GlobalNav DROPDOWN since 2026-08-04, so nothing about it
+ * mounts inside Factory any more. What crosses the boundary is the App-owned
+ * `switchSignal` counter, and these tests thread it exactly as App does.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import React from "react";
-import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 
 vi.mock("../../state/GameContext", async () => {
   const R = await import("react");
@@ -70,23 +69,30 @@ function Probe({ into }: { into: { current: GameApi | null } }) {
 function mountFactory(seed: GameState) {
   const actions: Action[] = [];
   const api: { current: GameApi | null } = { current: null };
-  // Controlled switcher wiring, exactly as App threads it: the opener (the
-  // GlobalNav idea chip in production) lives ABOVE Factory; the dialog stays
-  // mounted inside Factory so onSwitched can cancel an in-flight walk.
-  const nav: { openSwitcher: () => void } = { openSwitcher: () => undefined };
-  function ControlledFactory() {
-    const [open, setOpen] = React.useState(false);
-    nav.openSwitcher = () => setOpen(true);
-    return <Factory switcherOpen={open} onSwitcherOpenChange={setOpen} />;
+  // Switch wiring, exactly as App threads it since the switcher became a nav
+  // DROPDOWN (2026-08-04): the menu itself lives in the GlobalNav, ABOVE
+  // Factory, and the only thing crossing into Factory is the bumped counter it
+  // watches to cancel an in-flight walk.
+  const nav: { switchTo: (ideaIndex: number) => void } = { switchTo: () => undefined };
+  function NavHostedFactory() {
+    const [signal, setSignal] = React.useState(0);
+    const game = (GameContext as unknown as { useGame: () => GameApi }).useGame();
+    // What GlobalNav's menuitem does on click, in the same order: notify the
+    // walk-canceller, then dispatch the switch.
+    nav.switchTo = (ideaIndex: number) => {
+      setSignal((n) => n + 1);
+      game.dispatch({ type: "SET_ACTIVE_IDEA", ideaIndex });
+    };
+    return <Factory switchSignal={signal} />;
   }
   const utils = render(
     <FloorHarness seed={seed} Ctx={Ctx} onAction={(a) => actions.push(a)}>
       <Probe into={api} />
-      <ControlledFactory />
+      <NavHostedFactory />
     </FloorHarness>,
   );
-  const openSwitcher = () => act(() => nav.openSwitcher());
-  return { actions, api, openSwitcher, ...utils };
+  const switchToIdea = (ideaIndex: number) => act(() => nav.switchTo(ideaIndex));
+  return { actions, api, switchToIdea, ...utils };
 }
 
 const arrive = () => act(() => void vi.advanceTimersByTime(600));
@@ -120,15 +126,13 @@ describe("Factory — walk-race proofing (unit review FIX 1)", () => {
   it("an explicit idea switch mid-walk cancels the pending arrival (the switch wins)", () => {
     // Idea #1 finished 1.1 (eligible for 1.2); idea #2 is active and fresh.
     const seed = completeStep(withIdeas(2), 0, "1.1");
-    const { actions, openSwitcher } = mountFactory(seed);
+    const { actions, switchToIdea } = mountFactory(seed);
     openSellFloor();
     // The 1.2 card is locked for the ACTIVE idea but tappable for idea #1.
     fireEvent.click(screen.getByText("The Sales Room").closest("button")!);
-    // Mid-walk: open the switcher (the GlobalNav chip's route, via the
-    // controlled props) and explicitly pick idea #1 — onSwitched cancels the
-    // in-flight walk before the switch dispatches.
-    openSwitcher();
-    fireEvent.click(within(screen.getByRole("dialog")).getByText("Idea #1").closest("button")!);
+    // Mid-walk: switch to idea #1 from the nav dropdown. The bumped signal
+    // cancels the in-flight walk before the switch dispatches.
+    switchToIdea(0);
     const before = actions.length;
     arrive();
     // The pending arrival never fired: no runner, no picker, no extra dispatch.
@@ -207,21 +211,18 @@ describe("Factory — overlay guard (unit review FIX 5)", () => {
     expect(inertEl!.textContent).not.toContain("Make it your business");
   });
 
-  it("switcher open (via the controlled props): the coach hides and the floor container is inert", () => {
-    const { container, openSwitcher } = mountFactory(withIdeas(1));
+  it("switching ideas never inerts the floor: the dropdown is nav chrome, not an overlay", () => {
+    // The switcher used to be a Factory modal, so opening it hid the coach and
+    // sealed the floor. As a nav dropdown it takes nothing over: the floor
+    // stays live and the coach stays put across a switch.
+    const { container, switchToIdea } = mountFactory(withIdeas(2));
     expect(screen.getByText("Next Step")).toBeTruthy();
-    openSwitcher();
-    expect(screen.getByText("Switch idea")).toBeTruthy(); // the dialog heading
-    expect(screen.queryByText("Next Step")).toBeNull();
-    expect(container.querySelector("[inert]")).toBeTruthy();
-  });
-
-  it("closing the overlay restores the coach and un-inerts the floor", () => {
-    const { container, openSwitcher } = mountFactory(withIdeas(1));
-    openSwitcher();
-    expect(container.querySelector("[inert]")).toBeTruthy();
-    fireEvent.click(within(screen.getByRole("dialog")).getByText("Idea #1").closest("button")!);
     expect(container.querySelector("[inert]")).toBeNull();
+
+    switchToIdea(1);
     expect(screen.getByText("Next Step")).toBeTruthy();
+    expect(container.querySelector("[inert]")).toBeNull();
+    // And no switcher modal is left anywhere in the Factory tree.
+    expect(screen.queryByRole("dialog")).toBeNull();
   });
 });

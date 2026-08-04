@@ -22,7 +22,7 @@ const GENERIC_ERROR =
 const CREATE_ACCOUNT_URL = "https://the120.school/start?src=fplogin";
 
 export function Login() {
-  const { login, dispatch } = useGame();
+  const { login } = useGame();
   const [identifier, setIdentifier] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
@@ -46,14 +46,6 @@ export function Login() {
   return (
     <main className="flex min-h-screen w-full flex-col items-center justify-center bg-[hsl(40_30%_99%)] px-4 py-8 text-ink">
       <div className="w-full max-w-sm">
-        <button
-          type="button"
-          onClick={() => dispatch({ type: "SET_STAGE", stage: "landing" })}
-          className="mb-4 inline-flex min-h-[44px] items-center gap-1.5 rounded-full px-2 font-mono text-xs uppercase tracking-wider text-ink/60 hover:text-ink"
-        >
-          <span aria-hidden>←</span> Back
-        </button>
-
         <div className="rounded-3xl border border-[hsl(40_14%_89%)] bg-white p-6 shadow-card sm:p-8">
           <p className="font-mono text-[11px] uppercase tracking-[0.28em] text-sell">First Profit</p>
           <h1 className="mt-2 font-display text-3xl font-black leading-tight">Welcome back, founder.</h1>

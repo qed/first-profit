@@ -88,14 +88,29 @@ describe("renderPublishedPage", () => {
     );
   });
 
-  it("omits the one-liner section entirely when there is none, with default og:description", () => {
+  it("never renders the description under the headline, even when one is authored", () => {
+    const html = renderPublishedPage({
+      firstName: "Cedric",
+      headline: "My Stand",
+      oneLiner: "Fresh cookies for the whole block.",
+    });
+    // Neither the element nor the stylesheet rule survives.
+    expect(html).not.toContain('class="one-liner"');
+    expect(html).not.toMatch(/\.one-liner\s*{/);
+    // ...and the authored text appears ONLY in og:description, never in <body>.
+    const body = html.slice(html.indexOf("<body>"));
+    expect(body).not.toContain("Fresh cookies for the whole block.");
+    expect(html).toContain(
+      '<meta property="og:description" content="Fresh cookies for the whole block.">',
+    );
+  });
+
+  it("falls back to the default og:description when there is no one-liner", () => {
     const html = renderPublishedPage({
       firstName: "Cedric",
       headline: "My Stand",
       oneLiner: null,
     });
-    // The section (not the stylesheet rule) is what must be absent.
-    expect(html).not.toContain('class="one-liner"');
     expect(html).toContain('<meta property="og:description" content="A young founder’s first business — built with First Profit.">');
   });
 
@@ -255,7 +270,20 @@ describe("renderPublishedPage products", () => {
     expect(html).toMatch(/\.product-liner\s*{[^}]*overflow-wrap:\s*anywhere/);
     // And cards must be allowed to shrink inside the grid track.
     expect(html).toMatch(/\.product-card\s*{[^}]*min-width:\s*0/);
-    expect(html).toMatch(/minmax\(min\(100%, 240px\), 1fr\)/);
+  });
+
+  it("gives every product its OWN ROW at every width (single column, never 2-up)", () => {
+    const html = renderPublishedPage({
+      ...SITE,
+      products: [
+        { n: 1, name: "One", oneLiner: "a" },
+        { n: 2, name: "Two", oneLiner: "b" },
+      ],
+    });
+    expect(html).toMatch(/\.products\s*{[^}]*grid-template-columns:\s*1fr\s*;/);
+    // The old responsive 2-up track is gone for good.
+    expect(html).not.toContain("auto-fit");
+    expect(html).not.toContain("minmax(");
   });
 
   it("clamps product name to 60 and one-liner to 140 chars defensively", () => {

@@ -184,21 +184,27 @@ describe("Factory — the blue Improve CTA docks above the coach on every floor 
     expect(screen.getByText("← The Path")).toBeTruthy();
   }
 
-  it("PHASES OVERVIEW: blue CTA present, stacked in the SAME dock as (and above) the green coach, blue bg + white text, >=44px", () => {
+  it("PHASES OVERVIEW: blue CTA in the SAME dock as the green coach, lower-left with the coach's 52px chrome, blue bg + white text", () => {
     mountFactory(withIdeas(1));
     const cta = ctaButton();
     expect(cta.className).toContain("bg-build");
     expect(cta.className).toContain("text-white");
-    expect(cta.className).toContain("min-h-[44px]");
+    // Same size as the green coach: 52px chrome, rounded-2xl, hard 6px shadow.
+    expect(cta.className).toContain("min-h-[52px]");
+    expect(cta.className).toContain("rounded-2xl");
+    expect(cta.className).toContain("shadow-[0_6px_0_hsl(217_74%_36%)]");
     const coach = screen.getByText("Next Step").closest("button")!;
-    // Same dock container (the former coach dock, now a flex-col stack).
+    // Same dock container: blue at the lower-left, coach pushed to the
+    // lower-right by its own ml-auto; flex-wrap keeps them from overlapping
+    // on narrow viewports.
     const dock = cta.parentElement!;
     expect(dock).toBe(coach.parentElement);
     expect(dock.className).toContain("bottom-7");
-    expect(dock.className).toContain("flex-col");
+    expect(dock.className).toContain("flex-wrap");
     expect(dock.className).toContain("items-end");
     expect(dock.className).toContain("gap-2");
-    // Blue sits ABOVE the green coach in the stack.
+    expect(coach.className).toContain("ml-auto");
+    // Blue comes FIRST in the row (left of the green coach).
     const children = Array.from(dock.children);
     expect(children.indexOf(cta)).toBeLessThan(children.indexOf(coach));
   });

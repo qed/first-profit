@@ -187,9 +187,14 @@ describe("floorSelectors — room-entry routing (core multi-idea mechanic)", () 
     expect(entry).toEqual({ action: "enter", ideaIndex: 0, index: 0 });
   });
 
-  it("routes to the picker when multiple ideas are eligible", () => {
-    const entry = roomEntryFor(withIdeas(3), "1.1");
-    expect(entry).toEqual({ action: "pick", eligible: [0, 1, 2] });
+  it("enters the ACTIVE idea when several are eligible (no picker, 2026-08-04)", () => {
+    const s = withIdeas(3);
+    // The nav chip is the only place an idea is chosen, so the room follows it.
+    expect(roomEntryFor({ ...s, activeIdea: 2 }, "1.1")).toEqual({
+      action: "enter",
+      ideaIndex: 2,
+      index: 0,
+    });
   });
 
   it("enters at the first incomplete task index within the criterion", () => {
@@ -220,11 +225,17 @@ describe("floorSelectors — room-entry routing (core multi-idea mechanic)", () 
     expect(roomEntryFor(s, "1.1")).toEqual({ action: "enter", ideaIndex: 1, index: 1 });
   });
 
-  it("offers the picker when several DONE ideas could review a criterion", () => {
+  it("re-enters the ACTIVE idea when several DONE ideas could review a criterion", () => {
     let s = withNamedIdeas(2);
     s = completeStep(s, 0, "1.1");
     s = completeStep(s, 1, "1.1");
-    expect(roomEntryFor(s, "1.1")).toEqual({ action: "pick", eligible: [0, 1] });
+    expect(roomEntryFor({ ...s, activeIdea: 1 }, "1.1")).toEqual({
+      action: "enter",
+      ideaIndex: 1,
+      index: 0,
+    });
+    // Active idea NOT eligible → the old priority order still decides.
+    expect(roomEntryFor({ ...s, activeIdea: 0 }, "1.1").action).toBe("enter");
   });
 });
 
@@ -453,9 +464,18 @@ describe("floorSelectors — naming redirect (an unnamed idea always routes to 1
     expect(roomEntryFor(s, "1.1")).toEqual({ action: "enter", ideaIndex: 0, index: 0 });
   });
 
-  it("roomEntryFor(1.1) offers the picker when SEVERAL ideas still need naming", () => {
+  it("roomEntryFor(1.1) enters the ACTIVE idea when SEVERAL still need naming", () => {
     const s = completeStep(withIdeas(2), 0, "1.1"); // both unnamed, one done
-    expect(roomEntryFor(s, "1.1")).toEqual({ action: "pick", eligible: [0, 1] });
+    expect(roomEntryFor({ ...s, activeIdea: 0 }, "1.1")).toEqual({
+      action: "enter",
+      ideaIndex: 0,
+      index: 0,
+    });
+    expect(roomEntryFor({ ...s, activeIdea: 1 }, "1.1")).toEqual({
+      action: "enter",
+      ideaIndex: 1,
+      index: 0,
+    });
   });
 
   it("roomEntryFor for criteria other than 1.1 is untouched by the redirect", () => {

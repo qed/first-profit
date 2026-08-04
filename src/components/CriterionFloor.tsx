@@ -157,10 +157,12 @@ export function CriterionFloor({
                   />
                 );
               }
-              if (n === ideas.length && n < MAX_IDEAS) {
-                return <IdeaSlot key={n} kind="create" num={n + 1} onClick={() => onWalk({ kind: "createIdea" })} />;
-              }
-              return <IdeaSlot key={n} kind="future" num={n + 1} />;
+              // EVERY empty slot is a live "New idea" card (2026-08-04): the
+              // old design made only the very next slot tappable and rendered
+              // the rest as inert placeholders, which left no obvious way to
+              // add an idea. Any of them creates the next idea (the reducer
+              // appends and caps at MAX_IDEAS), so the card carries no number.
+              return <IdeaSlot key={n} kind="create" onClick={() => onWalk({ kind: "createIdea" })} />;
             })}
           </div>
         </div>

@@ -10,7 +10,13 @@ import { act, cleanup, fireEvent, render, screen } from "@testing-library/react"
 vi.mock("../../state/GameContext", async () => {
   const R = await import("react");
   const Ctx = R.createContext<unknown>(null);
-  return { __ctx: Ctx, useGame: () => R.useContext(Ctx) };
+  // isLoggedInStage: the real predicate, needed since the switcher moved into
+  // the GlobalNav (which branches its whole bar on it).
+  return {
+    __ctx: Ctx,
+    useGame: () => R.useContext(Ctx),
+    isLoggedInStage: (s: string) => s === "app" || s === "onboard",
+  };
 });
 
 // Public-site flag (Unit 6 claim hint): default OFF so every pre-Unit-6 coach
@@ -22,7 +28,8 @@ vi.mock("../../config", async (importOriginal) => {
 });
 
 import * as GameContext from "../../state/GameContext";
-import { NextStepCoach, SwitcherDialog } from "../../screens/Factory";
+import { NextStepCoach } from "../../screens/Factory";
+import { GlobalNav } from "../GlobalNav";
 import { FloorHarness, apply, completePhase, completeStep, validatedIdea, withIdeas, withNamedIdeas } from "../../testSupport/floorHarness";
 import type { WalkIntent } from "../FactoryFloor";
 import type { Action, GameState } from "../../state/gameCore";
@@ -200,16 +207,24 @@ describe("NextStepCoach — one-shot claim hint for handle-less accounts (Unit 6
   });
 });
 
-describe("SwitcherDialog — active-idea switching across phases (Unit 8)", () => {
+/**
+ * The switcher stopped being a Factory modal on 2026-08-04 and became a
+ * dropdown in the GlobalNav chip. These tests mount the REAL nav over the real
+ * reducer (GlobalNav.test.tsx covers the menu's open/close mechanics against a
+ * mocked context); what matters here is that the menu still reads live
+ * cross-phase state through the same selectors the dialog used.
+ */
+describe("GlobalNav idea switcher — active-idea switching across phases (Unit 8)", () => {
   function mountSwitcher(seed: GameState) {
     const actions: Action[] = [];
-    const closes: number[] = [];
     render(
-      <FloorHarness seed={seed} Ctx={Ctx} onAction={(a) => actions.push(a)}>
-        <SwitcherDialog open onClose={() => closes.push(1)} />
+      <FloorHarness seed={{ ...seed, stage: "app" }} Ctx={Ctx} onAction={(a) => actions.push(a)}>
+        <GlobalNav />
       </FloorHarness>,
     );
-    return { actions, closes };
+    // The chip is the trigger; the menu only exists once it is open.
+    fireEvent.click(screen.getByRole("button", { name: "Switch idea" }));
+    return { actions };
   }
 
   it("lists EVERY idea with progress (not just eligible ones) and marks the current", () => {
@@ -217,17 +232,23 @@ describe("SwitcherDialog — active-idea switching across phases (Unit 8)", () =
     s = completeStep(s, 0, "1.1");
     s = apply(s, { type: "SET_FIELD", ideaIndex: 0, key: "oneLiner", value: "Slime kits" });
     mountSwitcher(s);
-    expect(screen.getByText("Slime kits")).toBeTruthy();
-    expect(screen.getByText("Not named yet")).toBeTruthy();
-    expect(screen.getByText("current")).toBeTruthy();
+    const items = screen.getAllByRole("menuitem");
+    expect(items).toHaveLength(2);
+    expect(items[0].textContent).toContain("Slime kits");
+    expect(items[1].textContent).toContain("Not named yet");
+    // Progress labels come from the same selector the old dialog used.
+    expect(items[0].textContent).toMatch(/tasks · /);
+    // Idea #2 is active in this seed, so the "now" marker sits on that row.
+    expect(items[1].textContent).toContain("now");
+    expect(items[0].textContent).not.toContain("now");
   });
 
   it("choosing an idea dispatches SET_ACTIVE_IDEA only, then closes (works mid-Build)", () => {
     let s = withIdeas(2);
     s = completePhase(s, 0, "sell"); // idea 0 is in Build; idea 1 (active) in Sell
-    const { actions, closes } = mountSwitcher(s);
-    fireEvent.click(screen.getByText("Idea #1"));
+    const { actions } = mountSwitcher(s);
+    fireEvent.click(screen.getAllByRole("menuitem")[0]);
     expect(actions).toEqual([{ type: "SET_ACTIVE_IDEA", ideaIndex: 0 }]);
-    expect(closes.length).toBe(1);
+    expect(screen.queryByRole("menu", { name: "Switch idea" })).toBeNull();
   });
 });

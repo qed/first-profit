@@ -233,17 +233,21 @@ export function nextCoachTarget(
   return null;
 }
 
-export type RoomEntry =
-  | { action: "noop" }
-  | { action: "enter"; ideaIndex: number; index: number }
-  | { action: "pick"; eligible: number[] };
+export type RoomEntry = { action: "noop" } | { action: "enter"; ideaIndex: number; index: number };
 
 /**
  * Room-entry routing for ANY criterion of the sequence (handoff Multi-idea
  * model): gather the ideas eligible for `stepId` (unlocked — which is now
  * phase-aware, so a criterion of a locked phase no-ops for everyone — and not
- * yet done). 0 eligible → no-op; 1 → enter the runner for that idea; many →
- * idea picker. Pure so it is unit-tested directly (the game's core mechanic).
+ * yet done). 0 eligible → no-op; otherwise ENTER, never ask.
+ *
+ * WHICH IDEA (2026-08-04 owner spec): the one the GlobalNav chip says you are
+ * on. Entering a room used to raise a "pick the product" modal whenever more
+ * than one idea was eligible; now the nav dropdown is the single place an idea
+ * is chosen, and every room follows it. When the active idea is NOT eligible
+ * for this criterion (it is done, or locked here) the first eligible idea wins
+ * — the same priority order the picker used to list — so a tap still lands
+ * somewhere sensible instead of dead-ending.
  *
  * CONTENT-READINESS GATE: a criterion outside the `built` allowlist (path.ts
  * BUILT_CRITERIA; injectable — see nextCoachTarget) is a no-op entry for
@@ -264,17 +268,19 @@ export function roomEntryFor(
   // fall through to the picker, exactly like the normal many-eligible case.
   if (stepId === NAMING_STEP_ID) {
     const needing = state.ideas.map((_, i) => i).filter((i) => ideaNeedsNaming(state, i));
-    if (needing.length === 1) return { action: "enter", ideaIndex: needing[0], index: 0 };
-    if (needing.length > 1) return { action: "pick", eligible: needing };
+    if (needing.length > 0) return { action: "enter", ideaIndex: preferActive(state, needing), index: 0 };
   }
   // In-progress ideas keep exact pre-existing priority; when none, DONE ideas
   // re-enter in review mode (task 1, idempotent completion) so authored fields
   // like 1.1's productName/oneLiner are never orphaned behind a finished room.
   const eligible = ideasEnterableFor(state, stepId);
   if (eligible.length === 0) return { action: "noop" };
-  if (eligible.length === 1) {
-    const ideaIndex = eligible[0];
-    return { action: "enter", ideaIndex, index: firstIncompleteTaskIndex(state, ideaIndex, stepId) ?? 0 };
-  }
-  return { action: "pick", eligible };
+  const ideaIndex = preferActive(state, eligible);
+  return { action: "enter", ideaIndex, index: firstIncompleteTaskIndex(state, ideaIndex, stepId) ?? 0 };
+}
+
+/** The active idea when it is in `eligible`, else the highest-priority one.
+ *  `eligible` is never empty at either call site. */
+function preferActive(state: GameState, eligible: number[]): number {
+  return eligible.includes(state.activeIdea) ? state.activeIdea : eligible[0];
 }

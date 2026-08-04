@@ -49,7 +49,7 @@ export function GradeAsk({
    *  Factory-owned overlays (promote/switcher) the reducer flags below miss. */
   overlayOpen?: boolean;
 } = {}) {
-  const { stage, grade, gradeAskDone, skipGradeAsk, submitGradeAnswer, runnerOpen, room, celebrate, pickFor } =
+  const { stage, grade, gradeAskDone, skipGradeAsk, submitGradeAnswer, runnerOpen, room, celebrate } =
     useGame();
   const [year, setYear] = useState<string>("");
   const [saving, setSaving] = useState(false);
@@ -86,7 +86,7 @@ export function GradeAsk({
   if (phase === "ask") {
     if (stage !== "app" || grade !== null || gradeAskDone) return null;
     // Behind an overlay the card is hidden, not dismissed (reappears after).
-    if (overlayOpen || runnerOpen || room || celebrate || pickFor) return null;
+    if (overlayOpen || runnerOpen || room || celebrate) return null;
   }
 
   const save = async () => {
