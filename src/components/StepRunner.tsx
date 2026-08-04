@@ -21,8 +21,13 @@
  * carries NO per-task minutes. Rather than invent a misleading number we OMIT the
  * chip (plan: "do not invent misleading data; keep truthful").
  *
- * Layout: full-screen below `sm`, floating dialog from `sm` up — the overlay
- * breakpoint (matches RoomShell). No further tiers.
+ * Layout (2026-08-04): its OWN sectioned view, not a modal. It fills the
+ * factory floor's box — absolute inset-0 inside Factory's floor region, with
+ * the floor's own rounded red border — so the GlobalNav stays visible and
+ * usable above it. Content splits across a left nav (Overview / Instructions /
+ * Inputs / Tools); below `sm` that nav is a horizontal strip above the
+ * content, from `sm` up a left rail. That is the app's one overlay
+ * breakpoint — no further tiers.
  */
 import { useEffect, useRef, useState } from "react";
 import { useGame } from "../state/GameContext";
@@ -38,7 +43,6 @@ import {
 import { activeBusiness, criterionIdsForPhase, phaseOfCriterion } from "../state/gameCore";
 import { ideaOneLiner, ideaSummaryName } from "../state/floorSelectors";
 import { getDraft, setDraft, getLastUserId } from "../lib/draftCache";
-import { useFocusTrap } from "../lib/useFocusTrap";
 import { MoreToolsModal } from "./MoreToolsModal";
 import { isPublicSiteEnabled } from "../config";
 import { SITE_ONE_LINER_MAX_CHARS } from "../lib/siteCopy";
@@ -164,7 +168,9 @@ export function StepRunner() {
     return () => window.removeEventListener("keydown", onKey);
   }, [open, moreToolsOpen, dispatch]);
 
-  useFocusTrap(panelRef, open && !moreToolsOpen);
+  // No focus trap (change 16): the runner fills the FLOOR, not the screen,
+  // and the GlobalNav above it stays interactive on purpose — trapping
+  // focus here would contradict what the learner can see and tap.
 
   const step = runnerStep ? stepById(runnerStep) : undefined;
   const total = step ? step.tasks.length : 0;
@@ -294,18 +300,23 @@ export function StepRunner() {
   }
 
   return (
-    // A full-bleed VIEW, not a floating modal (2026-08-04): opaque background,
-    // no scrim, no rounded card at sm — it covers the room it was opened from
-    // edge to edge at every width, and the top-bar ✕ is still the way back.
-    // aria-modal stays true because it is still a focus-trapping takeover: the
-    // floor behind it is `inert` (Factory) and must not be tabbable.
+    // Its own VIEW, not a floating modal (2026-08-04): opaque, no scrim, no
+    // rounded card at sm. It fills the FACTORY FLOOR's box rather than the
+    // whole viewport (owner spec, change 16) — absolute inset-0 inside
+    // Factory's floor region, wearing the same rounded red border the floor
+    // wears — so the GlobalNav stays visible and usable above it and the task
+    // view sits exactly where the floor it replaced sat.
+    //
+    // NOT aria-modal, and no focus trap: the nav above it is deliberately
+    // still reachable, so trapping focus here would contradict what the
+    // learner can see. The floor underneath IS inert (Factory), so nothing
+    // hidden behind this panel can take a tap or a tab. Escape still closes.
     <div
       ref={panelRef}
       role="dialog"
-      aria-modal="true"
       aria-labelledby="fp-runner-title"
       tabIndex={-1}
-      className="fp-rise fixed inset-0 z-[55] flex flex-col bg-[hsl(40_55%_97%)] outline-none"
+      className="fp-rise absolute inset-0 z-[55] flex flex-col overflow-hidden rounded-[22px] border-2 border-[hsl(14_78%_54%/0.5)] bg-[hsl(40_55%_97%)] outline-none"
       style={{ animation: "fp-rise .3s cubic-bezier(.22,1,.36,1) both" }}
     >
       {/* The accessible name for the whole view. The visible criterion title

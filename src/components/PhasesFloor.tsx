@@ -27,7 +27,7 @@ import {
   isPhaseUnlocked,
 } from "../state/gameCore";
 import { phaseById, type PhaseId } from "../data/path";
-import { ideaProgressLabel, ideaSummaryName } from "../state/floorSelectors";
+import { ideaIsUnnamed, ideaProgressLabel, ideaSummaryName } from "../state/floorSelectors";
 import { CompanyCard, DashedSlot, IdeaSlot, PhaseCard, ProductCard, SectionTitle } from "./PodCardContent";
 import type { WalkIntent } from "./FactoryFloor";
 
@@ -113,19 +113,37 @@ export function PhasesFloor({ onWalk }: { onWalk: (intent: WalkIntent) => void }
         <div className={GRID}>
           {Array.from({ length: MAX_IDEAS }).map((_, n) =>
             n < ideas.length ? (
-              <ProductCard
-                key={n}
-                num={n + 1}
-                name={ideaSummaryName(game, n)}
-                progress={ideaProgressLabel(game, n)}
-                onOpen={() => {
-                  // Identity, not index (Change #7 review P1): an id-less
-                  // legacy in-memory idea has no summary target this session
-                  // (fromSaveDoc mints its id on the next load) — skip.
-                  const ideaId = ideas[n].id;
-                  if (ideaId) onWalk({ kind: "openIdea", ideaId });
-                }}
-              />
+              // TWO card states (owner spec 2026-08-04): an idea with no name
+              // AND no one-liner keeps the grey "New idea" look of an
+              // untouched slot, because that is what it is to the learner —
+              // but it OPENS ITS SUMMARY rather than creating anything, so the
+              // dialog that names it is one tap away. Named ideas get the
+              // filled card.
+              ideaIsUnnamed(game, n) ? (
+                <IdeaSlot
+                  key={n}
+                  kind="create"
+                  ariaLabel={`Open Idea #${n + 1}, not named yet`}
+                  onClick={() => {
+                    const ideaId = ideas[n].id;
+                    if (ideaId) onWalk({ kind: "openIdea", ideaId });
+                  }}
+                />
+              ) : (
+                <ProductCard
+                  key={n}
+                  num={n + 1}
+                  name={ideaSummaryName(game, n)}
+                  progress={ideaProgressLabel(game, n)}
+                  onOpen={() => {
+                    // Identity, not index (Change #7 review P1): an id-less
+                    // legacy in-memory idea has no summary target this session
+                    // (fromSaveDoc mints its id on the next load) — skip.
+                    const ideaId = ideas[n].id;
+                    if (ideaId) onWalk({ kind: "openIdea", ideaId });
+                  }}
+                />
+              )
             ) : (
               // EVERY empty slot is a live "New idea" card (2026-08-04). This
               // is the SAME IdeaSlot the Sell floor's Your Ideas row uses, on

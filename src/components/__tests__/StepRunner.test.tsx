@@ -175,10 +175,18 @@ describe("StepRunner", () => {
     expect(screen.getByText(/nothing to type in/i)).toBeTruthy();
   });
 
-  it("is a full-bleed view, not a floating modal card", () => {
+  it("fills the FLOOR box, not the viewport, and is not a floating modal card", () => {
     render(<Harness seed={seedAtLastTaskOf11()} />);
     const view = screen.getByRole("dialog");
-    expect(view.className).toContain("fixed inset-0");
+    // Change 16: absolute inside Factory's floor region — NOT fixed to the
+    // viewport — so the GlobalNav above it stays visible and usable.
+    expect(view.className).toContain("absolute inset-0");
+    expect(view.className).not.toMatch(/\bfixed\b/);
+    // It wears the floor's own rounded red border, so it lands inside it.
+    expect(view.className).toContain("rounded-[22px]");
+    expect(view.className).toContain("border-[hsl(14_78%_54%/0.5)]");
+    // Not a modal: the nav is deliberately still reachable.
+    expect(view.getAttribute("aria-modal")).toBeNull();
     // No scrim wrapper and no rounded floating card at sm.
     expect(view.className).not.toMatch(/sm:max-w-/);
     expect(view.className).not.toMatch(/sm:rounded-3xl/);

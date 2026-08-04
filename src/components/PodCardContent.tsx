@@ -393,12 +393,18 @@ export function IdeaSlot({
   progress,
   current,
   onClick,
+  ariaLabel,
 }: {
   kind: "filled" | "create";
   /** 1-based slot position. Filled cards only: an empty card creates whatever
    *  the NEXT idea is, so numbering it would lie (tapping slot 5 with two
    *  ideas makes idea 3). */
   num?: number;
+  /** Accessible name for a `create` card. Defaults to "Start a new idea".
+   *  An UNNAMED existing idea wears this same grey card but opens its summary
+   *  instead of creating anything, so it passes its own label — the look is
+   *  identical by design, the announced action must not be. */
+  ariaLabel?: string;
   name?: string;
   progress?: string;
   current?: boolean;
@@ -412,7 +418,7 @@ export function IdeaSlot({
       <button
         type="button"
         onClick={onClick}
-        aria-label="Start a new idea"
+        aria-label={ariaLabel ?? "Start a new idea"}
         className="flex min-h-[84px] flex-col items-center justify-center gap-1.5 rounded-[14px] border-2 border-dashed border-[hsl(25_12%_72%)] bg-[hsl(40_8%_94%)] p-3 transition-transform hover:-translate-y-[3px] hover:border-[hsl(14_78%_54%/0.5)]"
       >
         <span className="text-[17px] leading-none text-[hsl(25_12%_52%)]" aria-hidden>

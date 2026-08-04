@@ -29,7 +29,6 @@ export const IMPROVE_APP_COPY = {
   title: "Improve First Profit",
   question:
     "What could we improve about First Profit? Any part, the game, the content, the tools. Anything is fair game.",
-  hint: "Do not put names or addresses in here.",
   send: "Send",
   close: "Close",
   sent: "Got it. Thanks for telling us!",
@@ -155,9 +154,6 @@ export function ImproveAppModal({ onClose }: { /** Close WITHOUT sending. */ onC
                 onChange={(e) => setText(e.target.value.slice(0, FEEDBACK_BODY_MAX))}
                 className="mt-2 w-full resize-y rounded-[10px] border-2 border-[hsl(25_34%_20%/0.15)] bg-white px-3.5 py-3 text-sm text-[hsl(25_34%_20%)] outline-none focus:border-build"
               />
-              <p className="mt-1 text-[11.5px] leading-[1.5] text-[hsl(25_20%_38%)]">
-                {IMPROVE_APP_COPY.hint}
-              </p>
               <div className="mt-3 flex justify-end">
                 <button
                   type="button"

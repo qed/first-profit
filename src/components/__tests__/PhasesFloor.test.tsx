@@ -59,6 +59,35 @@ describe("PhasesFloor — real phase cards (Unit 8)", () => {
     expect(walks).toEqual([{ kind: "openIdea", ideaId: "idea-1" }]);
   });
 
+  it("an UNNAMED idea keeps the grey New idea card but OPENS ITS SUMMARY", () => {
+    // Owner spec 2026-08-04: ideas have two card states. withIdeas() makes
+    // ideas with no productName and no one-liner, so both are unnamed here.
+    const { walks } = mount(withIdeas(2));
+    // No filled "Open Idea #n" cards yet, and no "Not named yet" text.
+    expect(screen.queryByRole("button", { name: /^Open Idea #\d+: / })).toBeNull();
+    expect(screen.queryByText("Not named yet")).toBeNull();
+    // Idea #1 wears the grey card, announced honestly, and opens its summary
+    // rather than creating anything.
+    const unnamed = screen.getByRole("button", { name: "Open Idea #1, not named yet" });
+    expect(unnamed.textContent).toContain("New idea");
+    expect(unnamed.className).toMatch(/bg-\[hsl\(40_8%_94%\)\]/);
+    fireEvent.click(unnamed);
+    expect(walks).toEqual([{ kind: "openIdea", ideaId: "idea-0" }]);
+  });
+
+  it("naming an idea flips it to the filled card", () => {
+    const named = apply(withIdeas(2), {
+      type: "SET_FIELD",
+      ideaIndex: 0,
+      key: "productName",
+      value: "Slime Kits",
+    });
+    mount(named);
+    expect(screen.getByRole("button", { name: /^Open Idea #1: Slime Kits/ })).toBeTruthy();
+    // Idea #2 is still unnamed, so it keeps the grey card.
+    expect(screen.getByRole("button", { name: "Open Idea #2, not named yet" })).toBeTruthy();
+  });
+
   it("EVERY empty Products slot is a clickable grey New idea card", () => {
     // Regression pin (2026-08-04): this row used to render inert placeholders,
     // so making the Sell floor's Your Ideas row clickable left THIS floor —

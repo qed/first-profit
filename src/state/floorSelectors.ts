@@ -61,6 +61,20 @@ export function ideaNeedsNaming(state: GameState, ideaIndex: number): boolean {
 }
 
 /**
+ * An idea that carries NO authored identity at all — no product name and no
+ * one-liner — i.e. exactly the ideas `ideaSummaryName` renders as "Not named
+ * yet". Owner spec 2026-08-04: ideas have TWO card states, named and unnamed,
+ * and an unnamed one keeps the grey "New idea" look of a slot nobody has
+ * touched. Deliberately NOT `ideaNeedsNaming`, which is the stricter 1.1
+ * redirect test (true when EITHER field is blank) — an idea with a product
+ * name but no one-liner has an identity and must keep its filled card.
+ */
+export function ideaIsUnnamed(state: GameState, ideaIndex: number): boolean {
+  if (!state.ideas[ideaIndex]) return false;
+  return ideaProductName(state, ideaIndex) === "" && ideaOneLiner(state, ideaIndex) === "";
+}
+
+/**
  * Display name for an idea summary card: the PRODUCT NAME first and foremost
  * (the `productName` field the learner authors in criterion 1.1), falling back
  * to the one-liner for ideas that haven't named a product yet, else the
