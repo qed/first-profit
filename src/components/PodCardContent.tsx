@@ -206,13 +206,29 @@ export function DashedSlot({ label, accent }: { label: string; accent?: boolean 
   );
 }
 
-// ── Row 3 · The Products (read-only) ────────────────────────────────────────
+// ── Row 3 · The Products ────────────────────────────────────────────────────
 
-export function ProductCard({ num, name, progress }: { num: number; name: string; progress: string }) {
+/** A saved idea's card on the phases floor. Tapping opens the idea summary
+ *  dialog (the same `openIdea` walk intent as the Sell floor's Your Ideas
+ *  slots — one channel, one dialog). */
+export function ProductCard({
+  num,
+  name,
+  progress,
+  onOpen,
+}: {
+  num: number;
+  name: string;
+  progress: string;
+  onOpen: () => void;
+}) {
   return (
-    <div
-      className="flex flex-col gap-1.5 rounded-[14px] border-2 border-[hsl(25_34%_20%/0.15)] bg-[hsl(40_55%_97%)] p-3"
+    <button
+      type="button"
+      onClick={onOpen}
+      className="flex min-h-[44px] flex-col gap-1.5 rounded-[14px] border-2 border-[hsl(25_34%_20%/0.15)] bg-[hsl(40_55%_97%)] p-3 text-left transition hover:border-[hsl(14_78%_54%)]"
       style={{ boxShadow: CARD_SHADOW }}
+      aria-label={`Open Idea #${num}: ${name}`}
     >
       <span className="font-mono text-[11px] font-bold" style={{ color: "hsl(14 78% 44%)" }}>
         Idea #{num}
@@ -223,7 +239,7 @@ export function ProductCard({ num, name, progress }: { num: number; name: string
       <span className="block font-mono text-[9px]" style={{ color: INK_SOFT }}>
         {progress}
       </span>
-    </div>
+    </button>
   );
 }
 
