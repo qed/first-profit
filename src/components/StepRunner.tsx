@@ -43,6 +43,7 @@ import {
 import { activeBusiness, criterionIdsForPhase, phaseOfCriterion } from "../state/gameCore";
 import { ideaOneLiner, ideaSummaryName } from "../state/floorSelectors";
 import { getDraft, setDraft, getLastUserId } from "../lib/draftCache";
+import { AvatarSprite } from "./Avatar";
 import { MoreToolsModal } from "./MoreToolsModal";
 import { isPublicSiteEnabled } from "../config";
 import { SITE_ONE_LINER_MAX_CHARS } from "../lib/siteCopy";
@@ -606,6 +607,21 @@ export function StepRunner() {
           </button>
         )}
       </div>
+      </div>
+
+      {/* The learner is IN the room (owner spec 2026-08-04): the avatar stands
+          in exactly the spot a Next Step walk leaves them on the floor —
+          bottom center, 120px above the bottom border — so stepping into a
+          unit task reads as walking in, not as a screen swap. `bottom` is
+          measured from the padding box, i.e. the inner edge of the room's
+          border. It sits at the horizontal CENTER of the action row, which is
+          empty (More tools is pushed left, the CTA right), so it never covers
+          a control, and pointer-events-none keeps it out of the way anyway. */}
+      <div
+        className="pointer-events-none absolute bottom-[120px] left-1/2 z-10 -translate-x-1/2"
+        aria-hidden
+      >
+        <AvatarSprite name={game.profile.firstName || game.profile.handle || "Founder"} />
       </div>
     </div>
   );
