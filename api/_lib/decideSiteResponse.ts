@@ -18,13 +18,13 @@
  * request URL, so no open-redirect or CRLF shape can ever reach the header.
  */
 
-import { RESERVED_HANDLE_SET } from "./reservedHandles";
+import { RESERVED_HANDLE_SET } from "./reservedHandles.js";
 import {
   renderNotFoundPage,
   renderOfflinePage,
   renderPublishedPage,
   renderUnavailablePage,
-} from "./renderSite";
+} from "./renderSite.js";
 
 /** Same shape as the DB CHECK / fp_public_site() argument validator (the120
  *  fp-public-site-rules.ts HANDLE_PATTERN). An invalid segment 404s WITHOUT

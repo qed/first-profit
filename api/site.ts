@@ -61,8 +61,8 @@
  */
 
 import type { VercelRequest, VercelResponse } from "@vercel/node";
-import { resolveSiteResponse, type SiteEnv } from "./_lib/decideSiteResponse";
-import { callFpPublicSite, extractSegment } from "./_lib/handlerSupport";
+import { resolveSiteResponse, type SiteEnv } from "./_lib/decideSiteResponse.js";
+import { callFpPublicSite, extractSegment } from "./_lib/handlerSupport.js";
 
 export default async function handler(
   req: VercelRequest,
