@@ -24,7 +24,7 @@
  * Layout: full-screen below `sm`, floating dialog from `sm` up — the overlay
  * breakpoint (matches RoomShell). No further tiers.
  */
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useGame } from "../state/GameContext";
 import {
   allBandsNoteFor,
@@ -39,9 +39,22 @@ import { activeBusiness, criterionIdsForPhase, phaseOfCriterion } from "../state
 import { ideaOneLiner, ideaSummaryName } from "../state/floorSelectors";
 import { getDraft, setDraft, getLastUserId } from "../lib/draftCache";
 import { useFocusTrap } from "../lib/useFocusTrap";
-import { StuckBox, taskIdFor } from "./StuckBox";
+import { MoreToolsModal } from "./MoreToolsModal";
 import { isPublicSiteEnabled } from "../config";
 import { SITE_ONE_LINER_MAX_CHARS } from "../lib/siteCopy";
+
+/**
+ * Task id synthesis: the generated stable task id is `${stepId}.${index+1}` —
+ * ids are 1-based positional within their criterion, for ALL 25 criteria of
+ * the generated content (task counts vary per criterion; the synthesis never
+ * assumes 5). A pinned test (StepRunner.test.tsx) walks every criterion × task
+ * index of PATH_CONTENT and asserts this synthesis matches the generated id
+ * exactly, so a future id-scheme change fails the suite here.
+ * (Moved here from the retired StuckBox when Change #8 removed that affordance.)
+ */
+export function taskIdFor(stepId: string, index: number): string {
+  return `${stepId}.${index + 1}`;
+}
 
 /**
  * The one authored field that renders on the PUBLIC page (real-public-site
@@ -101,19 +114,30 @@ export function StepRunner() {
 
   const open = runnerOpen && Boolean(runnerStep) && !celebrate;
 
-  // Focus the dialog on open and wire Escape → close (CLOSE_RUNNER). Guarded on
-  // `open` so listeners only exist while the runner is up.
+  // "More tools please" (Change #8): a completely separate feedback modal.
+  // While it is open the runner is NOT rendered (never visually nested); the
+  // runner's open-state stays untouched in the reducer, so closing the modal
+  // returns to the exact same task. Local state resets if the runner closes.
+  const [moreToolsOpen, setMoreToolsOpen] = useState(false);
   useEffect(() => {
-    if (!open) return;
+    if (!open) setMoreToolsOpen(false);
+  }, [open]);
+
+  // Focus the dialog on open and wire Escape → close (CLOSE_RUNNER). Guarded on
+  // `open` (and suspended while the More-tools modal owns the screen — its own
+  // Escape closes only itself) so listeners only exist while the runner is up.
+  // The moreToolsOpen dep also refocuses the panel when the modal hands back.
+  useEffect(() => {
+    if (!open || moreToolsOpen) return;
     panelRef.current?.focus();
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") dispatch({ type: "CLOSE_RUNNER" });
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [open, dispatch]);
+  }, [open, moreToolsOpen, dispatch]);
 
-  useFocusTrap(panelRef, open);
+  useFocusTrap(panelRef, open && !moreToolsOpen);
 
   const step = runnerStep ? stepById(runnerStep) : undefined;
   const total = step ? step.tasks.length : 0;
@@ -144,16 +168,6 @@ export function StepRunner() {
 
   if (!open || !step || !runnerStep) return null;
 
-  // The criterion's companion room dialog (handoff §Rooms). Only 1.1 (idea) and
-  // 1.2 (market) have a built dialog in Slice A; opening it closes the runner so
-  // the two fixed overlays never stack (mirrors the prototype's openTaskRoom).
-  const ROOM_DIALOG_NAMES: Record<string, string> = { idea: "The Idea Room", market: "The Sales Room" };
-  const roomDialogName = ROOM_DIALOG_NAMES[step.room];
-  const openRoomDialog = () => {
-    dispatch({ type: "CLOSE_RUNNER" });
-    dispatch({ type: "OPEN_ROOM", room: step.room });
-  };
-
   // Phase-aware header chrome (Unit 8): phase name/number AND colors/tints from
   // the phase engine + PHASES data (path.ts, single source), "Criterion N of M"
   // from the criterion's position within ITS phase (M varies only if the
@@ -171,7 +185,7 @@ export function StepRunner() {
   // Band-resolved task content (P0: the words the child reads must come from
   // the generated content at the session's band, per task — never the
   // per-criterion STEP_META chrome). The stable task id is positional,
-  // `${criterionId}.${index+1}` (taskIdFor, pinned by StuckBox.test against
+  // `${criterionId}.${index+1}` (taskIdFor, pinned by StepRunner.test against
   // every generated id). The accessors fall back safely: titles and done-when
   // lines are band-invariant, and a band without an authored variant reads the
   // shared body alone — so the `?? step.*` fallbacks below can only fire if a
@@ -235,8 +249,22 @@ export function StepRunner() {
   // text; every ctaFill is computed-verified >= 4.5:1 by phaseContrast.test).
   const ctaStyle =
     phase && phaseId !== "sell"
-      ? { background: phase.ctaFill, boxShadow: `0 5px 0 ${phase.ctaShadow}` }
+      ? { background: phase.ctaFill, boxShadow: `0 3px 0 ${phase.ctaShadow}` }
       : undefined;
+
+  // The More-tools modal fully replaces the runner overlay while open (own
+  // clean overlay, runner hidden and inert underneath — it is simply not
+  // mounted). All runner open-state lives in the reducer, so handing back
+  // re-renders the exact same task.
+  if (moreToolsOpen) {
+    return (
+      <MoreToolsModal
+        taskId={currentTaskId}
+        taskTitle={taskLabel}
+        onClose={() => setMoreToolsOpen(false)}
+      />
+    );
+  }
 
   return (
     <div className="fixed inset-0 z-[55] flex bg-[hsl(25_34%_20%/0.55)] sm:items-center sm:justify-center sm:p-4">
@@ -275,7 +303,7 @@ export function StepRunner() {
           <button
             type="button"
             onClick={close}
-            aria-label="Back to the floor"
+            aria-label="Close"
             className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border-2 border-[hsl(25_34%_20%/0.15)] bg-[hsl(40_55%_97%)] text-sm text-[hsl(25_34%_20%)] hover:border-[hsl(25_34%_20%/0.4)]"
           >
             ✕
@@ -402,13 +430,23 @@ export function StepRunner() {
             <p className="mt-0.5 break-words text-[13.5px] leading-[1.55] text-[hsl(25_34%_20%)]">{taskDoneWhen}</p>
           </div>
 
-          {/* Actions */}
-          <div className="mt-6 flex flex-wrap gap-3">
+          {/* Actions (Change #8): a compact bottom-right row. "More tools
+              please" opens the separate Improve First Profit modal; the green
+              CTA keeps the exact done/advance/complete semantics it always had,
+              just smaller and right-aligned. Closing is the header ✕ only. */}
+          <div className="mt-6 flex flex-wrap items-center justify-end gap-3">
+            <button
+              type="button"
+              onClick={() => setMoreToolsOpen(true)}
+              className="inline-flex min-h-[44px] items-center justify-center rounded-xl border-2 border-[hsl(25_34%_20%/0.2)] px-4 font-display text-sm font-bold text-[hsl(25_34%_20%)] hover:border-[hsl(25_34%_20%/0.5)]"
+            >
+              More tools please
+            </button>
             {alreadyDone && isLast ? (
               <button
                 type="button"
                 disabled
-                className="inline-flex min-h-[52px] flex-1 items-center justify-center gap-2 rounded-2xl bg-verified px-5 font-display text-base font-bold text-white opacity-60 shadow-[0_5px_0_hsl(150_52%_26%)]"
+                className="inline-flex min-h-[44px] items-center justify-center gap-1.5 rounded-xl bg-verified px-4 font-display text-sm font-bold text-white opacity-60 shadow-[0_3px_0_hsl(150_52%_26%)]"
                 style={ctaStyle}
               >
                 ✓ Done
@@ -417,7 +455,7 @@ export function StepRunner() {
               <button
                 type="button"
                 onClick={advance}
-                className="inline-flex min-h-[52px] flex-1 items-center justify-center gap-2 rounded-2xl bg-verified px-5 font-display text-base font-bold text-white shadow-[0_5px_0_hsl(150_52%_26%)]"
+                className="inline-flex min-h-[44px] items-center justify-center gap-1.5 rounded-xl bg-verified px-4 font-display text-sm font-bold text-white shadow-[0_3px_0_hsl(150_52%_26%)]"
                 style={ctaStyle}
               >
                 Next task →
@@ -426,35 +464,13 @@ export function StepRunner() {
               <button
                 type="button"
                 onClick={doIt}
-                className="inline-flex min-h-[52px] flex-1 items-center justify-center gap-2 rounded-2xl bg-verified px-5 font-display text-base font-bold text-white shadow-[0_5px_0_hsl(150_52%_26%)]"
+                className="inline-flex min-h-[44px] items-center justify-center gap-1.5 rounded-xl bg-verified px-4 font-display text-sm font-bold text-white shadow-[0_3px_0_hsl(150_52%_26%)]"
                 style={ctaStyle}
               >
                 ✓ I did it
               </button>
             )}
-            <button
-              type="button"
-              onClick={close}
-              className="inline-flex min-h-[52px] items-center justify-center rounded-2xl border-2 border-[hsl(25_34%_20%/0.2)] px-5 font-display text-sm font-bold text-[hsl(25_34%_20%)] hover:border-[hsl(25_34%_20%/0.5)]"
-            >
-              Back to the Floor
-            </button>
           </div>
-
-          {roomDialogName ? (
-            <button
-              type="button"
-              onClick={openRoomDialog}
-              className="mt-3 block w-full text-center text-[12px] text-[hsl(25_20%_38%)] underline decoration-[hsl(25_20%_38%/0.4)] underline-offset-2 hover:text-[hsl(25_34%_20%)]"
-            >
-              Everything you need for this task is inside {roomDialogName} →
-            </button>
-          ) : null}
-
-          {/* "Stuck? Tell us" (Unit 2): below the CTA row so it never competes
-              with the primary actions at 390px. Keyed per task so the box and
-              its draft text reset when the runner moves to another task. */}
-          <StuckBox key={taskIdFor(runnerStep, idx)} taskId={taskIdFor(runnerStep, idx)} />
         </div>
       </div>
     </div>
