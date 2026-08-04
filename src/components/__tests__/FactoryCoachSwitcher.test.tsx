@@ -23,7 +23,7 @@ vi.mock("../../config", async (importOriginal) => {
 
 import * as GameContext from "../../state/GameContext";
 import { NextStepCoach, SwitcherDialog } from "../../screens/Factory";
-import { FloorHarness, apply, completePhase, completeStep, validatedIdea, withIdeas } from "../../testSupport/floorHarness";
+import { FloorHarness, apply, completePhase, completeStep, validatedIdea, withIdeas, withNamedIdeas } from "../../testSupport/floorHarness";
 import type { WalkIntent } from "../FactoryFloor";
 import type { Action, GameState } from "../../state/gameCore";
 
@@ -46,21 +46,21 @@ function mountCoach(seed: GameState) {
 
 describe("NextStepCoach — promote CTA + full-path walking (Unit 8)", () => {
   it("shows 'Make it your business!' at the promotion seam and opens the promote screen", () => {
-    const { walks } = mountCoach(validatedIdea(withIdeas(1), 0));
+    const { walks } = mountCoach(validatedIdea(withNamedIdeas(1), 0));
     expect(screen.getByText("Make it your business!")).toBeTruthy();
     fireEvent.click(screen.getByText("Next Step"));
     expect(walks).toEqual([{ kind: "openPromote" }]);
   });
 
   it("walks a BUILD criterion by its room name once Sell completes (post-allowlist expansion)", () => {
-    const { walks } = mountCoach(completePhase(withIdeas(1), 0, "sell"));
+    const { walks } = mountCoach(completePhase(withNamedIdeas(1), 0, "sell"));
     expect(screen.getByText("Take me to The Build Room")).toBeTruthy();
     fireEvent.click(screen.getByText("Next Step"));
     expect(walks).toEqual([{ kind: "enterCriterion", stepId: "2.1" }]);
   });
 
   it("walks GROW criteria for the promoted business (4.1 in the Checkout Booth)", () => {
-    let s = validatedIdea(withIdeas(1), 0);
+    let s = validatedIdea(withNamedIdeas(1), 0);
     s = apply(s, { type: "PROMOTE_IDEA", ideaId: "idea-0", businessId: "biz-1", at: 1 });
     const { walks } = mountCoach(s);
     expect(screen.getByText("Take me to The Checkout Booth")).toBeTruthy();
@@ -69,7 +69,7 @@ describe("NextStepCoach — promote CTA + full-path walking (Unit 8)", () => {
   });
 
   it("hides once the whole path is done (terminal state)", () => {
-    let s = validatedIdea(withIdeas(1), 0);
+    let s = validatedIdea(withNamedIdeas(1), 0);
     s = apply(s, { type: "PROMOTE_IDEA", ideaId: "idea-0", businessId: "biz-1", at: 1 });
     for (const phase of ["grow", "scale"] as const) s = completePhase(s, 0, phase);
     mountCoach(s);

@@ -39,6 +39,24 @@ export function withIdeas(n: number): GameState {
   return s;
 }
 
+/** Give one idea BOTH naming fields, so the floor-layer naming redirect
+ *  (floorSelectors.ideaNeedsNaming: unnamed idea → 1.1.1) stays out of the
+ *  way of what a test pins. */
+export function nameIdea(state: GameState, ideaIndex: number): GameState {
+  return apply(
+    state,
+    { type: "SET_FIELD", ideaIndex, key: "productName", value: `Product ${ideaIndex + 1}` },
+    { type: "SET_FIELD", ideaIndex, key: "oneLiner", value: `One-liner ${ideaIndex + 1}` },
+  );
+}
+
+/** Base state with N ideas, every one fully named. */
+export function withNamedIdeas(n: number): GameState {
+  let s = withIdeas(n);
+  for (let i = 0; i < n; i++) s = nameIdea(s, i);
+  return s;
+}
+
 /** Mark every task of a criterion done for one idea (real reducer writes). */
 export function completeStep(state: GameState, ideaIndex: number, stepId: string): GameState {
   const step = stepById(stepId);

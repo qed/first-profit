@@ -37,6 +37,29 @@ export function ideaProductName(state: GameState, ideaIndex: number): string {
   return (idea.fields.productName ?? "").trim();
 }
 
+/** The criterion whose first task authors the product name + one-liner
+ *  (pathHooks FIELD_HOOKS "1.1") — the destination of the naming redirect. */
+export const NAMING_STEP_ID = "1.1";
+
+/** The unit-task id the naming redirect points at (1.1's first task). */
+const NAMING_TASK_ID = `${NAMING_STEP_ID}.1`;
+
+/**
+ * RULE (2026-08-03): an idea missing its product name OR its one-liner
+ * (trimmed-empty counts as missing) still needs naming, and its next step is
+ * ALWAYS 1.1 task 1 — even when 1.1 (or later criteria) are already complete.
+ *
+ * This is a FLOOR-LAYER redirect only: gameCore's unlock/progress/completion
+ * semantics are untouched. The Step Runner already opens done tasks in review
+ * mode (idempotent completion), where 1.1's fields stay editable, so the
+ * redirect can never strand a kid. Consulted by nextTaskId, nextCoachTarget,
+ * ideaProgressLabel, and roomEntryFor below.
+ */
+export function ideaNeedsNaming(state: GameState, ideaIndex: number): boolean {
+  if (!state.ideas[ideaIndex]) return false;
+  return ideaProductName(state, ideaIndex) === "" || ideaOneLiner(state, ideaIndex) === "";
+}
+
 /**
  * Display name for an idea summary card: the PRODUCT NAME first and foremost
  * (the `productName` field the learner authors in criterion 1.1), falling back
@@ -105,6 +128,9 @@ export function firstIncompleteTaskIndex(
  * Task ids are 1-based within a criterion, matching the generated stable ids.
  */
 export function nextTaskId(state: GameState, ideaIndex: number): string | null {
+  // Naming redirect: an unnamed idea's next task is always 1.1.1 (see
+  // ideaNeedsNaming) — progress labels and coach copy follow this id.
+  if (ideaNeedsNaming(state, ideaIndex)) return NAMING_TASK_ID;
   const stepId = nextUpFor(state, ideaIndex);
   if (!stepId) return null;
   const idx = firstIncompleteTaskIndex(state, ideaIndex, stepId);
@@ -122,7 +148,11 @@ export function nextTaskId(state: GameState, ideaIndex: number): string | null {
  * lingers — the label rolls straight onto the next phase's first task.
  */
 export function ideaProgressLabel(state: GameState, ideaIndex: number): string {
-  const phase = currentPhaseFor(state, ideaIndex);
+  // Naming redirect: an unnamed idea's label counts 1.1's phase (Sell) and its
+  // nextTaskId reads 1.1.1, so the line honestly says where the coach sends it.
+  const phase = ideaNeedsNaming(state, ideaIndex)
+    ? (phaseOfCriterion(NAMING_STEP_ID) ?? "sell")
+    : currentPhaseFor(state, ideaIndex);
   const { done } = phaseProgress(state, ideaIndex, phase);
   const total = phaseTaskTotal(phase);
   const next = nextTaskId(state, ideaIndex);
@@ -179,6 +209,12 @@ export function nextCoachTarget(
   for (const ideaIndex of order) {
     if (seen.has(ideaIndex)) continue;
     seen.add(ideaIndex);
+    // Naming redirect: an unnamed idea's coach destination is always 1.1
+    // (subject to the same content-readiness gate as every other target).
+    if (ideaNeedsNaming(state, ideaIndex) && built.has(NAMING_STEP_ID)) {
+      const room = stepById(NAMING_STEP_ID)?.room;
+      if (room) return { kind: "criterion", stepId: NAMING_STEP_ID, room };
+    }
     const stepId = nextUpFor(state, ideaIndex);
     if (stepId) {
       // Unbuilt frontier: behave exactly as pre-Unit-6 (no target for this
@@ -220,6 +256,17 @@ export function roomEntryFor(
   built: ReadonlySet<string> = BUILT_CRITERIA,
 ): RoomEntry {
   if (!built.has(stepId)) return { action: "noop" };
+  // Naming redirect (see ideaNeedsNaming): entering 1.1 while any idea is
+  // still unnamed routes to that idea at task 1 — the task that authors
+  // productName/oneLiner — so a coach-driven walk for an unnamed idea always
+  // lands on 1.1 index 0, even when the idea already completed 1.1 (the
+  // runner's review entry keeps the fields editable). Several unnamed ideas
+  // fall through to the picker, exactly like the normal many-eligible case.
+  if (stepId === NAMING_STEP_ID) {
+    const needing = state.ideas.map((_, i) => i).filter((i) => ideaNeedsNaming(state, i));
+    if (needing.length === 1) return { action: "enter", ideaIndex: needing[0], index: 0 };
+    if (needing.length > 1) return { action: "pick", eligible: needing };
+  }
   // In-progress ideas keep exact pre-existing priority; when none, DONE ideas
   // re-enter in review mode (task 1, idempotent completion) so authored fields
   // like 1.1's productName/oneLiner are never orphaned behind a finished room.

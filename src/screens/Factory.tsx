@@ -34,8 +34,10 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useGame } from "../state/GameContext";
 import { isPublicSiteEnabled } from "../config";
-import { firstIncompleteTaskIndex, ideaOneLiner, ideaProgressLabel, ideaSummaryName, nextCoachTarget, roomEntryFor } from "../state/floorSelectors";
+import { firstIncompleteTaskIndex, ideaOneLiner, ideaProgressLabel, ideaSummaryName, NAMING_STEP_ID, nextCoachTarget, roomEntryFor } from "../state/floorSelectors";
 import { stepById, type RoomId } from "../data/path";
+import { FIELD_HOOKS } from "../data/pathHooks";
+import { SITE_ONE_LINER_MAX_CHARS } from "../lib/siteCopy";
 import { FactoryFloor, type FloorView, type WalkIntent } from "../components/FactoryFloor";
 import { StepRunner } from "../components/StepRunner";
 import { Celebration } from "../components/Celebration";
@@ -367,6 +369,165 @@ export function SwitcherDialog({
   );
 }
 
+/**
+ * Cap for the product name input in the idea summary dialog below. The
+ * productName field has no dedicated cap constant anywhere else (the runner
+ * uses its generic 2000-char input cap), so the dialog's cap lives HERE,
+ * right beside the field it governs. 60 keeps the name comfortably inside
+ * every summary surface (cards truncate at 42 for display).
+ */
+export const IDEA_NAME_MAX_CHARS = 60;
+
+/**
+ * The idea summary dialog (2026-08-03 rule 2): tapping a FILLED slot in the
+ * Sell floor's "Your Ideas" row opens THIS summary instead of path entry —
+ * the idea's name and one-liner (both editable; SET_FIELD with an EXPLICIT
+ * ideaIndex, never assumed active) plus the progress line. Edits commit on
+ * blur/save and flush immediately (game.flushNow, the Step Runner's
+ * public-page freshness discipline — both strings reach the live public page
+ * through the projection). Naming here also moves the coach off 1.1.1: the
+ * floor selectors re-derive from the same fields (ideaNeedsNaming).
+ *
+ * Shell matches the other overlays: full-screen below sm, floating dialog
+ * from sm up. Open-state lives in Factory's useState (above the breakpoint
+ * conditional, like promoteOpen/switcherOpen). Exported for the test suite;
+ * only Factory mounts it.
+ */
+export function IdeaSummaryDialog({
+  ideaIndex,
+  onClose,
+}: {
+  ideaIndex: number;
+  onClose: () => void;
+}) {
+  const game = useGame();
+  const { dispatch } = game;
+  const panelRef = useRef<HTMLDivElement>(null);
+  const idea = game.ideas[ideaIndex];
+  const [name, setName] = useState(idea?.fields.productName ?? "");
+  const [liner, setLiner] = useState(idea?.fields.oneLiner ?? "");
+
+  useEffect(() => {
+    panelRef.current?.focus();
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
+  useFocusTrap(panelRef, true);
+
+  if (!idea) return null;
+
+  // Labels/placeholders come from the SAME authored field hooks the Step
+  // Runner renders for 1.1, so the two edit surfaces always read alike.
+  const namingFields = FIELD_HOOKS[NAMING_STEP_ID] ?? [];
+  const nameMeta = namingFields.find((f) => f.key === "productName");
+  const linerMeta = namingFields.find((f) => f.key === "oneLiner");
+
+  /** Dispatch SET_FIELD for THIS idea if the draft differs; true when it did. */
+  const commitField = (key: "productName" | "oneLiner", value: string): boolean => {
+    if ((idea.fields[key] ?? "") === value) return false;
+    dispatch({ type: "SET_FIELD", ideaIndex, key, value });
+    return true;
+  };
+  /** Blur commit: land the edit now (flushNow is optional-called defensively —
+   *  test harnesses that stub the context may omit it). */
+  const commitOnBlur = (key: "productName" | "oneLiner", value: string) => {
+    if (commitField(key, value)) void game.flushNow?.();
+  };
+  const saveAndClose = () => {
+    const changedName = commitField("productName", name);
+    const changedLiner = commitField("oneLiner", liner);
+    if (changedName || changedLiner) void game.flushNow?.();
+    onClose();
+  };
+
+  return (
+    <div className="fixed inset-0 z-[55] flex bg-[hsl(25_34%_20%/0.55)] sm:items-center sm:justify-center sm:p-4">
+      <div
+        ref={panelRef}
+        role="dialog"
+        aria-modal="true"
+        aria-label={`Idea #${ideaIndex + 1}`}
+        tabIndex={-1}
+        className="fp-rise flex h-full w-full flex-col overflow-y-auto bg-[hsl(40_55%_97%)] outline-none sm:h-auto sm:max-h-[calc(100dvh-2rem)] sm:w-full sm:max-w-[560px] sm:rounded-3xl sm:border-2 sm:border-[hsl(25_34%_20%/0.15)] sm:shadow-[0_8px_0_rgba(120,80,40,.1)]"
+        style={{ animation: "fp-rise .3s cubic-bezier(.22,1,.36,1) both" }}
+      >
+        <header className="flex items-start justify-between gap-4 border-b-2 border-[hsl(25_34%_20%/0.1)] px-5 py-4 sm:px-6">
+          <div className="min-w-0">
+            <p className="font-mono text-[10px] uppercase tracking-[0.2em] text-[hsl(14_78%_44%)]">
+              Idea #{ideaIndex + 1}
+            </p>
+            <h2 className="mt-1 font-display text-xl font-black leading-tight text-[hsl(25_34%_20%)]">
+              {ideaSummaryName(game, ideaIndex)}
+            </h2>
+            <p className="mt-1 font-mono text-[10px] text-[hsl(25_20%_38%)]">
+              {ideaProgressLabel(game, ideaIndex)}
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="Back to the floor"
+            className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border-2 border-[hsl(25_34%_20%/0.15)] bg-[hsl(40_55%_97%)] text-sm text-[hsl(25_34%_20%)] hover:border-[hsl(25_34%_20%/0.4)]"
+          >
+            ✕
+          </button>
+        </header>
+
+        <div className="px-5 pb-7 pt-5 sm:px-6">
+          <label
+            htmlFor="fp-idea-summary-name"
+            className="mb-1.5 block font-mono text-[10.5px] uppercase tracking-[0.08em] text-[hsl(25_20%_38%)]"
+          >
+            {nameMeta?.label ?? "Product name"}
+          </label>
+          <input
+            id="fp-idea-summary-name"
+            maxLength={IDEA_NAME_MAX_CHARS}
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            onBlur={() => commitOnBlur("productName", name)}
+            placeholder={nameMeta?.placeholder}
+            className="min-h-[44px] w-full rounded-[10px] border-2 border-[hsl(25_34%_20%/0.15)] bg-white px-3.5 py-3 text-sm text-[hsl(25_34%_20%)] outline-none focus:border-sell"
+          />
+
+          <label
+            htmlFor="fp-idea-summary-liner"
+            className="mb-1.5 mt-[18px] block font-mono text-[10.5px] uppercase tracking-[0.08em] text-[hsl(25_20%_38%)]"
+          >
+            {linerMeta?.label ?? "Your one-liner"}
+          </label>
+          <input
+            id="fp-idea-summary-liner"
+            maxLength={SITE_ONE_LINER_MAX_CHARS}
+            value={liner}
+            onChange={(e) => setLiner(e.target.value)}
+            onBlur={() => commitOnBlur("oneLiner", liner)}
+            placeholder={linerMeta?.placeholder}
+            className="min-h-[44px] w-full rounded-[10px] border-2 border-[hsl(25_34%_20%/0.15)] bg-white px-3.5 py-3 text-sm text-[hsl(25_34%_20%)] outline-none focus:border-sell"
+          />
+          {isPublicSiteEnabled() ? (
+            <p className="mt-1.5 text-[12px] text-[hsl(25_20%_38%)]">
+              This goes on your public page. No phone numbers, addresses, or last names.
+            </p>
+          ) : null}
+
+          <button
+            type="button"
+            onClick={saveAndClose}
+            className="mt-6 min-h-[48px] w-full rounded-2xl bg-verified px-5 font-display text-lg font-black text-white shadow-[0_5px_0_hsl(150_52%_26%)] transition hover:-translate-y-0.5 active:translate-y-0.5 active:shadow-[0_2px_0_hsl(150_52%_26%)] focus:outline-none focus-visible:ring-4 focus-visible:ring-verified/40"
+          >
+            Save my idea
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export function Factory({
   switcherOpen: controlledSwitcherOpen,
   onSwitcherOpenChange,
@@ -386,6 +547,11 @@ export function Factory({
   // reducer action ever needs to drive, held above the breakpoint conditional
   // mount so both survive the lg swap (see PromoteBusiness's doc comment).
   const [promoteOpen, setPromoteOpen] = useState(false);
+  // Which idea the summary dialog shows (null = closed). Same placement rule
+  // as promoteOpen: Factory never unmounts across lg, so the open-state
+  // survives the breakpoint swap; the slots inside CriterionFloor reach it
+  // through the SAME onWalk intent channel as every other card tap.
+  const [ideaSummary, setIdeaSummary] = useState<number | null>(null);
   const [internalSwitcherOpen, setInternalSwitcherOpen] = useState(false);
   const switcherOpen = controlledSwitcherOpen ?? internalSwitcherOpen;
   const setSwitcherOpen = onSwitcherOpenChange ?? setInternalSwitcherOpen;
@@ -418,18 +584,12 @@ export function Factory({
           // "noop" → nothing (no eligible idea)
           break;
         }
-        case "openIdea": {
-          dispatch({ type: "SET_ACTIVE_IDEA", ideaIndex: intent.ideaIndex });
-          const step = game.nextUpFor(intent.ideaIndex);
-          if (step) {
-            dispatch({
-              type: "OPEN_RUNNER",
-              stepId: step,
-              index: firstIncompleteTaskIndex(game, intent.ideaIndex, step) ?? 0,
-            });
-          }
+        case "openIdea":
+          // A filled "Your Ideas" slot opens the idea SUMMARY dialog (2026-08-03
+          // rule 2) — never direct path entry. The path stays reachable through
+          // the room cards and the coach; the dialog itself edits name/one-liner.
+          setIdeaSummary(intent.ideaIndex);
           break;
-        }
         case "createIdea":
           // The idea's stable id is minted at this caller boundary (Unit 7).
           dispatch({ type: "CREATE_IDEA", ideaId: crypto.randomUUID() });
@@ -454,6 +614,7 @@ export function Factory({
   const anyOverlayOpen =
     Boolean(game.runnerOpen || game.room || game.celebrate || game.pickFor) ||
     promoteOpen ||
+    ideaSummary !== null ||
     switcherOpen;
   // React 18's types don't know the `inert` attribute yet; apply it through a
   // spread so the DOM gets the real attribute without a ts-expect-error.
@@ -490,6 +651,14 @@ export function Factory({
         onClose={() => setSwitcherOpen(false)}
         onSwitched={cancelWalk}
       />
+      {ideaSummary !== null && game.ideas[ideaSummary] ? (
+        // Keyed per idea so the local drafts reset when a different slot opens.
+        <IdeaSummaryDialog
+          key={ideaSummary}
+          ideaIndex={ideaSummary}
+          onClose={() => setIdeaSummary(null)}
+        />
+      ) : null}
     </main>
   );
 }

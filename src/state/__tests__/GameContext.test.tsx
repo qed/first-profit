@@ -592,6 +592,10 @@ describe("promoteIdea / archiveBusiness / unarchiveBusiness (caller boundary)", 
     act(() => {
       getApi().dispatch({ type: "CREATE_IDEA", ideaId: "idea-a" });
       getApi().dispatch({ type: "CLOSE_RUNNER" });
+      // Name the idea: an unnamed idea is redirected to 1.1 by the floor
+      // selectors (naming rule, 2026-08-03), which would mask the seam here.
+      getApi().dispatch({ type: "SET_FIELD", ideaIndex: 0, key: "productName", value: "Slime Kits" });
+      getApi().dispatch({ type: "SET_FIELD", ideaIndex: 0, key: "oneLiner", value: "DIY slime kits" });
     });
     completeThroughValidate(0);
 

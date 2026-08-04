@@ -30,7 +30,7 @@ vi.mock("../../state/GameContext", async () => {
 
 import * as GameContext from "../../state/GameContext";
 import { Factory } from "../Factory";
-import { FloorHarness, completeStep, validatedIdea, withIdeas } from "../../testSupport/floorHarness";
+import { FloorHarness, completeStep, validatedIdea, withIdeas, withNamedIdeas } from "../../testSupport/floorHarness";
 import { stepById } from "../../data/path";
 import type { Action, GameState } from "../../state/gameCore";
 import type { GameApi } from "../../state/GameContext";
@@ -193,7 +193,7 @@ describe("Factory — walk-race proofing (unit review FIX 1)", () => {
 
 describe("Factory — overlay guard (unit review FIX 5)", () => {
   it("promote open: the coach hides and the floor container is inert", () => {
-    const { container } = mountFactory(validatedIdea(withIdeas(1), 0));
+    const { container } = mountFactory(validatedIdea(withNamedIdeas(1), 0));
     // The coach's promote CTA opens the PromoteBusiness overlay via the walk.
     fireEvent.click(screen.getByText("Next Step"));
     arrive();
