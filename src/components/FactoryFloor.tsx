@@ -72,15 +72,38 @@ export function FactoryFloor(props: FloorProps) {
 
 const HINT = "Click the floor to walk · click a room to enter it";
 
+/**
+ * How far above the floor's bottom border the avatar stands after a Next Step
+ * coach walk (owner spec 2026-08-04). The coach button is docked down there,
+ * so the avatar meets it rather than stopping in the middle of the room.
+ */
+const COACH_STOP_ABOVE_BOTTOM_PX = 120;
+
 function DesktopFloor({ walkTo, onArrived, onWalk, floorView, onBack }: FloorProps) {
   const { profile } = useGame();
   const [pos, setPos] = useState({ x: 50, y: 94 });
   const timer = useRef<number | null>(null);
   // Counts floor clicks, so a walk can tell "the learner clicked somewhere on
   // this floor" (walk there) from "the walk came from outside" (walk to the
-  // middle). Refs, not state: this must not cause a render of its own.
+  // coach's spot). Refs, not state: this must not cause a render of its own.
   const clickSeq = useRef(0);
   const walkedSeq = useRef(0);
+  const floorRef = useRef<HTMLDivElement>(null);
+
+  /**
+   * Where the avatar stands for a coach-driven walk, as a `top` percentage.
+   * The sprite is `-translate-y-full`, so `top` places its FEET — this returns
+   * the percentage that puts them COACH_STOP_ABOVE_BOTTOM_PX above the floor's
+   * bottom border. Derived from the live height because the floor resizes with
+   * the viewport; the constant fallback covers a not-yet-measured mount (jsdom
+   * reports 0), and it is the same ~82% the pixel math lands on at a typical
+   * desktop floor height.
+   */
+  const coachStopPercent = () => {
+    const h = floorRef.current?.clientHeight ?? 0;
+    if (h <= COACH_STOP_ABOVE_BOTTOM_PX) return 82;
+    return ((h - COACH_STOP_ABOVE_BOTTOM_PX) / h) * 100;
+  };
 
   // Drive the walk from the parent's intent (survives the breakpoint swap).
   // walkTo → null is CANCELLATION (unit review FIX 1b): the dep change makes
@@ -90,12 +113,13 @@ function DesktopFloor({ walkTo, onArrived, onWalk, floorView, onBack }: FloorPro
     if (!walkTo) return;
     // WALK TO THE THING YOU CLICKED (owner spec 2026-08-04). A card tap
     // bubbles to onFloorClick below, which has already pointed the avatar at
-    // the click, so this effect must NOT drag it back to the middle. When a
-    // walk starts WITHOUT a floor click — the docked coach and the nav sit
-    // outside this container — there is no click to walk to, so we fall back
-    // to the middle and the walk still reads as a walk. The click counter is
-    // how we tell the two apart.
-    if (clickSeq.current === walkedSeq.current) setPos({ x: 50, y: 46 });
+    // the click, so this effect must NOT drag it back anywhere. When a walk
+    // starts WITHOUT a floor click — the docked Next Step coach and the nav
+    // sit outside this container — there is nothing on the floor to walk to,
+    // so the avatar heads to the coach's own corner of the room: bottom
+    // center, standing COACH_STOP_ABOVE_BOTTOM_PX above the bottom border.
+    // The click counter is how we tell the two apart.
+    if (clickSeq.current === walkedSeq.current) setPos({ x: 50, y: coachStopPercent() });
     walkedSeq.current = clickSeq.current;
     if (timer.current) window.clearTimeout(timer.current);
     timer.current = window.setTimeout(() => onArrived(walkTo), 550);
@@ -116,6 +140,7 @@ function DesktopFloor({ walkTo, onArrived, onWalk, floorView, onBack }: FloorPro
 
   return (
     <div
+      ref={floorRef}
       className="fp-grid relative h-full w-full overflow-hidden rounded-[22px] border-2 border-[hsl(14_78%_54%/0.5)] bg-[hsl(38_40%_92%)]"
       onClick={onFloorClick}
       role="application"
