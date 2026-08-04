@@ -771,8 +771,21 @@ export function Factory({
   const inertProps = (anyOverlayOpen ? { inert: "" } : {}) as React.HTMLAttributes<HTMLDivElement>;
 
   return (
-    <main className="flex h-[100dvh] w-full flex-col gap-3 overflow-hidden bg-[hsl(38_46%_95%)] p-3 text-ink sm:gap-4 sm:p-5">
-      <div className="relative min-h-0 flex-1" {...inertProps}>
+    // Sized to the space BELOW the sticky GlobalNav (change 16), not the whole
+    // viewport: the bar publishes its live height as `--fp-nav-h` (it wraps to
+    // two rows at 390px, so it is not a constant). A plain 100dvh here made the
+    // document taller than the screen by exactly the bar's height, so the floor
+    // — and now the runner that fills it — scrolled underneath the bar. The
+    // 0px fallback keeps pre-nav mounts (tests, the floor harness) unchanged.
+    <main className="flex h-[calc(100dvh-var(--fp-nav-h,0px))] w-full flex-col gap-3 overflow-hidden bg-[hsl(38_46%_95%)] p-3 text-ink sm:gap-4 sm:p-5">
+      {/* The floor REGION (2026-08-04). The outer box is the positioning
+          context and is never inert; the inner box holds the floor itself and
+          takes `inert` while an overlay is open. The unit-task runner mounts
+          as a sibling of that inner box so it fills the floor's footprint —
+          inside the red border, with the GlobalNav still visible and usable
+          above it — instead of covering the whole viewport. */}
+      <div className="relative min-h-0 flex-1">
+      <div className="relative h-full w-full" {...inertProps}>
         <FactoryFloor
           walkTo={walkTo}
           onArrived={onArrived}
@@ -800,8 +813,11 @@ export function Factory({
             conditional like the coach, so it survives the lg variant swap. */}
         <GradeAsk overlayOpen={anyOverlayOpen} />
       </div>
+        {/* Fills the floor box (absolute inset-0), so it lands inside the red
+            border and leaves the nav bar alone. */}
+        <StepRunner />
+      </div>
 
-      <StepRunner />
       <Celebration />
       <RoomDialog />
       <PromoteBusiness open={promoteOpen} onClose={() => setPromoteOpen(false)} />

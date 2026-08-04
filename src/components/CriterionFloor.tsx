@@ -24,7 +24,7 @@
 import { useGame } from "../state/GameContext";
 import { MAX_IDEAS, activeBusiness } from "../state/gameCore";
 import { BUILT_CRITERIA, STEPS, phaseById, type PhaseId } from "../data/path";
-import { ideaProgressLabel, ideaSummaryName } from "../state/floorSelectors";
+import { ideaIsUnnamed, ideaProgressLabel, ideaSummaryName } from "../state/floorSelectors";
 import { CriterionRoomCard, IdeaSlot, SectionTitle } from "./PodCardContent";
 import type { WalkIntent } from "./FactoryFloor";
 
@@ -139,6 +139,27 @@ export function CriterionFloor({
           <div className={GRID}>
             {Array.from({ length: MAX_IDEAS }).map((_, n) => {
               if (n < ideas.length) {
+                // Identity, not index (Change #7 review P1; see the WalkIntent
+                // doc): id-less legacy ideas have no summary target this
+                // session — skip.
+                const open = () => {
+                  const ideaId = ideas[n].id;
+                  if (ideaId) onWalk({ kind: "openIdea", ideaId });
+                };
+                // TWO card states (owner spec 2026-08-04): an idea with no
+                // name AND no one-liner keeps the grey "New idea" look of an
+                // untouched slot, but opens its summary instead of creating
+                // anything. Same rule as the phases floor's Products row.
+                if (ideaIsUnnamed(game, n)) {
+                  return (
+                    <IdeaSlot
+                      key={n}
+                      kind="create"
+                      ariaLabel={`Open Idea #${n + 1}, not named yet`}
+                      onClick={open}
+                    />
+                  );
+                }
                 return (
                   <IdeaSlot
                     key={n}
@@ -147,13 +168,7 @@ export function CriterionFloor({
                     name={ideaSummaryName(game, n)}
                     progress={ideaProgressLabel(game, n)}
                     current={n === activeIdea}
-                    onClick={() => {
-                      // Identity, not index (Change #7 review P1; see the
-                      // WalkIntent doc): id-less legacy ideas have no summary
-                      // target this session — skip.
-                      const ideaId = ideas[n].id;
-                      if (ideaId) onWalk({ kind: "openIdea", ideaId });
-                    }}
+                    onClick={open}
                   />
                 );
               }

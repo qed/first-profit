@@ -518,10 +518,10 @@ describe("Factory — Your Ideas slots route to the summary dialog (rule 2)", ()
     expect(screen.getByText("← The Path")).toBeTruthy();
   }
 
-  it("a FILLED slot opens the read-mode summary dialog, never the runner", () => {
+  it("an UNNAMED idea's grey card opens the read-mode summary dialog, never the runner", () => {
     const { actions } = mountFactory(withIdeas(1));
     openSellFloor();
-    fireEvent.click(screen.getByText("Idea #1").closest("button")!);
+    fireEvent.click(screen.getByRole("button", { name: "Open Idea #1, not named yet" }));
     arrive();
     expect(screen.getByLabelText("Idea #1")).toBeTruthy(); // the dialog itself
     expect(screen.getByLabelText("Edit name")).toBeTruthy(); // read mode
@@ -565,7 +565,7 @@ describe("Factory — Your Ideas slots route to the summary dialog (rule 2)", ()
     const seed = withIdeas(2);
     mountFactory(seed);
     openSellFloor();
-    fireEvent.click(screen.getByText("Idea #1").closest("button")!);
+    fireEvent.click(screen.getByRole("button", { name: "Open Idea #1, not named yet" }));
     arrive();
     expect(screen.getByLabelText("Idea #1")).toBeTruthy(); // the dialog
     const remoteDoc = toSaveDoc(reducer(seed, { type: "DELETE_IDEA", ideaId: "idea-0" }));
@@ -580,7 +580,7 @@ describe("Factory — Your Ideas slots route to the summary dialog (rule 2)", ()
     const seed = withIdeas(2);
     mountFactory(seed);
     openSellFloor();
-    fireEvent.click(screen.getByText("Idea #1").closest("button")!); // walk starts (~550ms)
+    fireEvent.click(screen.getByRole("button", { name: "Open Idea #1, not named yet" })); // walk starts (~550ms)
     // The deletion lands while the avatar is still walking.
     const remoteDoc = toSaveDoc(reducer(seed, { type: "DELETE_IDEA", ideaId: "idea-0" }));
     act(() => latestDispatch!({ type: "UNION_REMOTE", doc: remoteDoc }));
@@ -595,7 +595,7 @@ describe("Factory — Your Ideas slots route to the summary dialog (rule 2)", ()
     const { actions } = mountFactory(completeStep(withIdeas(1), 0, "1.1"));
     expect(screen.getByText("Take me to The Idea Room")).toBeTruthy();
     openSellFloor();
-    fireEvent.click(screen.getByText("Idea #1").closest("button")!);
+    fireEvent.click(screen.getByRole("button", { name: "Open Idea #1, not named yet" }));
     arrive();
     fireEvent.click(screen.getByLabelText("Edit name"));
     fireEvent.change(screen.getByLabelText("Product name"), { target: { value: "Slime Kits" } });

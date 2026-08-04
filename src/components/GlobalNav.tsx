@@ -304,6 +304,29 @@ export function GlobalNav({ onSwitched }: { onSwitched?: () => void } = {}) {
   const loggedIn = isLoggedInStage(stage);
   const founder = profile.firstName || profile.handle || "Founder";
 
+  /**
+   * Publish the bar's LIVE height as `--fp-nav-h` (2026-08-04). The bar wraps
+   * to two rows at 390px, so its height is not a constant anyone can hardcode:
+   * Factory sizes the floor to `100dvh - var(--fp-nav-h)` so the floor (and
+   * the unit-task runner that now fills it) always fits BELOW the sticky bar
+   * instead of scrolling underneath it. Measured, not assumed, so a wrap, a
+   * longer idea name, or a font swap can never desync the two.
+   */
+  const navRef = useRef<HTMLElement>(null);
+  useEffect(() => {
+    const el = navRef.current;
+    if (!el || typeof ResizeObserver === "undefined") return;
+    const publish = () =>
+      document.documentElement.style.setProperty("--fp-nav-h", `${el.offsetHeight}px`);
+    publish();
+    const ro = new ResizeObserver(publish);
+    ro.observe(el);
+    return () => {
+      ro.disconnect();
+      document.documentElement.style.removeProperty("--fp-nav-h");
+    };
+  }, []);
+
   const wordmark = (
     <span className="flex items-center gap-2.5 whitespace-nowrap">
       <LogoMark className="h-6 w-auto" />
@@ -313,6 +336,7 @@ export function GlobalNav({ onSwitched }: { onSwitched?: () => void } = {}) {
 
   return (
     <nav
+      ref={navRef}
       aria-label="First Profit"
       className="sticky top-0 z-40 border-b border-[hsl(40_14%_89%)] bg-[hsl(40_30%_99%)] text-ink"
     >
