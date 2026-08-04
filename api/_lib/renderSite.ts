@@ -33,7 +33,7 @@
  * horizontal scroll.
  */
 
-import { defaultSiteHeadline } from "../../src/lib/siteCopy";
+import { defaultSiteHeadline } from "../../src/lib/siteCopy.js";
 
 export interface PublishedSite {
   firstName: string | null;

@@ -7,7 +7,7 @@
  * plain vitest node.
  */
 
-import type { LogError, SiteEnv, SiteRpcResult } from "./decideSiteResponse";
+import type { LogError, SiteEnv, SiteRpcResult } from "./decideSiteResponse.js";
 
 /** The minimal slice of VercelRequest this module reads. */
 export interface RequestLike {
