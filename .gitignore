@@ -27,3 +27,6 @@ dist-ssr
 .env*
 !.env.example
 .gstack/
+
+# Agent worktrees live inside the repo; they are checkouts, never content.
+.claude/worktrees/

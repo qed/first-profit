@@ -13,7 +13,43 @@
     <meta name="referrer" content="strict-origin-when-cross-origin" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>First Profit Business Simulator</title>
+    <title>First Profit, Your kid's first $1,000 earned</title>
+    <meta
+      name="description"
+      content="A game where kids start a real small business — find an idea, test whether anyone wants it, and earn their first $1,000."
+    />
+    <!--
+      Link-preview tags (WhatsApp, iMessage, Slack, LinkedIn). These MUST live in
+      this static shell: preview crawlers do not execute JavaScript, so anything
+      React sets at runtime is invisible to them. Without og:title a crawler falls
+      back to <title>, which is why the preview read "First Profit Business
+      Simulator" before these existed.
+
+      Scope: this file is the SPA shell served for `/` and every non-handle route
+      (see vercel.json's catch-all rewrite). Learner pages at /<handle> are server-
+      rendered by api/_lib/renderSite.ts and carry their OWN og:title/og:description
+      built from the learner's headline — do not centralize the two; they describe
+      different things and renderSite escapes learner-authored text per context.
+
+      og:image is deliberately absent: only favicon.svg exists today and SVG is not
+      a supported og:image format, so a broken raster reference would be worse than
+      none. A 1200x630 PNG in public/ plus og:image + og:image:width/height is the
+      upgrade — previews render as a text-only card until then.
+    -->
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="First Profit" />
+    <meta property="og:url" content="https://firstprofit.school" />
+    <meta property="og:title" content="First Profit, Your kid's first $1,000 earned" />
+    <meta
+      property="og:description"
+      content="A game where kids start a real small business — find an idea, test whether anyone wants it, and earn their first $1,000."
+    />
+    <meta name="twitter:card" content="summary" />
+    <meta name="twitter:title" content="First Profit, Your kid's first $1,000 earned" />
+    <meta
+      name="twitter:description"
+      content="A game where kids start a real small business — find an idea, test whether anyone wants it, and earn their first $1,000."
+    />
   </head>
   <body>
     <div id="root"></div>
