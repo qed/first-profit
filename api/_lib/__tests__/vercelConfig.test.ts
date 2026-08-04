@@ -23,8 +23,15 @@ interface Rewrite {
   destination: string;
 }
 
+interface Redirect {
+  source: string;
+  destination: string;
+  permanent: boolean;
+}
+
 interface VercelConfig {
   trailingSlash: boolean;
+  redirects: Redirect[];
   rewrites: Rewrite[];
 }
 
@@ -48,6 +55,17 @@ describe("vercel.json", () => {
     expect(config.rewrites[0].source.startsWith("/:handle(")).toBe(true);
     expect(config.rewrites[0].destination).toBe("/api/site");
     expect(config.rewrites[1]).toEqual({ source: "/(.*)", destination: "/index.html" });
+  });
+
+  it("permanently redirects the OLD staff route /admin to /staff (Vercel runs redirects BEFORE rewrites)", () => {
+    expect(config.redirects).toEqual([
+      { source: "/admin", destination: "/staff", permanent: true },
+    ]);
+    // Both words stay in the rewrite exclusion list regardless: neither may
+    // ever be claimable as a public-site handle.
+    const segment = handleSegmentRegExp(config.rewrites[0].source);
+    expect(segment.test("admin")).toBe(false);
+    expect(segment.test("staff")).toBe(false);
   });
 
   it("excludes exactly the 48-handle reserved seed (the120 fp-public-site-rules.ts)", () => {

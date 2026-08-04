@@ -42,8 +42,8 @@ import {
 } from "./screens/signup/consentPolicy";
 import type { SignupSubmission } from "./screens/signup/validation";
 import { readVerifyToken, stripVerifyTokenFromUrl } from "./screens/signup/verifyLink";
-import { isAdminPath } from "./screens/admin/adminLink";
-import { AdminSuggestions } from "./screens/AdminSuggestions";
+import { isLegacyAdminPath, isStaffPath } from "./screens/staff/staffLink";
+import { StaffSuggestions } from "./screens/StaffSuggestions";
 
 function Boot() {
   return (
@@ -64,13 +64,25 @@ function Boot() {
 function StageRouter() {
   const { stage, dispatch, login } = useGame();
 
-  // The reserved /admin route (Change #9), read ONCE from the boot URL exactly
+  // The reserved /staff route (Change #9), read ONCE from the boot URL exactly
   // like the verify-return token below (but never stripped — the path IS the
   // page). It overrides ALL stage routing and renders the staff suggestions
-  // screen OUTSIDE the game shell (no GlobalNav): a child hitting /admin sees
+  // screen OUTSIDE the game shell (no GlobalNav): a child hitting /staff sees
   // the staff sign-in, and their credential can never pass the server's staff
   // gate (byte-identical 401 → the staff-only refusal).
-  const [adminRoute] = useState(() => isAdminPath());
+  //
+  // The retired /admin route counts as the staff route too. Production 308s it
+  // at the edge (vercel.json redirects), but vite dev never reads vercel.json —
+  // this keeps a stale bookmark working in EVERY environment.
+  const [staffRoute] = useState(() => isStaffPath() || isLegacyAdminPath());
+
+  // Bring the address bar in line when the edge redirect did not run. replace,
+  // not push: /admin must not sit in the back-stack waiting to redirect again.
+  useEffect(() => {
+    if (staffRoute && isLegacyAdminPath()) {
+      window.history.replaceState(null, "", "/staff");
+    }
+  }, [staffRoute]);
 
   // The idea switcher is a DROPDOWN owned entirely by the GlobalNav chip
   // (2026-08-04), so no open-state crosses this boundary any more. What still
@@ -190,9 +202,9 @@ function StageRouter() {
     }
   })();
 
-  // /admin renders as a pre-stage route (the verify precedent): no GlobalNav,
-  // no stage content — the admin screen is not part of the game shell.
-  if (adminRoute) return <AdminSuggestions />;
+  // /staff renders as a pre-stage route (the verify precedent): no GlobalNav,
+  // no stage content — the staff screen is not part of the game shell.
+  if (staffRoute) return <StaffSuggestions />;
 
   // The global nav mounts ABOVE the stage render (never remounts across stage
   // swaps); only the boot spinner stays chrome-free. Spec:
