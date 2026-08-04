@@ -119,6 +119,20 @@ function seedAtLastTaskOf11(): GameState {
   };
 }
 
+/** State at the pilot tool's task, with task 1 already complete. */
+function seedAtPitchTask(fields: Record<string, string> = {}): GameState {
+  const s = initialState();
+  return {
+    ...s,
+    stage: "app",
+    ideas: [{ fields, done: { [taskKey("1.1", 0)]: true } }],
+    activeIdea: 0,
+    runnerOpen: true,
+    runnerStep: "1.1",
+    runnerIndex: 1,
+  };
+}
+
 afterEach(() => {
   cleanup();
   publicSiteFlag = false;
@@ -208,6 +222,32 @@ describe("StepRunner", () => {
     const tools = screen.getByText(/Tools to help you complete/);
     expect(tools.tagName).toBe("P");
     expect(tools.className).toContain("font-normal");
+  });
+
+  it("routes task 1.1.2 Tools to the pitch builder and persists structured + combined fields", () => {
+    const actions: unknown[] = [];
+    render(<Harness seed={seedAtPitchTask()} onAction={(action) => actions.push(action)} />);
+
+    openSection("Tools");
+    expect(screen.getByText("60-Second Pitch Builder")).toBeTruthy();
+    expect(screen.queryByText("Tools to help you complete the unit task will go here.")).toBeNull();
+
+    fireEvent.change(screen.getByLabelText("1. Hook"), {
+      target: { value: "What if your neighborhood stories could fit in your pocket?" },
+    });
+
+    expect(actions).toContainEqual({
+      type: "SET_FIELD",
+      ideaIndex: 0,
+      key: "pitchHook",
+      value: "What if your neighborhood stories could fit in your pocket?",
+    });
+    expect(actions).toContainEqual({
+      type: "SET_FIELD",
+      ideaIndex: 0,
+      key: "pitch",
+      value: "What if your neighborhood stories could fit in your pocket?",
+    });
   });
 
   it("fills the FLOOR box, not the viewport, and is not a floating modal card", () => {

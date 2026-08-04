@@ -83,7 +83,7 @@ describe("PromoteBusiness", () => {
     // re-render wipes the celebrate-lite state back to the list.
     function FactoryLike() {
       GameContext.useGame(); // consume context so a dispatch re-renders us
-      return <PromoteBusiness open onClose={() => {}} />;
+      return <PromoteBusiness open onClose={vi.fn()} />;
     }
     render(
       <FloorHarness seed={namedValidatedSeed()} Ctx={Ctx}>
@@ -138,7 +138,7 @@ describe("PromoteBusiness — double-confirm guard + returned truth (unit review
     const actions: Action[] = [];
     const utils = render(
       <FloorHarness seed={seed} Ctx={Ctx} onAction={(a) => actions.push(a)}>
-        <PromoteBusiness open onClose={() => {}} />
+        <PromoteBusiness open onClose={vi.fn()} />
       </FloorHarness>,
     );
     return { actions, ...utils };

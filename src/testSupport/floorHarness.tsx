@@ -137,7 +137,7 @@ export function FloorHarness({ seed, Ctx, children, onAction, promoteIdea, submi
     grade: state.profile.grade,
     band: "g6_8" as const,
     gradeAskDone: true,
-    skipGradeAsk: () => {},
+    skipGradeAsk: () => undefined,
     submitGradeAnswer: async () => ({ ok: true }),
     submitFeedback: submitFeedback ?? (async () => "sent" as const),
   };

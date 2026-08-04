@@ -44,8 +44,10 @@ import { criterionIdsForPhase, phaseOfCriterion } from "../state/gameCore";
 import { getDraft, setDraft, getLastUserId } from "../lib/draftCache";
 import { AvatarSprite } from "./Avatar";
 import { MoreToolsModal } from "./MoreToolsModal";
+import { PitchBuilderTool } from "./tools/PitchBuilderTool";
 import { isPublicSiteEnabled } from "../config";
 import { SITE_ONE_LINER_MAX_CHARS } from "../lib/siteCopy";
+import { PITCH_PERSISTED_FIELD_KEYS, PITCH_TASK_ID } from "../lib/pitch";
 
 /**
  * Task id synthesis: the generated stable task id is `${stepId}.${index+1}` —
@@ -287,17 +289,23 @@ export function StepRunner() {
   const taskFields = idx === 0 ? stepFields : [];
   const idea = ideas[activeIdea];
   const userId = getLastUserId();
+  const currentTaskId = runnerStep ? taskIdFor(runnerStep, idx) : "";
+  const restorableFieldKeys = [
+    ...taskFields.map((field) => field.key),
+    ...(currentTaskId === PITCH_TASK_ID ? PITCH_PERSISTED_FIELD_KEYS : []),
+  ];
 
-  // Seed each reducer field from the account-scoped draft when the idea's saved
-  // value is empty (R6 restore-after-expiry). Runs when the fields/idea change;
-  // the `!== ""` guard makes it idempotent, so no dispatch loop.
+  // Seed each reducer field, including task-tool fields, from the account-scoped
+  // draft when the idea's saved value is empty (R6 restore-after-expiry). Runs
+  // when the fields/idea change; the `!== ""` guard makes it idempotent, so no
+  // dispatch loop.
   useEffect(() => {
-    if (!open || !userId || taskFields.length === 0) return;
-    for (const f of taskFields) {
-      if ((idea?.fields[f.key] ?? "") !== "") continue;
-      const draft = getDraft<string>(userId, fieldDraftName(activeIdea, f.key));
+    if (!open || !userId || restorableFieldKeys.length === 0) return;
+    for (const key of restorableFieldKeys) {
+      if ((idea?.fields[key] ?? "") !== "") continue;
+      const draft = getDraft<string>(userId, fieldDraftName(activeIdea, key));
       if (typeof draft === "string" && draft !== "") {
-        dispatch({ type: "SET_FIELD", ideaIndex: activeIdea, key: f.key, value: draft });
+        dispatch({ type: "SET_FIELD", ideaIndex: activeIdea, key, value: draft });
       }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -324,7 +332,6 @@ export function StepRunner() {
   // lines are band-invariant, and a band without an authored variant reads the
   // shared body alone — so the `?? step.*` fallbacks below can only fire if a
   // task id ever failed to resolve, keeping the screen non-empty even then.
-  const currentTaskId = taskIdFor(runnerStep, idx);
   const taskLabel =
     taskTitleForBand(currentTaskId, band) ?? parseTask(step.tasks[idx]).label;
   const taskBody = taskBodyForBand(currentTaskId, band);
@@ -660,8 +667,18 @@ export function StepRunner() {
 
           {section === "tools" ? (
             <div>
-              <h3 className={SECTION_HEADLINE}>{TOOLS_HEADING}</h3>
-              <p className={`${SECTION_HEADLINE_REGULAR} mt-1.5`}>{TOOLS_PLACEHOLDER}</p>
+              {currentTaskId === PITCH_TASK_ID ? (
+                <PitchBuilderTool
+                  fields={idea?.fields ?? {}}
+                  onFieldChange={onFieldChange}
+                  runAfterWalk={walkThen}
+                />
+              ) : (
+                <>
+                  <h3 className={SECTION_HEADLINE}>{TOOLS_HEADING}</h3>
+                  <p className={`${SECTION_HEADLINE_REGULAR} mt-1.5`}>{TOOLS_PLACEHOLDER}</p>
+                </>
+              )}
             </div>
           ) : null}
         </div>

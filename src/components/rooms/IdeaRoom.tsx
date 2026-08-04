@@ -5,12 +5,13 @@
  * states. This room writes nothing — the Step Runner authors these fields.
  */
 import { useGame } from "../../state/GameContext";
+import { pitchTextForFields } from "../../lib/pitch";
 
 export function IdeaRoom() {
   const { ideas, activeIdea } = useGame();
   const fields = ideas[activeIdea]?.fields ?? {};
   const oneLiner = (fields.oneLiner ?? "").trim();
-  const pitch = (fields.pitch ?? "").trim();
+  const pitch = pitchTextForFields(fields);
 
   return (
     <div>
