@@ -129,19 +129,68 @@ afterEach(() => {
   publicSiteFlag = false;
 });
 
+/**
+ * The runner is a sectioned VIEW as of 2026-08-04 (Overview / Instructions /
+ * Inputs / Tools in a left nav), so content that used to be on one long scroll
+ * now lives behind a section button. Every test that reads task words or
+ * fields opens its section first. Overview is the default on open.
+ */
+function openSection(label: "Overview" | "Instructions" | "Inputs" | "Tools") {
+  fireEvent.click(screen.getByRole("button", { name: label }));
+}
+
 describe("StepRunner", () => {
   it("shows the criterion header, task rail count, and done-when for 1.1", () => {
     render(<Harness seed={seedAtLastTaskOf11()} />);
+    // Overview is the landing section and carries the criterion chrome.
     expect(screen.getByText("Phase 1 · Sell · Criterion 1 of 5 · Idea #1")).toBeTruthy();
+    openSection("Instructions");
     expect(screen.getByText("Task 5 of 5")).toBeTruthy();
     expect(screen.getByText("Done when")).toBeTruthy();
     // Real path.ts copy, em-dash free.
     expect(document.body.textContent).not.toMatch(/—/);
   });
 
+  it("the left nav switches sections; Tools declares itself as a placeholder", () => {
+    render(<Harness seed={seedAtLastTaskOf11()} />);
+    // The four sections exist as a nav, and the view is NOT a floating card.
+    const nav = screen.getByRole("navigation", { name: "Task sections" });
+    expect(nav).toBeTruthy();
+    for (const label of ["Overview", "Instructions", "Inputs", "Tools"]) {
+      expect(screen.getByRole("button", { name: label })).toBeTruthy();
+    }
+    // Overview by default; its content is present and Instructions' is not.
+    expect(screen.getByText("Phase 1 · Sell · Criterion 1 of 5 · Idea #1")).toBeTruthy();
+    expect(screen.queryByText("Done when")).toBeNull();
+
+    openSection("Tools");
+    expect(
+      screen.getByText("Tools to help you complete the unit task will go here."),
+    ).toBeTruthy();
+    // Switching sections shows one at a time.
+    expect(screen.queryByText("Phase 1 · Sell · Criterion 1 of 5 · Idea #1")).toBeNull();
+
+    // This task (index 4) has no authored fields, so Inputs says so plainly.
+    openSection("Inputs");
+    expect(screen.getByText(/nothing to type in/i)).toBeTruthy();
+  });
+
+  it("is a full-bleed view, not a floating modal card", () => {
+    render(<Harness seed={seedAtLastTaskOf11()} />);
+    const view = screen.getByRole("dialog");
+    expect(view.className).toContain("fixed inset-0");
+    // No scrim wrapper and no rounded floating card at sm.
+    expect(view.className).not.toMatch(/sm:max-w-/);
+    expect(view.className).not.toMatch(/sm:rounded-3xl/);
+    expect(view.parentElement?.className ?? "").not.toMatch(/bg-\[hsl\(25_34%_20%\/0\.55\)\]/);
+    // The ✕ still returns you to the room behind it.
+    expect(screen.getByLabelText("Close")).toBeTruthy();
+  });
+
   it("renders the productName + oneLiner inputs on task 1 and mirrors keystrokes into the reducer", () => {
     const s = seedAtLastTaskOf11();
     render(<Harness seed={{ ...s, runnerIndex: 0, ideas: [{ fields: {}, done: {} }] }} />);
+    openSection("Inputs");
     const nameInput = screen.getByLabelText("Product name") as HTMLInputElement;
     const linerInput = screen.getByLabelText("Your one-liner") as HTMLInputElement;
     fireEvent.change(nameInput, { target: { value: "Bracelets" } });
@@ -244,6 +293,7 @@ describe("StepRunner", () => {
     const { container } = render(<Harness seed={seed} />);
     // Criterion position derives from the phase's ordered ids, not the raw id digit.
     expect(screen.getByText("Phase 2 · Build · Criterion 3 of 5 · Idea #1")).toBeTruthy();
+    openSection("Instructions");
     expect(screen.getByText("Task 1 of 6")).toBeTruthy();
     // One rail segment bar per REAL task: 2.3 carries six.
     expect(container.querySelectorAll(".h-1\\.5").length).toBe(6);
@@ -335,6 +385,7 @@ describe("StepRunner", () => {
     };
 
     const younger = render(<Harness seed={seed} band="g3_5" />);
+    openSection("Instructions");
     // Shared body + the g3_5 variant line; never the g9_12 line.
     expect(document.body.textContent).toContain(task.body);
     expect(document.body.textContent).toContain(g35);
@@ -344,6 +395,7 @@ describe("StepRunner", () => {
     younger.unmount();
 
     render(<Harness seed={seed} band="g9_12" />);
+    openSection("Instructions");
     // Same task, different visible copy: emphasis markers render stripped.
     expect(document.body.textContent).toContain(
       "Child also writes one sentence on who the wrong customer is and why.",
@@ -363,6 +415,7 @@ describe("StepRunner", () => {
       ideas: [{ fields: {}, done: {} }],
     };
     render(<Harness seed={seed} band="g6_8" />);
+    openSection("Instructions");
     // The banded title renders twice by design: the rail segment AND the h3.
     expect(screen.getAllByText("Rehearse to camera until note-free").length).toBe(2);
     expect(document.body.textContent).toContain(task.body);
@@ -379,6 +432,7 @@ describe("StepRunner", () => {
       ideas: [{ fields: {}, done: {} }],
     };
     render(<Harness seed={seed} />);
+    openSection("Instructions");
     expect(document.body.textContent).toContain(
       "All bands: as written; 9–12 adds one sentence on what they'd change about the sale process.",
     );
@@ -407,6 +461,8 @@ describe("StepRunner", () => {
     expect(next.className).toContain("min-h-[44px]");
     fireEvent.click(next);
     expect(actions).toContainEqual({ type: "OPEN_RUNNER", stepId: "1.1", index: 1 });
+    // Advancing resets the view to Overview, so read the counter in Instructions.
+    openSection("Instructions");
     expect(screen.getByText("Task 2 of 5")).toBeTruthy();
   });
 
@@ -509,6 +565,7 @@ describe("More tools please modal (Change #8)", () => {
     fireEvent.click(screen.getByLabelText(MORE_TOOLS_COPY.close));
     expect(submit).not.toHaveBeenCalled();
     // The runner is back exactly as it was: same task index, CTA present.
+    openSection("Instructions");
     expect(screen.getByText("Task 5 of 5")).toBeTruthy();
     expect(screen.getByText("✓ I did it")).toBeTruthy();
     expect(screen.queryByText(MORE_TOOLS_COPY.title)).toBeNull();
@@ -521,6 +578,7 @@ describe("More tools please modal (Change #8)", () => {
     expect(submit).not.toHaveBeenCalled();
     expect(screen.queryByText(MORE_TOOLS_COPY.title)).toBeNull();
     // The Escape closed only the modal, never the runner underneath.
+    openSection("Instructions");
     expect(screen.getByText("Task 5 of 5")).toBeTruthy();
   });
 });
@@ -641,6 +699,7 @@ describe("one-liner public-string treatment (real-public-site Unit 6)", () => {
     publicSiteFlag = true;
     const flushNow = vi.fn().mockResolvedValue("landed");
     render(<Harness seed={seedAtFirstTaskOf11()} flushNow={flushNow} />);
+    openSection("Inputs");
     const liner = screen.getByLabelText("Your one-liner") as HTMLInputElement;
     expect(liner.getAttribute("maxlength")).toBe("140");
     fireEvent.change(liner, { target: { value: "Friendship bracelets for recess trades" } });
@@ -656,6 +715,7 @@ describe("one-liner public-string treatment (real-public-site Unit 6)", () => {
     publicSiteFlag = true;
     const flushNow = vi.fn().mockResolvedValue("landed");
     render(<Harness seed={seedAtFirstTaskOf11()} flushNow={flushNow} />);
+    openSection("Inputs");
     const name = screen.getByLabelText("Product name") as HTMLInputElement;
     expect(name.getAttribute("maxlength")).toBe("2000");
     fireEvent.change(name, { target: { value: "Bracelets" } });
@@ -667,6 +727,7 @@ describe("one-liner public-string treatment (real-public-site Unit 6)", () => {
     publicSiteFlag = false;
     const flushNow = vi.fn().mockResolvedValue("landed");
     render(<Harness seed={seedAtFirstTaskOf11()} flushNow={flushNow} />);
+    openSection("Inputs");
     const liner = screen.getByLabelText("Your one-liner") as HTMLInputElement;
     expect(liner.getAttribute("maxlength")).toBe("2000");
     fireEvent.blur(liner);
