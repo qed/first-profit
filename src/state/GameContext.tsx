@@ -706,6 +706,24 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
     setGradeAskDone(true);
   }, []);
 
+  /**
+   * Mirror a SERVER-CONFIRMED grade into the account-scoped profile cache so a
+   * restored session re-adopts it — without this, the cache keeps the stale
+   * null captured at login and the ask-once card re-pops on every reload even
+   * after the roster has the answer. Only roster-confirmed grades are cached
+   * (the local-fallback band is session-only by design: DB has no answer yet,
+   * so re-asking next session is correct).
+   */
+  const cacheConfirmedGrade = useCallback((grade: number | null) => {
+    const userId = getLastUserId();
+    if (!userId) return;
+    const cached = getDraft<Record<string, unknown>>(userId, PROFILE_CACHE_DRAFT);
+    setDraft(userId, PROFILE_CACHE_DRAFT, {
+      ...(cached && typeof cached === "object" ? cached : {}),
+      grade,
+    });
+  }, []);
+
   const submitGradeAnswer = useCallback(async (birthYear: number): Promise<{ ok: boolean }> => {
     // Capture the session generation BEFORE the await (async-writer learning):
     // if login/logout changes the session while the write is in flight, the
@@ -717,6 +735,7 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
     setGradeAskDone(true);
     if (result.ok) {
       dispatch({ type: "SET_PROFILE", patch: { grade: result.grade } });
+      cacheConfirmedGrade(result.grade);
       return { ok: true };
     }
     // Generic failure (offline, rate limited, expired token): apply the band
@@ -727,7 +746,7 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
     dispatch({ type: "SET_PROFILE", patch: { grade: gradeFromBirthYear(birthYear, new Date()) } });
     gradeRetryRef.current = { birthYear, gen };
     return { ok: false };
-  }, []);
+  }, [cacheConfirmedGrade]);
 
   // The one-shot silent write-back retry: on the next return to a visible /
   // focused window, re-post a failed ask-once answer exactly once. The pending
@@ -743,6 +762,7 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
       void submitBirthYear(pending.birthYear).then((result) => {
         if (result.ok && pending.gen === sessionGenRef.current) {
           dispatch({ type: "SET_PROFILE", patch: { grade: result.grade } });
+          cacheConfirmedGrade(result.grade);
         }
         // A second failure is accepted silently: the local band already
         // applies, and the roster ask simply reappears next session.
@@ -757,7 +777,7 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
       window.removeEventListener("focus", retry);
       document.removeEventListener("visibilitychange", onVisibility);
     };
-  }, []);
+  }, [cacheConfirmedGrade]);
 
   // ── "Stuck? Tell us" feedback submission ─────────────────────────────────
   // Date.now()/crypto.randomUUID stay at this caller boundary (gameCore and
