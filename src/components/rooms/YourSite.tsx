@@ -1,128 +1,71 @@
 /**
- * Your Site room body (handoff §Rooms, screenshot 11; real-public-site plan
- * Unit 6): a browser frame for firstprofit.school/<handle> with the live site
- * headline, an editable headline input below, the active idea's one-liner if
- * written, and a "Back me · from $10" pill (in-game preview only, R8).
- *
- * The headline lives in the SAVE DOC (profile.siteHeadline), not the identity
- * profile (which is service-role-write-only). Editing dispatches SET_PROFILE
- * {siteHeadline}; the sync layer persists it, and with the public site enabled
- * a COMMIT (input blur) forces an immediate flush (R11, "edit→refresh within
- * seconds").
+ * Your Site room body (your-site-room-simplification, 2026-08-03): the room
+ * no longer simulates a website. The mock browser frame, headline editor, and
+ * all parent-visibility copy are deleted in every flag state; the room simply
+ * reflects the real site's state and, when live, links to it.
  *
  * ── Flag gate (VITE_ENABLE_PUBLIC_SITE) ─────────────────────────────────────
- * Flag OFF renders `LegacyYourSite`, byte-identical to the pre-Unit-6 room
- * (the mock frame with the hardcoded "● live" chip, `/you` fallback, no input
- * cap, no network). Flag ON renders the REAL room, driven by the site slice
- * (the Unit 4 registry read-back):
+ * Flag OFF renders ONLY the Coming Soon note (claiming needs the gated
+ * backend, so no claim UI, no link, no network). Flag ON renders the real
+ * room, driven by the site slice (the Unit 4 registry read-back):
  *
- *   published → the URL bar is a real link (new tab, rel-hardened) + "● live".
+ *   published → an open-your-site link (constructed href, new tab,
+ *               rel-hardened, >=44px tap target, URL text truncates) + the
+ *               Coming Soon note.
  *   offline   → parent-unpublished OR operator-locked (deliberately
- *               undistinguished to the child): plain-text URL, a DISABLED
- *               visit affordance with a visible reason — never a warn-on-click
- *               — and editing still saves. The room never says "live" (R19).
- *   claimed   → "going live…": the claim landed but publish has not (R19's
- *               not-live-yet state). Opening the room RETRIES flush→publish
- *               for exactly this state (never for offline: a parent takedown
- *               must not be auto-reversed; republish is an explicit act that
- *               does not exist on this child surface in v1).
- *   none      → placeholder URL bar and the in-room claim UI — the SAME claim
- *               block as onboarding screen 2 (shared ClaimBlock component),
- *               wired here for existing accounts (R16: they claim at first
- *               login through this room). A successful in-room claim flows
- *               straight into publish (Key Technical Decision: claim IS the
- *               go-live moment for existing accounts — onboarding never
- *               re-runs — and triggers the parent email server-side).
- *   unknown   → the status fetch failed: neutral render — no link, no "live",
- *               no claim UI (we cannot know a claim is safe) — editing saves.
+ *               undistinguished to the child): plain-text URL, the honest
+ *               reason caption, no clickable link + the note.
+ *   claimed   → "going live…" caption (R19's not-live-yet state) + the note.
+ *               Opening the room RETRIES flush→publish for exactly this
+ *               state (never for offline: a parent takedown must not be
+ *               auto-reversed).
+ *   none      → the in-room claim UI — the SAME claim block as onboarding
+ *               screen 2 (shared ClaimBlock/useClaimFlow), wired here for
+ *               existing accounts (R16). A successful in-room claim flows
+ *               straight into publish (claim IS the go-live moment for
+ *               existing accounts).
+ *   unknown   → the status fetch failed: neutral caption only — no link, no
+ *               claim UI (we cannot know a claim is safe), no note.
  *
  * Room open calls refreshSiteStatus() (the deferred half of the split-storage
  * read-back): a parent unpublish reaches a playing child with staleness
  * bounded by their next room open, not their next login.
  *
- * Content screening for the headline is SERVER-side at the projection/publish
- * layer (blocked strings are stored empty, so the public page falls back to
- * the default copy) — this room's job is the input cap (R6), the PII nudge
- * (R23's accepted-limit copy), and honest state display. No client blocklist
- * corpus (see src/lib/handleRules.ts). Honesty about screening (Unit 7
- * review): the self-read's `projected` payload is what the public page
- * actually renders — when a typed headline/one-liner sits beside an EMPTY
- * projected value, the room shows the kid-friendly blocked-text note instead
- * of previewing raw text forever.
+ * The public page's one-liner keeps tracking the active idea via the Step
+ * Runner field (where the PII nudge lives); site editing returns as a future
+ * feature — the Coming Soon note is that commitment.
+ *
+ * Copy rule (global product rule): kid-voice, NO em dashes anywhere.
  */
 import { useEffect, useRef } from "react";
 import { isPublicSiteEnabled } from "../../config";
-import { defaultSiteHeadline, SITE_HEADLINE_MAX_CHARS } from "../../lib/siteCopy";
 import { useClaimFlow } from "../../lib/useClaimFlow";
 import { ClaimBlock, GreenCta } from "../claim/ClaimBlock";
 import { useGame } from "../../state/GameContext";
-import { ideaOneLiner } from "../../state/floorSelectors";
 import type { SiteStatus } from "../../state/gameCore";
 
 export function YourSite() {
   // The flag is baked into the bundle (never flips at runtime), so branching
-  // to two components here is hook-safe and keeps the flag-off render
-  // byte-identical to the pre-Unit-6 room.
-  return isPublicSiteEnabled() ? <RealYourSite /> : <LegacyYourSite />;
+  // to two components here is hook-safe; the flag-off body mounts no game
+  // hooks and makes no network calls.
+  return isPublicSiteEnabled() ? <RealYourSite /> : <ComingSoonOnly />;
 }
 
-/* ────────────────────────────────────────────────────────── flag OFF (mock) */
+/** The one commitment the room makes about editing (normative copy). */
+const COMING_SOON_NOTE = "Changing your First Profit website is coming soon.";
 
-/** The pre-Unit-6 mock room, unchanged (flag-off stability contract). */
-function LegacyYourSite() {
-  const game = useGame();
-  const { profile, activeIdea, dispatch } = game;
-  const handle = profile.handle || "you";
-  const oneLiner = ideaOneLiner(game, activeIdea);
-
-  // The frame + input display the saved headline, defaulting to the shared
-  // starter line (src/lib/siteCopy.ts — the public page renders the same
-  // sentence, R12) while the save doc's headline is still empty.
-  const headline =
-    profile.siteHeadline || defaultSiteHeadline(profile.firstName || "Founder");
-
+function ComingSoonNote() {
   return (
-    <div>
-      <div className="overflow-hidden rounded-[14px] border-2 border-[hsl(25_34%_20%/0.15)] bg-white">
-        <div className="flex items-center gap-1.5 border-b-2 border-[hsl(25_34%_20%/0.1)] bg-[hsl(25_34%_20%/0.05)] px-3 py-2">
-          <span className="h-2.5 w-2.5 rounded-full bg-sell" />
-          <span className="h-2.5 w-2.5 rounded-full bg-scale" />
-          <span className="h-2.5 w-2.5 rounded-full bg-grow" />
-          <span className="ml-1.5 min-w-0 flex-1 truncate rounded-md bg-white px-2.5 py-0.5 font-mono text-[10px] text-[hsl(25_20%_38%)]">
-            firstprofit.school/{handle}
-          </span>
-          <span className="shrink-0 font-mono text-[9px] uppercase text-verified">● live</span>
-        </div>
-        <div className="px-5 py-7 text-center">
-          <p className="mx-auto max-w-[38ch] font-display text-[17px] font-bold leading-[1.45] text-[hsl(25_34%_20%)]">
-            {headline}
-          </p>
-          {oneLiner ? (
-            <p className="mx-auto mt-2.5 max-w-[44ch] text-[13px] text-[hsl(25_20%_38%)]">{oneLiner}</p>
-          ) : null}
-          <span className="mt-4 inline-block rounded-full bg-[hsl(25_34%_20%)] px-5 py-2 text-[13px] font-semibold text-[hsl(40_55%_97%)]">
-            Back me · from $10
-          </span>
-        </div>
-      </div>
+    <p className="text-[12.5px] leading-[1.5] text-[hsl(25_20%_38%)]">{COMING_SOON_NOTE}</p>
+  );
+}
 
-      <div className="mt-4">
-        <label
-          htmlFor="fp-site-headline"
-          className="mb-1.5 block font-mono text-[10.5px] uppercase tracking-[0.08em] text-[hsl(25_20%_38%)]"
-        >
-          Your headline
-        </label>
-        <input
-          id="fp-site-headline"
-          value={headline}
-          onChange={(e) => dispatch({ type: "SET_PROFILE", patch: { siteHeadline: e.target.value } })}
-          className="w-full rounded-[10px] border-2 border-[hsl(25_34%_20%/0.15)] bg-white px-3.5 py-3 text-sm text-[hsl(25_34%_20%)] outline-none focus:border-sell"
-        />
-        <p className="mt-2 text-[12px] text-[hsl(25_20%_38%)]">
-          Edits publish instantly. Your parent sees everything that goes live.
-        </p>
-      </div>
+/* ─────────────────────────────────────────────────── flag OFF (note only) */
+
+function ComingSoonOnly() {
+  return (
+    <div className="flex flex-col items-start gap-3">
+      <ComingSoonNote />
     </div>
   );
 }
@@ -140,50 +83,34 @@ const STATE_COPY = {
   none: "Claim your page name below and your page goes live on the real internet.",
 } as const;
 
-/** The R23 accepted-limit nudge: a blocklist cannot catch self-disclosure. */
-const PII_NUDGE =
-  "Your page is public. Don't put your phone number, address, school, or last name on it.";
-
-/** The honest-divergence note (Unit 7 review): shown when a locally-typed
- *  headline/one-liner was stored EMPTY by the server's word check, so the
- *  public page shows default copy while this preview shows the typed text.
- *  Kid-friendly, no scolding, actionable. NO em dashes (product rule). */
-const BLOCKED_TEXT_NOTE =
-  "Part of your page text can't be shown on your public page. Try different words.";
-
-/** The designed active-idea behavior, made visible so it reads as a feature,
- *  not a data bug (Unit 6 copy note). */
-const ONE_LINER_NOTE =
-  "Your page shows your headline plus the one-liner from the idea you are working on right now. Switch ideas and the page follows.";
-
 /**
  * Everything the room varies by site status, derived in ONE exhaustive switch
- * (Unit 6 review P3a) so a future sixth SiteStatus fails the build here
- * instead of silently falling into some ternary's else-branch.
+ * so a future sixth SiteStatus fails the build here instead of silently
+ * falling into some ternary's else-branch.
  */
 interface RoomView {
-  /** URL-bar state chip, or none (R19: only `published` may ever say live). */
-  chip: { text: string; tone: string } | null;
-  /** The honest state caption under the visit row, or none (published). */
+  /** The honest state caption, or none (published needs no caption). */
   caption: string | null;
-  /** Visit affordance: a real link, a disabled-with-reason button, or none. */
-  visit: "link" | "disabled" | "none";
+  /** URL affordance: a real open-site link, plain (non-clickable) text, or none. */
+  url: "link" | "plain" | "none";
   /** Render the in-room claim UI (unclaimed accounts only). */
   showClaim: boolean;
+  /** The Coming Soon note shows in every claimed-or-later state (normative). */
+  showNote: boolean;
 }
 
 function roomViewFor(status: SiteStatus): RoomView {
   switch (status) {
     case "published":
-      return { chip: { text: "● live", tone: "text-verified" }, caption: null, visit: "link", showClaim: false };
+      return { caption: null, url: "link", showClaim: false, showNote: true };
     case "offline":
-      return { chip: { text: "offline", tone: "text-[hsl(14_78%_44%)]" }, caption: STATE_COPY.offline, visit: "disabled", showClaim: false };
+      return { caption: STATE_COPY.offline, url: "plain", showClaim: false, showNote: true };
     case "claimed":
-      return { chip: { text: "going live…", tone: "text-[hsl(41_74%_38%)]" }, caption: STATE_COPY.claimed, visit: "disabled", showClaim: false };
+      return { caption: STATE_COPY.claimed, url: "none", showClaim: false, showNote: true };
     case "none":
-      return { chip: null, caption: STATE_COPY.none, visit: "none", showClaim: true };
+      return { caption: STATE_COPY.none, url: "none", showClaim: true, showNote: false };
     case "unknown":
-      return { chip: null, caption: STATE_COPY.unknown, visit: "none", showClaim: false };
+      return { caption: STATE_COPY.unknown, url: "none", showClaim: false, showNote: false };
     default: {
       // Exhaustiveness: a new SiteStatus must be handled above.
       const unhandled: never = status;
@@ -194,27 +121,11 @@ function roomViewFor(status: SiteStatus): RoomView {
 
 function RealYourSite() {
   const game = useGame();
-  const { profile, activeIdea, dispatch, refreshSiteStatus, flushNow, publishSite } = game;
+  const { profile, refreshSiteStatus, flushNow, publishSite } = game;
   // Defensive default (mirrors Onboarding): a legacy stub/provider without the
   // slice renders the neutral unknown state, never a fake handle.
   const site = game.site ?? { handle: null, status: "unknown" as const, projected: null };
   const view = roomViewFor(site.status);
-  const oneLiner = ideaOneLiner(game, activeIdea);
-  const headline =
-    profile.siteHeadline || defaultSiteHeadline(profile.firstName || "Founder");
-
-  // ── Honest-divergence check (Unit 7 review): the self-read's `projected`
-  // is what the public page actually renders. A NON-EMPTY local string beside
-  // an EMPTY projected one means the server's word check stored it empty (the
-  // page shows default copy) — say so, instead of previewing raw text forever.
-  // `projected` null (no row / read not answered) shows nothing: we never
-  // infer a block from data we do not have. Bounded staleness: the projection
-  // refreshes with the room-open read-back, same as the status itself.
-  const projected = site.projected ?? null;
-  const blockedTextNote =
-    projected !== null &&
-    ((profile.siteHeadline !== "" && projected.headline === "") ||
-      (oneLiner !== "" && projected.oneLiner === ""));
 
   // ── Room open = the deferred registry read-back (bounded staleness for a
   // parent unpublish reaching a playing child). refreshSiteStatus is stable
@@ -286,86 +197,41 @@ function RealYourSite() {
     },
   });
 
-  // ── URL bar (R19: the chip/link can never say "live" unless the slice
-  // says published — see roomViewFor).
   const urlText = site.handle ? `firstprofit.school/${site.handle}` : "firstprofit.school/ …";
-  const urlBarClass =
-    "ml-1.5 min-w-0 flex-1 truncate rounded-md bg-white px-2.5 py-0.5 font-mono text-[10px]";
 
+  // One container layout across states (the claim and published bodies share
+  // it). Mobile-first (CLAUDE.md ~390px): the link keeps a >=44px tap target
+  // and its URL text truncates at container width; no horizontal scrolling.
   return (
-    <div>
-      <div className="overflow-hidden rounded-[14px] border-2 border-[hsl(25_34%_20%/0.15)] bg-white">
-        <div className="flex items-center gap-1.5 border-b-2 border-[hsl(25_34%_20%/0.1)] bg-[hsl(25_34%_20%/0.05)] px-3 py-2">
-          <span className="h-2.5 w-2.5 rounded-full bg-sell" />
-          <span className="h-2.5 w-2.5 rounded-full bg-scale" />
-          <span className="h-2.5 w-2.5 rounded-full bg-grow" />
-          {view.visit === "link" && site.handle ? (
-            // R13: the URL bar IS the visit affordance when the page is live.
-            // Server strings (the canonical handle) render through React's
-            // default escaping only; the href is built from the slice's
-            // already-validated handle, never echoed user input.
-            <a
-              href={`https://firstprofit.school/${site.handle}`}
-              target="_blank"
-              rel="noopener noreferrer"
-              className={`${urlBarClass} text-[hsl(217_74%_46%)] underline decoration-[hsl(217_74%_46%/0.4)] underline-offset-2`}
-            >
-              {urlText} ↗
-            </a>
-          ) : (
-            <span className={`${urlBarClass} text-[hsl(25_20%_38%)]`}>{urlText}</span>
-          )}
-          {view.chip ? (
-            <span className={`shrink-0 font-mono text-[9px] uppercase ${view.chip.tone}`}>
-              {view.chip.text}
-            </span>
-          ) : null}
-        </div>
-        <div className="px-5 py-7 text-center">
-          <p className="mx-auto max-w-[38ch] break-words font-display text-[17px] font-bold leading-[1.45] text-[hsl(25_34%_20%)]">
-            {headline}
-          </p>
-          {oneLiner ? (
-            <p className="mx-auto mt-2.5 max-w-[44ch] break-words text-[13px] text-[hsl(25_20%_38%)]">{oneLiner}</p>
-          ) : null}
-          {/* R8: the Back me pill stays an in-game preview affordance only. */}
-          <span className="mt-4 inline-block rounded-full bg-[hsl(25_34%_20%)] px-5 py-2 text-[13px] font-semibold text-[hsl(40_55%_97%)]">
-            Back me · from $10
-          </span>
-        </div>
-      </div>
-
-      {/* Visit affordance row: a real link when live; a DISABLED affordance
-          with its reason visible (not a warning-on-click) otherwise. */}
-      {view.visit === "link" && site.handle ? (
+    <div className="flex w-full flex-col items-start gap-3">
+      {view.url === "link" && site.handle ? (
+        // The open-site affordance. Server strings (the canonical handle)
+        // render through React's default escaping only; the href is built
+        // from the slice's already-validated handle, never echoed user input.
         <a
           href={`https://firstprofit.school/${site.handle}`}
           target="_blank"
           rel="noopener noreferrer"
-          className="mt-3 inline-flex min-h-[44px] items-center rounded-full border-2 border-[hsl(217_74%_56%/0.4)] bg-[hsl(217_74%_56%/0.08)] px-4 text-[13px] font-semibold text-[hsl(217_74%_46%)]"
+          className="inline-flex min-h-[44px] max-w-full items-center gap-1.5 rounded-full border-2 border-[hsl(217_74%_56%/0.4)] bg-[hsl(217_74%_56%/0.08)] px-4 text-[13px] font-semibold text-[hsl(217_74%_46%)]"
         >
-          Visit your site ↗
+          <span className="min-w-0 truncate font-mono">{urlText}</span>
+          <span aria-hidden="true">↗</span>
+          <span className="sr-only">(opens in a new tab)</span>
         </a>
       ) : null}
-      {view.visit === "disabled" ? (
-        // A BUTTON, not an anchor: with no href there is nothing Enter/Space
-        // (or any click) could navigate to — the disabled affordance is
-        // keyboard-inert by construction, and the reason renders right below.
-        <button
-          type="button"
-          aria-disabled="true"
-          onClick={(e) => e.preventDefault()}
-          className="mt-3 inline-flex min-h-[44px] cursor-default items-center rounded-full border border-[hsl(25_34%_20%/0.25)] bg-[hsl(40_55%_97%)] px-4 text-[13px] font-semibold text-[hsl(25_34%_20%)] opacity-60"
-        >
-          Visit your site ↗
-        </button>
+      {view.url === "plain" ? (
+        // Offline: the URL is shown but deliberately NOT clickable (the page
+        // is down; a dead link would lie).
+        <p className="max-w-full truncate font-mono text-[12.5px] text-[hsl(25_20%_38%)]">
+          {urlText}
+        </p>
       ) : null}
       {view.caption ? (
-        <p className="mt-2 text-[12.5px] leading-[1.5] text-[hsl(25_20%_38%)]">{view.caption}</p>
+        <p className="text-[12.5px] leading-[1.5] text-[hsl(25_20%_38%)]">{view.caption}</p>
       ) : null}
 
       {view.showClaim ? (
-        <div className="mt-5">
+        <div className="w-full">
           <h3 className="font-display text-[17px] font-black text-[hsl(25_34%_20%)]">
             Claim your page name
           </h3>
@@ -387,44 +253,7 @@ function RealYourSite() {
         </div>
       ) : null}
 
-      <div className="mt-4">
-        <label
-          htmlFor="fp-site-headline"
-          className="mb-1.5 block font-mono text-[10.5px] uppercase tracking-[0.08em] text-[hsl(25_20%_38%)]"
-        >
-          Your headline
-        </label>
-        <input
-          id="fp-site-headline"
-          value={headline}
-          maxLength={SITE_HEADLINE_MAX_CHARS}
-          onChange={(e) => dispatch({ type: "SET_PROFILE", patch: { siteHeadline: e.target.value } })}
-          // Commit = blur: force the debounced save out NOW so the public page
-          // reflects the edit within seconds (R11). Fire-and-forget; the HUD's
-          // sync status and the state chip stay the honest indicators.
-          // BEST-EFFORT by design (review P3d): closing the room via ✕/Escape
-          // can unmount this input without a blur, skipping the immediate
-          // flush — the value is ALREADY in the reducer (SET_PROFILE per
-          // keystroke), so nothing is lost; it lands on the sync engine's
-          // normal 3s debounce instead of within seconds. No dedicated
-          // close-path flush: one more flush trigger is not worth a second
-          // commit channel for a few seconds of tail latency.
-          onBlur={() => void flushNow()}
-          className="w-full rounded-[10px] border-2 border-[hsl(25_34%_20%/0.15)] bg-white px-3.5 py-3 text-sm text-[hsl(25_34%_20%)] outline-none focus:border-sell"
-        />
-        <p className="mt-2 text-[12px] text-[hsl(25_20%_38%)]">
-          {site.status === "published"
-            ? "Edits go live in a few seconds. Your parent can see your page too."
-            : "Edits save now and show up as soon as your page is live. Your parent can see your page too."}
-        </p>
-        {blockedTextNote ? (
-          <p className="mt-1.5 text-[12px] font-semibold text-[hsl(14_78%_44%)]">
-            {BLOCKED_TEXT_NOTE}
-          </p>
-        ) : null}
-        <p className="mt-1.5 text-[12px] font-semibold text-[hsl(25_20%_38%)]">{PII_NUDGE}</p>
-        <p className="mt-1.5 text-[12px] text-[hsl(25_20%_38%)]">{ONE_LINER_NOTE}</p>
-      </div>
+      {view.showNote ? <ComingSoonNote /> : null}
     </div>
   );
 }
