@@ -23,7 +23,9 @@
  *    it (and network faults / malformed bodies) to its flat failure without
  *    ever distinguishing reasons.
  *  - A DB outage is the STRUCTURED 200 `{ok:false, reason:"outage"}`.
- *  - Flag off (VITE_ENABLE_PUBLIC_SITE) -> flat failure with NO network call.
+ *  - Flag off (VITE_ENABLE_PUBLIC_SITE) -> availability/claim/publish flat-fail
+ *    with NO network call; fetchSiteStatus is NOT gated (the server self-read
+ *    is ungated, so a published row reaches the room even in a dark build).
  *  - House auth.ts discipline: flat {ok:false}-style results, never throws.
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
@@ -137,14 +139,16 @@ beforeEach(() => {
   global.fetch = vi.fn() as unknown as typeof fetch;
 });
 
-// ── Feature-flag short-circuit (all four) ────────────────────────────────────
+// ── Feature-flag short-circuit (availability/claim/publish ONLY) ─────────────
+// fetchSiteStatus is deliberately NOT flag-gated: the server's self-read is
+// ungated (own-row status read-back), so a published row must reach the Your
+// Site room even in a flag-off build.
 
-describe("VITE_ENABLE_PUBLIC_SITE off → flat failure, NO network, NO session read", () => {
-  it("short-circuits every function without touching fetch or the session", async () => {
+describe("VITE_ENABLE_PUBLIC_SITE off → availability/claim/publish flat-fail, NO network, NO session read", () => {
+  it("short-circuits the three gated functions without touching fetch or the session", async () => {
     publicSiteFlag.enabled = false;
     const fetchSpy = global.fetch as ReturnType<typeof vi.fn>;
 
-    expect(await fetchSiteStatus()).toEqual({ ok: false });
     expect(await checkHandleAvailability("cedric")).toEqual({ ok: false });
     // claim/publish keep the wire `reason` vocabulary; `cause` is the
     // CLIENT-LOCAL diagnostic (never on the wire, never pinned against the120).
@@ -157,6 +161,18 @@ describe("VITE_ENABLE_PUBLIC_SITE off → flat failure, NO network, NO session r
 
     expect(fetchSpy).not.toHaveBeenCalled();
     expect(getSession).not.toHaveBeenCalled();
+  });
+
+  it("fetchSiteStatus still fetches flag-off (self-read is ungated server-side)", async () => {
+    publicSiteFlag.enabled = false;
+    const fetchSpy = mockFetch(serializedResponse(200, SITE_READ_PUBLISHED));
+    expect(await fetchSiteStatus()).toEqual({
+      ok: true,
+      handle: "cedric",
+      status: "published",
+      projected: { headline: "Dog walking", oneLiner: "I walk dogs" },
+    });
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
   });
 });
 

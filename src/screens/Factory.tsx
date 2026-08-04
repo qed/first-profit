@@ -53,7 +53,7 @@ import { IdeaRoom } from "../components/rooms/IdeaRoom";
 /** Room-id → dialog chrome (sign / name / tagline) + body. Only these four fpv2
  *  rooms have real surfaces in Slice A; any other RoomId is inert (no dialog). */
 const ROOM_META: Partial<Record<RoomId, { sign: string; name: string; tagline: string; Body: () => React.JSX.Element }>> = {
-  website: { sign: "🌐", name: "Your Site", tagline: "Live already. Make it yours.", Body: YourSite },
+  website: { sign: "🌐", name: "Your Site", tagline: "Your real page on the internet.", Body: YourSite },
   checkout: { sign: "💳", name: "The Checkout Booth", tagline: "Take real money. Backers get store credit.", Body: CheckoutBooth },
   market: { sign: "🛒", name: "The Sales Room", tagline: "Strangers, asks, yeses and nos.", Body: SalesRoom },
   idea: { sign: "💡", name: "The Idea Room", tagline: "Pick one thing to sell. Say it in a sentence.", Body: IdeaRoom },
@@ -107,15 +107,11 @@ function RoomDialog() {
   const meta = ROOM_META[room];
   if (!meta) return null;
   const { sign, name, Body } = meta;
-  // Truthful chrome (Unit 6, R19): the website room's static "Live already."
-  // tagline is only honest for the mock. With the real public site enabled the
-  // room body renders the actual state (live / going live / offline /
-  // unclaimed), so the tagline stays state-neutral. Flag off keeps the
-  // original string byte-for-byte.
-  const tagline =
-    room === "website" && isPublicSiteEnabled()
-      ? "Your real page on the internet."
-      : meta.tagline;
+  // Truthful chrome (Unit 6, R19; flag-independent since the room-link change):
+  // the website room's tagline is state-neutral in EVERY build because the room
+  // body now reflects the real registry state (live / going live / offline /
+  // unclaimed) regardless of the flag. The old mock tagline is gone entirely.
+  const tagline = meta.tagline;
   const close = () => dispatch({ type: "CLOSE_ROOM" });
 
   return (

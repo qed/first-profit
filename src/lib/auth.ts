@@ -499,8 +499,11 @@ export async function fetchConsentPolicy(): Promise<FetchedConsentPolicy | null>
  *    Bearer` (the submitBirthYear/createSignupChild pattern) — no cookie
  *    fallback, CSRF-resistant by construction.
  *  - FEATURE FLAG: while `VITE_ENABLE_PUBLIC_SITE` is off (isPublicSiteEnabled
- *    false) all four functions short-circuit to their flat failure WITHOUT a
- *    network call or a session read — the client half of the Unit 7 gate.
+ *    false) availability/claim/publish short-circuit to their flat failure
+ *    WITHOUT a network call or a session read — the client half of the Unit 7
+ *    gate. fetchSiteStatus is deliberately NOT flag-gated: the server's
+ *    self-read is ungated (own-row status read-back only), so a published row
+ *    must reach the Your Site room even in a flag-off build.
  *  - claim/publish keep their `reason` vocabulary pinned to the server
  *    contract: the flag-off short-circuit and every transport/auth failure
  *    surface as reason "outage" (the UI's outage treatment — "try again in a
@@ -565,15 +568,16 @@ function asProjected(value: unknown): SiteProjectedContent | null {
  * The account's OWN registry-row status (GET /api/fp/site) — the read-back the
  * hydrate path and the Your Site room consume. The endpoint is deliberately
  * ungated server-side (it reveals only the caller's own row and answers `none`
- * while the feature is dark), but this client still short-circuits when the
- * flag is off so a dark build makes zero site traffic. A flat `{ok:false}`
- * (outage / refusal / network / flag off) means "unknown" to the caller —
+ * while the feature is dark), so this client is NOT flag-gated either: a child
+ * whose row is already published must see their real link even in a flag-off
+ * build (the Unit 4 blanket short-circuit was caution, deliberately narrowed —
+ * only availability/claim/publish stay flag-gated). A flat `{ok:false}`
+ * (outage / refusal / network) means "unknown" to the caller —
  * NEVER a fake handle or status: a non-`none` status without a string handle
  * is refused rather than half-adopted.
  */
 export async function fetchSiteStatus(): Promise<FetchSiteStatusResult> {
   try {
-    if (!isPublicSiteEnabled()) return { ok: false };
     const { t120ApiUrl } = getConfig();
     const accessToken = await currentAccessToken();
     if (!accessToken) return { ok: false };
