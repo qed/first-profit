@@ -24,6 +24,7 @@ import {
   renderOfflinePage,
   renderPublishedPage,
   renderUnavailablePage,
+  type SiteProduct,
 } from "./renderSite.js";
 
 /** Same shape as the DB CHECK / fp_public_site() argument validator (the120
@@ -96,10 +97,40 @@ export function decideSiteRequest(rawSegment: unknown): RequestDecision {
 }
 
 /**
+ * TOLERANT parsing of the published row's `products` field (RPC v2: an array
+ * of `{n, name, oneLiner}` ordered by n, ≤5; NULL/absent when offline). A
+ * shape wobble here must NEVER 503 a page that otherwise works — so:
+ * missing/null/non-array → empty array (the section simply doesn't render);
+ * per element: non-object dropped, `n` coerced to a positive integer (number
+ * or numeric string) else the element is dropped, `name`/`oneLiner` kept only
+ * when they are strings else "". Escaping/clamping stays in the renderer.
+ */
+function parseProducts(value: unknown): SiteProduct[] {
+  if (!Array.isArray(value)) return [];
+  const products: SiteProduct[] = [];
+  for (const element of value) {
+    if (typeof element !== "object" || element === null) continue;
+    const record = element as Record<string, unknown>;
+    const rawN = record.n;
+    const n =
+      typeof rawN === "number" || typeof rawN === "string"
+        ? Math.trunc(Number(rawN))
+        : NaN;
+    if (!Number.isSafeInteger(n) || n < 1) continue;
+    products.push({
+      n,
+      name: typeof record.name === "string" ? record.name : "",
+      oneLiner: typeof record.oneLiner === "string" ? record.oneLiner : "",
+    });
+  }
+  return products;
+}
+
+/**
  * Map the PostgREST rows from `fp_public_site(p_handle)` to a response.
  * Contract (verified against the120 migration 20260907120000_fp_public_sites
- * .sql): AT MOST one row {state:'published', first_name, headline, one_liner}
- * | {state:'offline', nulls} | ZERO rows (unknown handle OR
+ * .sql): AT MOST one row {state:'published', first_name, headline, one_liner,
+ * products} | {state:'offline', nulls} | ZERO rows (unknown handle OR
  * claimed-never-published — byte-identical by design, both render not-found).
  * Anything else — including MORE than one row (handle is UNIQUE; a multi-row
  * result means the contract is broken, not that the page is gone) — is NOT a
@@ -119,6 +150,7 @@ export function decideRpcOutcome(body: unknown): SiteResponse {
         firstName: typeof record.first_name === "string" ? record.first_name : null,
         headline: typeof record.headline === "string" ? record.headline : null,
         oneLiner: typeof record.one_liner === "string" ? record.one_liner : null,
+        products: parseProducts(record.products),
       }),
       cacheControl: PUBLISHED_CACHE_CONTROL,
     };

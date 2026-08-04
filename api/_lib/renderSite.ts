@@ -7,7 +7,8 @@
  *
  * ESCAPING RULE (enforcement, not garnish — XSS on a child's public page is
  * the worst failure this module can have): EVERY learner-sourced string
- * (`first_name`, `headline`, `one_liner`) passes through `publicText()` before
+ * (`first_name`, `headline`, `one_liner`, every product `name`/`oneLiner`)
+ * passes through `publicText()` before
  * it reaches ANY output context — HTML text, `<title>`, and attribute values
  * (og:title / og:description `content`). `publicText()` strips newlines and
  * all other control characters FIRST (nothing learner-sourced can ever break
@@ -17,7 +18,8 @@
  * through `publicText()` too; there is deliberately no "trusted" bypass.
  *
  * Render-boundary caps (R6): the DB projection already clamps headline<=120,
- * one_liner<=140, first_name<=80, but this renderer re-clamps defensively so
+ * one_liner<=140, first_name<=80, product name<=60 / one-liner<=140 with at
+ * most 5 products, but this renderer re-clamps defensively so
  * a non-DB caller (tests, future refactors) can never break the ~390px
  * layout with an unbounded string.
  *
@@ -35,15 +37,44 @@
 
 import { defaultSiteHeadline } from "../../src/lib/siteCopy.js";
 
+/** One published product card (already tolerantly parsed by
+ *  `decideSiteResponse` — but this renderer still re-validates defensively,
+ *  same discipline as the render-boundary caps below). */
+export interface SiteProduct {
+  /** 1-based original position — drives the "Product #n" eyebrow. */
+  n: number;
+  name: string;
+  oneLiner: string;
+}
+
 export interface PublishedSite {
   firstName: string | null;
   headline: string | null;
   oneLiner: string | null;
+  /** Optional so a non-DB caller can omit it; absent renders no section. */
+  products?: SiteProduct[];
 }
 
 const HEADLINE_MAX = 120;
 const ONE_LINER_MAX = 140;
-const FIRST_NAME_MAX = 80;
+const PRODUCT_NAME_MAX = 60;
+const PRODUCT_ONE_LINER_MAX = 140;
+const PRODUCTS_MAX = 5;
+
+/**
+ * The five First Profit phase colors, cycled by product position (sell,
+ * build, validate, grow, scale). hsl literals copied VERBATIM from the SPA's
+ * design tokens — `tailwind.config.js` `colors.{sell,build,validate,grow,
+ * scale}`, the same values `src/components/LogoMark.tsx` paints its five
+ * ascending steps with. Keep in sync with those sources.
+ */
+const PHASE_COLORS = [
+  "hsl(14 78% 54%)", // sell
+  "hsl(217 74% 56%)", // build
+  "hsl(265 52% 58%)", // validate
+  "hsl(150 52% 42%)", // grow
+  "hsl(41 88% 52%)", // scale
+] as const;
 
 /* ------------------------------------------------------------- escaping */
 
@@ -91,15 +122,6 @@ const STYLE = `
     margin: 0 auto;
     padding: 48px 24px 32px;
   }
-  .founder {
-    margin: 0 0 12px;
-    font-size: 0.95rem;
-    font-weight: 600;
-    letter-spacing: 0.04em;
-    text-transform: uppercase;
-    color: #8a6f52;
-    overflow-wrap: anywhere;
-  }
   h1 {
     margin: 0;
     font-size: clamp(1.6rem, 6vw, 2.2rem);
@@ -145,6 +167,57 @@ const STYLE = `
     text-decoration: none;
     border-bottom: 1px solid currentColor;
   }
+  .sr-only {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
+  }
+  .products {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 240px), 1fr));
+    gap: 16px;
+    margin-top: 40px;
+  }
+  .product-card {
+    border-radius: 16px;
+    border: 1px solid rgba(59, 47, 37, 0.08);
+    border-left: 5px solid var(--pc);
+    background: #fffcf7;
+    background: color-mix(in srgb, var(--pc) 6%, #fffcf7);
+    padding: 20px 22px;
+    box-shadow: 0 1px 3px rgba(59, 47, 37, 0.06);
+    min-width: 0;
+  }
+  .product-eyebrow {
+    margin: 0 0 8px;
+    font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
+    font-size: 0.72rem;
+    font-weight: 700;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--pc);
+  }
+  .product-name {
+    margin: 0;
+    font-size: 1.15rem;
+    font-weight: 700;
+    line-height: 1.3;
+    overflow-wrap: anywhere;
+  }
+  .product-liner {
+    margin: 8px 0 0;
+    font-size: 0.98rem;
+    line-height: 1.5;
+    color: #5c4b3a;
+    overflow-wrap: anywhere;
+  }
+${PHASE_COLORS.map((color, i) => `  .pc-${i} { --pc: ${color}; }`).join("\n")}
 `;
 
 interface Shell {
@@ -175,7 +248,7 @@ function renderShell(page: Shell): string {
 </head>
 <body>
 ${page.body}
-<footer><a href="/">Built with First Profit</a></footer>
+<footer><a href="/" target="_blank" rel="noopener noreferrer">Built with First Profit<span class="sr-only"> (opens in a new tab)</span></a></footer>
 </body>
 </html>
 `;
@@ -186,9 +259,42 @@ ${page.body}
 const DEFAULT_OG_DESCRIPTION =
   "A young founder’s first business — built with First Profit.";
 
-/** The live page (R5, R6, R7, R10): first name, headline, optional one-liner. */
+/**
+ * Render the product cards section, or "" when there is nothing to show.
+ * Defensive re-validation at the render boundary (same discipline as the
+ * text caps): clamp to PRODUCTS_MAX, drop elements with a non-positive-int
+ * `n`, skip cards where BOTH name and one-liner are empty after the
+ * control-strip. When name is empty the one-liner takes the primary slot.
+ * EVERY learner string routes through `publicText()` — no bypass.
+ */
+function renderProductsSection(products: SiteProduct[]): string {
+  const cards: string[] = [];
+  for (const product of products.slice(0, PRODUCTS_MAX)) {
+    if (!Number.isSafeInteger(product.n) || product.n < 1) continue;
+    const name = publicText(product.name ?? "", PRODUCT_NAME_MAX);
+    const oneLiner = publicText(product.oneLiner ?? "", PRODUCT_ONE_LINER_MAX);
+    if (!name && !oneLiner) continue;
+    // Brand color cycles by ARRAY POSITION (sell, build, validate, grow,
+    // scale — PHASE_COLORS), not by n: a gap in n never skips a color.
+    const colorClass = `pc-${cards.length % PHASE_COLORS.length}`;
+    const primary = name || oneLiner;
+    const secondary = name ? oneLiner : "";
+    cards.push(
+      [
+        `<article class="product-card ${colorClass}">`,
+        `<p class="product-eyebrow">Product #${product.n}</p>`,
+        `<h2 class="product-name">${primary}</h2>`,
+        ...(secondary ? [`<p class="product-liner">${secondary}</p>`] : []),
+        "</article>",
+      ].join("\n"),
+    );
+  }
+  if (cards.length === 0) return "";
+  return [`<section class="products" aria-label="Products">`, ...cards, "</section>"].join("\n");
+}
+
+/** The live page (R5, R6, R7, R10): headline, optional one-liner, products. */
 export function renderPublishedPage(site: PublishedSite): string {
-  const firstName = publicText(site.firstName ?? "", FIRST_NAME_MAX) || "Founder";
   const headlineRaw = stripControlChars(site.headline ?? "");
   // The composed default (shared in-game sentence, R12 parity via
   // src/lib/siteCopy.ts) obeys the SAME cap as an authored headline: the
@@ -202,13 +308,15 @@ export function renderPublishedPage(site: PublishedSite): string {
     ? publicText(headlineRaw, HEADLINE_MAX)
     : publicText(defaultSiteHeadline(defaultName), HEADLINE_MAX);
   const oneLiner = publicText(site.oneLiner ?? "", ONE_LINER_MAX);
+  const productsSection = renderProductsSection(site.products ?? []);
 
   const body = [
     "<main>",
-    `<p class="founder">${firstName}</p>`,
+    // No first-name eyebrow: the name lives inside the default sentence only.
     `<h1>${headline}</h1>`,
     // No one-liner -> the section is omitted entirely (R6).
     ...(oneLiner ? [`<p class="one-liner">${oneLiner}</p>`] : []),
+    ...(productsSection ? [productsSection] : []),
     "</main>",
   ].join("\n");
 
