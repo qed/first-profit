@@ -401,32 +401,38 @@ export function IdeaSlot({
   current,
   onClick,
 }: {
-  kind: "filled" | "create" | "future";
-  num: number;
+  kind: "filled" | "create";
+  /** 1-based slot position. Filled cards only: an empty card creates whatever
+   *  the NEXT idea is, so numbering it would lie (tapping slot 5 with two
+   *  ideas makes idea 3). */
+  num?: number;
   name?: string;
   progress?: string;
   current?: boolean;
   onClick?: () => void;
 }) {
   if (kind === "create") {
+    // A FULL-SIZE card, same footprint as a filled idea, in light grey so the
+    // row reads as "these are the empty ones" at a glance (2026-08-04). Every
+    // empty slot is tappable — this is the app's way to add an idea.
     return (
       <button
         type="button"
         onClick={onClick}
-        className="flex min-h-[84px] flex-col items-center justify-center gap-1.5 rounded-[14px] border-2 border-dashed bg-[hsl(14_78%_54%/0.04)] p-3 transition-transform hover:-translate-y-[3px]"
-        style={{ borderColor: "hsl(14 78% 54% / .4)" }}
+        aria-label="Start a new idea"
+        className="flex min-h-[84px] flex-col items-center justify-center gap-1.5 rounded-[14px] border-2 border-dashed border-[hsl(25_12%_72%)] bg-[hsl(40_8%_94%)] p-3 transition-transform hover:-translate-y-[3px] hover:border-[hsl(14_78%_54%/0.5)]"
       >
-        <span className="text-[15px]" style={{ color: "hsl(14 78% 44%)" }} aria-hidden>
+        <span className="text-[17px] leading-none text-[hsl(25_12%_52%)]" aria-hidden>
           ＋
         </span>
-        <span className="font-mono text-[9.5px] uppercase tracking-[0.06em]" style={{ color: "hsl(14 78% 44%)" }}>
-          Start Idea #{num}
+        <span className="font-display text-[12.5px] font-bold leading-tight text-[hsl(25_16%_45%)]">
+          New idea
+        </span>
+        <span className="font-mono text-[9px] uppercase tracking-[0.06em] text-[hsl(25_12%_58%)]">
+          Tap to start
         </span>
       </button>
     );
-  }
-  if (kind === "future") {
-    return <ProductEmpty num={num} />;
   }
   return (
     <button

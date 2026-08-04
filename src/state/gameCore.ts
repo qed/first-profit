@@ -271,7 +271,6 @@ export interface GameState {
   /** In-memory ledger for the session. NOT part of the save doc (lives in fp_ledger). */
   ledger: LedgerEntry[];
   /** Criterion id awaiting an idea-picker choice, or null. */
-  pickFor: string | null;
   runnerOpen: boolean;
   /** Criterion id the Step Runner is showing, or null. */
   runnerStep: string | null;
@@ -318,7 +317,6 @@ export function initialState(): GameState {
     ideas: [],
     activeIdea: 0,
     ledger: [],
-    pickFor: null,
     runnerOpen: false,
     runnerStep: null,
     runnerIndex: 0,
@@ -1219,7 +1217,6 @@ export type Action =
   | { type: "CLOSE_RUNNER" }
   | { type: "OPEN_ROOM"; room: RoomId }
   | { type: "CLOSE_ROOM" }
-  | { type: "SET_PICK_FOR"; pickFor: string | null }
   | ({ type: "ADD_LEDGER"; mock?: boolean } & LedgerEntry)
   | { type: "SET_LEDGER"; ledger: LedgerEntry[] }
   | { type: "DISMISS_CELEBRATION" }
@@ -1428,8 +1425,7 @@ export function reducer(state: GameState, action: Action): GameState {
         runnerOpen: true,
         runnerStep: CRITERION_SEQUENCE[0],
         runnerIndex: 0,
-        pickFor: null,
-      };
+          };
     }
 
     case "DELETE_IDEA": {
@@ -1474,7 +1470,7 @@ export function reducer(state: GameState, action: Action): GameState {
       // A runner open on the DELETED idea's state must not keep showing it:
       // close it. This is a LOCAL user action, not a remote union, so the
       // "the union can never close the runner" invariant does not apply here
-      // (deliberate exception). pickFor/celebrate stay untouched.
+      // (deliberate exception). celebrate stays untouched.
       const closeRunner = state.runnerOpen && state.activeIdea === deleteIndex;
       return {
         ...state,
@@ -1521,9 +1517,6 @@ export function reducer(state: GameState, action: Action): GameState {
 
     case "CLOSE_ROOM":
       return { ...state, room: null };
-
-    case "SET_PICK_FOR":
-      return { ...state, pickFor: action.pickFor };
 
     case "ADD_LEDGER": {
       // Idempotent on id (retried outbox inserts must not double-append).

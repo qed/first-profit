@@ -531,10 +531,10 @@ describe("Factory — Your Ideas slots route to the summary dialog (rule 2)", ()
     expect(screen.queryByText("Next Step")).toBeNull();
   });
 
-  it("an EMPTY 'Start Idea' slot keeps its behavior (creates an idea, no summary)", () => {
+  it("an EMPTY 'New idea' slot keeps its behavior (creates an idea, no summary)", () => {
     const { actions } = mountFactory(withIdeas(1));
     openSellFloor();
-    fireEvent.click(screen.getByText("Start Idea #2").closest("button")!);
+    fireEvent.click(screen.getAllByRole("button", { name: "Start a new idea" })[0]);
     arrive();
     expect(actions.some((a) => a.type === "CREATE_IDEA")).toBe(true);
     expect(screen.queryByLabelText("Edit name")).toBeNull();

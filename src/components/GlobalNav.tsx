@@ -23,7 +23,7 @@ import { useEffect, useRef, useState } from "react";
 import { ChevronDown } from "lucide-react";
 import { isLoggedInStage, useGame } from "../state/GameContext";
 import { activeBusiness } from "../state/gameCore";
-import { ideaSummaryName } from "../state/floorSelectors";
+import { ideaProgressLabel, ideaSummaryName } from "../state/floorSelectors";
 import { isSignupEnabled } from "../config";
 import { LogoMark } from "./LogoMark";
 import type { SyncStatus } from "../lib/sync";
@@ -65,44 +65,142 @@ function MoneyStat({ label, cents }: { label: string; cents: number }) {
 }
 
 /**
- * The app-stage game section (idea/business chip + stats + save indicator).
- * Mounted ONLY when stage === "app", so the other stages never touch the game
- * fields on the context. The chip shows the ACTIVE idea's display name
- * (productName preferred via ideaSummaryName) and, when the active idea IS
- * the promoted business, the building emoji. It is a button that opens the
- * switcher only when there is another idea to switch to.
+ * The idea switcher as a NAV DROPDOWN (2026-08-04 owner spec), replacing the
+ * full-screen SwitcherDialog modal that used to live in Factory: switching
+ * ideas is navigation, so it belongs in a menu hanging off the nav chip that
+ * names the current idea, not in a takeover that hides the floor behind it.
+ *
+ * Interaction is the AccountMenu contract verbatim (one dropdown convention in
+ * this bar): mousedown outside closes, Escape closes and returns focus to the
+ * chip, z-50 so it floats above the sticky z-40 bar, right-aligned so it never
+ * overflows at 390px. Choosing an idea dispatches SET_ACTIVE_IDEA and then
+ * fires `onSwitched` so Factory can cancel an in-flight walk (the kid's switch
+ * wins over a pending arrival — the behavior the modal's onSwitched carried).
  */
-function AppNavSection({ onOpenSwitcher }: { onOpenSwitcher?: () => void }) {
+function IdeaSwitcherMenu({ onSwitched }: { onSwitched?: () => void }) {
   const game = useGame();
-  const { ideas, activeIdea, grossSalesSumCents, salesSumCents, syncStatus } = game;
-  const name = ideaSummaryName(game, activeIdea);
+  const { ideas, activeIdea, dispatch } = game;
+  const [open, setOpen] = useState(false);
+  const rootRef = useRef<HTMLSpanElement>(null);
+  const chipRef = useRef<HTMLButtonElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const onMouseDown = (e: MouseEvent) => {
+      if (rootRef.current && !rootRef.current.contains(e.target as Node)) setOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        setOpen(false);
+        chipRef.current?.focus();
+      }
+    };
+    document.addEventListener("mousedown", onMouseDown);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onMouseDown);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [open]);
+
+  const choose = (ideaIndex: number) => {
+    setOpen(false);
+    onSwitched?.();
+    dispatch({ type: "SET_ACTIVE_IDEA", ideaIndex });
+  };
+
+  return (
+    <span ref={rootRef} className="relative inline-flex">
+      <button
+        ref={chipRef}
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        aria-label="Switch idea"
+        aria-haspopup="menu"
+        aria-expanded={open}
+        className={`${CHIP_CLASS} min-h-[44px] px-1 transition-colors hover:text-[hsl(150_52%_32%)]`}
+      >
+        <ChipName />
+        <ChevronDown size={14} aria-hidden className="shrink-0" />
+      </button>
+
+      {open ? (
+        <div className="absolute right-0 top-full z-50 mt-1 w-[15rem] rounded-2xl border-2 border-[hsl(25_34%_20%/0.15)] bg-white p-1.5 shadow-[0_8px_0_rgba(120,80,40,.1)]">
+          <p className="px-2 pb-1 pt-1.5 font-mono text-[9.5px] uppercase tracking-[0.08em] text-[hsl(25_20%_38%)]">
+            Switch idea
+          </p>
+          <div role="menu" aria-label="Switch idea">
+            {ideas.map((_, n) => (
+              <button
+                key={n}
+                type="button"
+                role="menuitem"
+                onClick={() => choose(n)}
+                className="flex min-h-[44px] w-full flex-col justify-center rounded-xl px-2 py-1.5 text-left hover:bg-[hsl(40_30%_95%)]"
+              >
+                <span className="flex items-center gap-1.5">
+                  <span className="truncate text-[13px] font-bold text-ink">
+                    {ideaSummaryName(game, n)}
+                  </span>
+                  {n === activeIdea ? (
+                    <span className="shrink-0 font-mono text-[8.5px] font-bold uppercase tracking-[0.06em] text-grow">
+                      now
+                    </span>
+                  ) : null}
+                </span>
+                <span className="truncate font-mono text-[9px] text-[hsl(25_20%_38%)]">
+                  {ideaProgressLabel(game, n)}
+                </span>
+              </button>
+            ))}
+          </div>
+        </div>
+      ) : null}
+    </span>
+  );
+}
+
+/**
+ * Regular bold text, no pill: no background, border, or rounding. Colored with
+ * the FOURTH bar of the logo mark (the `grow` token, hsl(150 52% 42%) — the
+ * same green LogoMark paints its fourth ascending step with, owner spec
+ * 2026-08-04), so the current idea reads as the one branded thing in the bar.
+ */
+const CHIP_CLASS =
+  "inline-flex items-center gap-1.5 font-mono text-[10px] font-bold uppercase tracking-[0.06em] text-grow";
+
+/** The chip's label: business emoji when the active idea IS the promoted
+ *  business, then the display name (productName preferred), truncated. */
+function ChipName() {
+  const game = useGame();
+  const { ideas, activeIdea } = game;
   const business = activeBusiness(game);
   const isBusiness = Boolean(business && ideas[activeIdea] && business.ideaId === ideas[activeIdea].id);
-  const chipInner = (
+  return (
     <>
       {isBusiness ? <span aria-hidden>🏢</span> : null}
-      <span className="max-w-[6rem] truncate sm:max-w-[13rem]">{name}</span>
+      <span className="max-w-[6rem] truncate sm:max-w-[13rem]">{ideaSummaryName(game, activeIdea)}</span>
     </>
   );
-  // Regular bold text, no pill: no background, border, or rounding. The >1-idea
-  // button keeps its 44px hit target via min-h + a little inline padding only.
-  const chipClass =
-    "inline-flex items-center gap-1.5 font-mono text-[10px] font-bold uppercase tracking-[0.06em] text-ink";
+}
+
+/**
+ * The app-stage game section (idea/business chip + stats + save indicator).
+ * Mounted ONLY when stage === "app", so the other stages never touch the game
+ * fields on the context. With more than one idea the chip is the dropdown
+ * trigger above; a single idea renders as plain text with no chevron.
+ */
+function AppNavSection({ onSwitched }: { onSwitched?: () => void }) {
+  const game = useGame();
+  const { ideas, grossSalesSumCents, salesSumCents, syncStatus } = game;
   return (
     <>
       {ideas.length > 1 ? (
-        <button
-          type="button"
-          onClick={onOpenSwitcher}
-          aria-label="Switch idea"
-          aria-haspopup="dialog"
-          className={`${chipClass} min-h-[44px] px-1 transition-colors hover:text-[hsl(14_78%_44%)]`}
-        >
-          {chipInner}
-          <ChevronDown size={14} aria-hidden className="shrink-0" />
-        </button>
+        <IdeaSwitcherMenu onSwitched={onSwitched} />
       ) : ideas.length === 1 ? (
-        <span className={`${chipClass} py-1.5`}>{chipInner}</span>
+        <span className={`${CHIP_CLASS} py-1.5`}>
+          <ChipName />
+        </span>
       ) : null}
       <MoneyStat label="Sales" cents={grossSalesSumCents()} />
       <MoneyStat label="Profit" cents={salesSumCents()} />
@@ -179,7 +277,7 @@ function AccountMenu({ founder, onLogout }: { founder: string; onLogout: () => v
   );
 }
 
-export function GlobalNav({ onOpenSwitcher }: { onOpenSwitcher?: () => void } = {}) {
+export function GlobalNav({ onSwitched }: { onSwitched?: () => void } = {}) {
   const { stage, dispatch, logout, profile } = useGame();
   const loggedIn = isLoggedInStage(stage);
   const founder = profile.firstName || profile.handle || "Founder";
@@ -212,7 +310,7 @@ export function GlobalNav({ onOpenSwitcher }: { onOpenSwitcher?: () => void } = 
 
         {loggedIn ? (
           <span className="flex flex-wrap items-center justify-end gap-x-2 gap-y-1 sm:gap-x-2.5">
-            {stage === "app" ? <AppNavSection onOpenSwitcher={onOpenSwitcher} /> : null}
+            {stage === "app" ? <AppNavSection onSwitched={onSwitched} /> : null}
             <AccountMenu founder={founder} onLogout={() => void logout()} />
           </span>
         ) : stage !== "login" ? (

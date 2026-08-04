@@ -33,6 +33,17 @@ function appGame(over: Record<string, unknown> = {}) {
     ...over,
   };
 }
+/** Two ideas: the state where the chip becomes the switcher dropdown. */
+function twoIdeaGame(over: Record<string, unknown> = {}) {
+  return appGame({
+    ideas: [
+      { id: "idea-0", fields: { productName: "Slime Kits" }, done: {} },
+      { id: "idea-1", fields: { productName: "Dog Walking" }, done: {} },
+    ],
+    ...over,
+  });
+}
+
 let game: Record<string, unknown> = appGame();
 
 vi.mock("../../state/GameContext", () => ({
@@ -235,18 +246,73 @@ describe("GlobalNav app stage — the one bar's game section", () => {
     expect(screen.getByRole("status").textContent).toBe("Saved");
   });
 
-  it("the chip is a Switch idea button that fires onOpenSwitcher when ideas > 1", () => {
+  it("the chip opens an in-nav DROPDOWN MENU (not a modal) listing every idea", () => {
     stage = "app";
-    game = appGame({
-      ideas: [
-        { id: "idea-0", fields: { productName: "Slime Kits" }, done: {} },
-        { id: "idea-1", fields: {}, done: {} },
-      ],
-    });
-    const onOpenSwitcher = vi.fn();
-    render(<GlobalNav onOpenSwitcher={onOpenSwitcher} />);
+    game = twoIdeaGame();
+    render(<GlobalNav />);
+    const chip = screen.getByRole("button", { name: "Switch idea" });
+    // Closed to start: a menu, not a dialog, and nothing rendered yet.
+    expect(chip.getAttribute("aria-haspopup")).toBe("menu");
+    expect(chip.getAttribute("aria-expanded")).toBe("false");
+    expect(screen.queryByRole("menu", { name: "Switch idea" })).toBeNull();
+
+    fireEvent.click(chip);
+    expect(chip.getAttribute("aria-expanded")).toBe("true");
+    const menu = screen.getByRole("menu", { name: "Switch idea" });
+    // One menuitem per idea, and NO modal/dialog anywhere in the tree.
+    expect(screen.getAllByRole("menuitem")).toHaveLength(2);
+    expect(menu.closest("[role='dialog']")).toBeNull();
+    expect(document.querySelector("[aria-modal='true']")).toBeNull();
+  });
+
+  it("choosing an idea dispatches SET_ACTIVE_IDEA, fires onSwitched, and closes the menu", () => {
+    stage = "app";
+    game = twoIdeaGame();
+    const onSwitched = vi.fn();
+    render(<GlobalNav onSwitched={onSwitched} />);
     fireEvent.click(screen.getByRole("button", { name: "Switch idea" }));
-    expect(onOpenSwitcher).toHaveBeenCalledTimes(1);
+    fireEvent.click(screen.getAllByRole("menuitem")[1]);
+
+    expect(dispatch).toHaveBeenCalledWith({ type: "SET_ACTIVE_IDEA", ideaIndex: 1 });
+    // onSwitched is Factory's walk-cancel signal; it must fire on every switch.
+    expect(onSwitched).toHaveBeenCalledTimes(1);
+    expect(screen.queryByRole("menu", { name: "Switch idea" })).toBeNull();
+  });
+
+  it("Escape closes the switcher menu and returns focus to the chip", () => {
+    stage = "app";
+    game = twoIdeaGame();
+    render(<GlobalNav />);
+    const chip = screen.getByRole("button", { name: "Switch idea" });
+    fireEvent.click(chip);
+    expect(screen.getByRole("menu", { name: "Switch idea" })).toBeTruthy();
+
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect(screen.queryByRole("menu", { name: "Switch idea" })).toBeNull();
+    expect(document.activeElement).toBe(chip);
+  });
+
+  it("an outside mousedown closes the switcher menu", () => {
+    stage = "app";
+    game = twoIdeaGame();
+    render(<GlobalNav />);
+    fireEvent.click(screen.getByRole("button", { name: "Switch idea" }));
+    fireEvent.mouseDown(document.body);
+    expect(screen.queryByRole("menu", { name: "Switch idea" })).toBeNull();
+  });
+
+  it("the idea name is the logo's FOURTH-BAR green (the grow token), in both chip states", () => {
+    stage = "app";
+    // Single idea: plain text, still green.
+    render(<GlobalNav />);
+    expect((screen.getByText("Slime Kits").parentElement as HTMLElement).className).toMatch(
+      /text-grow/,
+    );
+    cleanup();
+    // Multi idea: the dropdown trigger, same green.
+    game = twoIdeaGame();
+    render(<GlobalNav />);
+    expect(screen.getByRole("button", { name: "Switch idea" }).className).toMatch(/text-grow/);
   });
 
   it("the chip is NOT a button with a single idea (nothing to switch to)", () => {
@@ -256,17 +322,12 @@ describe("GlobalNav app stage — the one bar's game section", () => {
     expect(screen.getByText("Slime Kits")).toBeTruthy(); // inert span
   });
 
-  it("the multi-idea chip is bold plain text advertising a dialog with a chevron, no pill", () => {
+  it("the multi-idea chip is bold plain text advertising a menu with a chevron, no pill", () => {
     stage = "app";
-    game = appGame({
-      ideas: [
-        { id: "idea-0", fields: { productName: "Slime Kits" }, done: {} },
-        { id: "idea-1", fields: {}, done: {} },
-      ],
-    });
-    render(<GlobalNav onOpenSwitcher={vi.fn()} />);
+    game = twoIdeaGame();
+    render(<GlobalNav />);
     const chip = screen.getByRole("button", { name: "Switch idea" });
-    expect(chip.getAttribute("aria-haspopup")).toBe("dialog");
+    expect(chip.getAttribute("aria-haspopup")).toBe("menu");
     expect(chip.querySelector("svg")).toBeTruthy(); // the ChevronDown affordance
     expect(chip.className).toMatch(/font-bold/);
     expect(chip.className).not.toMatch(/bg-\[/); // old tinted pill background gone
@@ -305,15 +366,15 @@ describe("GlobalNav app stage — the one bar's game section", () => {
 
   it("keeps >=44px tap targets and no em dash in the app stage", () => {
     stage = "app";
-    game = appGame({
-      ideas: [
-        { id: "idea-0", fields: { productName: "Slime Kits" }, done: {} },
-        { id: "idea-1", fields: {}, done: {} },
-      ],
-    });
-    render(<GlobalNav onOpenSwitcher={vi.fn()} />);
+    game = twoIdeaGame();
+    render(<GlobalNav />);
     for (const b of screen.getAllByRole("button")) {
       expect(b.className).toMatch(/min-h-\[44px\]/);
+    }
+    // The menu's own rows are tap targets too once it is open.
+    fireEvent.click(screen.getByRole("button", { name: "Switch idea" }));
+    for (const item of screen.getAllByRole("menuitem")) {
+      expect(item.className).toMatch(/min-h-\[44px\]/);
     }
     expect(document.body.textContent ?? "").not.toMatch(/—/);
   });

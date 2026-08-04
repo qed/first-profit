@@ -78,10 +78,26 @@ describe("CriterionFloor — phase parameterization", () => {
   it("shows the Your Ideas row on the SELL floor only", () => {
     const first = mount(withIdeas(1), "sell");
     expect(screen.getByText("Your Ideas")).toBeTruthy();
-    expect(screen.getByText("Start Idea #2")).toBeTruthy();
     first.unmount();
     mount(withIdeas(1), "build");
     expect(screen.queryByText("Your Ideas")).toBeNull();
+  });
+
+  it("EVERY empty idea slot is a full, clickable light-grey New idea card", () => {
+    const { walks } = mount(withIdeas(1), "sell");
+    // 1 filled + 4 empty = MAX_IDEAS cards, all of them buttons.
+    const empties = screen.getAllByRole("button", { name: "Start a new idea" });
+    expect(empties).toHaveLength(4);
+    for (const card of empties) {
+      expect(card.textContent).toContain("New idea");
+      // Same footprint as a filled card, light grey rather than the old
+      // orange dashed "next slot only" affordance.
+      expect(card.className).toMatch(/min-h-\[84px\]/);
+      expect(card.className).toMatch(/bg-\[hsl\(40_8%_94%\)\]/);
+    }
+    // The LAST one is live too (the old design only wired slot #2).
+    fireEvent.click(empties[3]);
+    expect(walks).toEqual([{ kind: "createIdea" }]);
   });
 
   it("emits enterCriterion walk intents from unlocked cards", () => {

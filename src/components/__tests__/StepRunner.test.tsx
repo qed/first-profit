@@ -174,21 +174,44 @@ describe("StepRunner", () => {
     expect(screen.getByLabelText("Close")).toBeTruthy();
   });
 
-  it("renders the compact bottom-right action row: More tools please beside the green CTA, both >= 44px", () => {
+  it("renders the action row: More tools please BOTTOM-LEFT in logo blue, green CTA right", () => {
     render(<Harness seed={seedAtLastTaskOf11()} />);
     const more = screen.getByText("More tools please") as HTMLElement;
     const cta = screen.getByText("✓ I did it") as HTMLElement;
-    // Same right-aligned row.
+    // Same row, but More tools is pushed to the LEFT edge by mr-auto so the
+    // beta-feedback route is unmissable (2026-08-04).
     const row = more.parentElement as HTMLElement;
     expect(row).toBe(cta.parentElement);
-    expect(row.className).toContain("justify-end");
-    // Compact but still kid-tappable (390px rule), quiet vs filled styles.
+    expect(more.className).toContain("mr-auto");
+    // Filled with the First Profit logo blue (`build`) + white text.
+    expect(more.className).toContain("bg-build");
+    expect(more.className).toContain("text-white");
+    expect(more.className).not.toContain("border-2");
+    // Both stay kid-tappable at 390px.
     expect(more.className).toContain("min-h-[44px]");
-    expect(more.className).toContain("border-2");
     expect(cta.className).toContain("min-h-[44px]");
     expect(cta.className).toContain("bg-verified");
     // The CTA no longer stretches to hero width.
     expect(cta.className).not.toContain("flex-1");
+  });
+
+  it("the task rail is navigation: each segment jumps the runner to that task", () => {
+    const actions: { type: string; index?: number; stepId?: string }[] = [];
+    render(
+      <Harness seed={seedAtLastTaskOf11()} onAction={(a) => actions.push(a as typeof actions[number])} />,
+    );
+    const rail = screen.getAllByRole("button", { name: /^Task \d+ of \d+: / });
+    expect(rail.length).toBeGreaterThan(1);
+    // The current task's segment is marked and inert.
+    const current = rail.find((b) => b.getAttribute("aria-current") === "step")!;
+    expect(current).toBeTruthy();
+    fireEvent.click(current);
+    expect(actions.some((a) => a.type === "OPEN_RUNNER")).toBe(false);
+    // Any OTHER segment jumps straight to that index, completing nothing.
+    const other = rail.findIndex((b) => b !== current);
+    fireEvent.click(rail[other]);
+    expect(actions).toContainEqual({ type: "OPEN_RUNNER", stepId: "1.1", index: other });
+    expect(actions.some((a) => a.type === "COMPLETE_TASK")).toBe(false);
   });
 
   it("renders PHASE-AWARE header chrome on a Build criterion (2.1)", () => {

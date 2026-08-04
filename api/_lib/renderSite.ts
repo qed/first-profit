@@ -128,13 +128,6 @@ const STYLE = `
     line-height: 1.2;
     overflow-wrap: anywhere;
   }
-  .one-liner {
-    margin: 20px 0 0;
-    font-size: 1.1rem;
-    line-height: 1.5;
-    color: #5c4b3a;
-    overflow-wrap: anywhere;
-  }
   .note {
     margin: 16px 0 0;
     font-size: 1rem;
@@ -180,7 +173,10 @@ const STYLE = `
   }
   .products {
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(min(100%, 240px), 1fr));
+    /* ONE card per row at every width (never 2-up): a product name plus its
+       description needs the full measure to stay readable, and a single
+       column is the same shape on a 390px phone as on a desktop. */
+    grid-template-columns: 1fr;
     gap: 16px;
     margin-top: 40px;
   }
@@ -314,8 +310,10 @@ export function renderPublishedPage(site: PublishedSite): string {
     "<main>",
     // No first-name eyebrow: the name lives inside the default sentence only.
     `<h1>${headline}</h1>`,
-    // No one-liner -> the section is omitted entirely (R6).
-    ...(oneLiner ? [`<p class="one-liner">${oneLiner}</p>`] : []),
+    // The one-liner is NOT rendered on the page any more: the headline plus
+    // the product cards carry the page, and the description under the
+    // headline was the first thing pushed off a phone screen. The authored
+    // one-liner still feeds og:description below, so link previews keep it.
     ...(productsSection ? [productsSection] : []),
     "</main>",
   ].join("\n");

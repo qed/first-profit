@@ -6,15 +6,21 @@
  * src/data/providers.ts is untouched (fee modeling elsewhere depends on it);
  * only this room's UI narrows.
  *
- * Two states:
+ * Two states, both now headed by the provider's brand mark (First Profit's own
+ * LogoMark for First Profit Pay) and both closing with the SAME `UNLOCK_LINE`
+ * notice, so the room says exactly one thing about what the booth offers:
  *   - NO provider chosen (the norm now) -> a single First Profit Pay card with
- *     the fee/hold subhead and a LOCKED, disabled affordance ("Live Checkout
- *     Page when you have a product and a price"). Nothing here writes
- *     chosenProvider; the lock is static, no unlock logic.
+ *     the fee/hold subhead and the unlock notice. Nothing here writes
+ *     chosenProvider; there is no unlock logic in this room.
  *   - A provider ALREADY chosen (legacy accounts; the reducer keeps
- *     SET_PROVIDER + chosenProvider) -> a compact chosen summary (name + fee
- *     line + the subscription-so-far proxy for subscription providers). It has
- *     no actions; this room mints no new choices.
+ *     SET_PROVIDER + chosenProvider) -> a compact chosen summary (mark + name +
+ *     fee line + the subscription-so-far proxy for subscription providers). It
+ *     has no actions; this room mints no new choices.
+ *
+ * Copy retired 2026-08-04 (owner spec): the room tagline "Your checkout page
+ * opens when you have a product and a price." (deleted at the ROOM_META call
+ * site in src/screens/Factory.tsx), the locked pseudo-button that repeated it,
+ * and "You chose this. It collects your money on every sale."
  *
  * The append-only Ledger list (existing sale records) stays visible in both
  * states. Mobile-first at ~390px; no em dashes; 44px tap targets.
@@ -28,6 +34,13 @@ import { PROVIDERS, type Provider } from "../../data/providers";
 
 /** The booth card's fee/hold subhead. Exact copy per owner spec, 2026-08-03. */
 export const FPP_SUBHEAD = "5% of every sale. 90 day hold before transfer.";
+
+/**
+ * THE one message of this room (owner spec, 2026-08-04). It replaces both the
+ * old room tagline and the old "You chose this" line, and it renders in BOTH
+ * booth states so they can never disagree about what the booth offers.
+ */
+export const UNLOCK_LINE = "You can unlock a live checkout page in the app.";
 
 /** ~30-day month in ms, for the directional "subscription so far" proxy. */
 const MS_PER_MONTH = 30 * 24 * 60 * 60 * 1000;
@@ -80,16 +93,34 @@ export function CheckoutBooth() {
 }
 
 /**
- * The single First Profit Pay card: name, the exact fee/hold subhead, and a
- * static locked affordance. The button is decorative-disabled (disabled +
- * aria-disabled, no onClick): there is nothing to unlock from this room.
+ * The unlock notice: the ONE thing this room says right now, so it is styled to
+ * be read first — full-measure panel, lock icon, display face at 17px. Shared
+ * by both booth states. Static copy; nothing here unlocks anything (the real
+ * unlock lives in the app), so it is a <p>, never a dead disabled button.
+ */
+function UnlockNotice() {
+  return (
+    <div className="mt-4 flex items-start gap-3 rounded-[14px] border-2 border-[hsl(217_74%_56%/0.35)] bg-[hsl(217_74%_56%/0.08)] p-4">
+      <Lock size={20} aria-hidden className="mt-0.5 shrink-0 text-build" />
+      <p className="font-display text-[17px] font-bold leading-[1.4] text-[hsl(25_34%_20%)]">
+        {UNLOCK_LINE}
+      </p>
+    </div>
+  );
+}
+
+/**
+ * The single First Profit Pay card: the First Profit logo + name, the exact
+ * fee/hold subhead, and the unlock notice. The old locked pseudo-button is
+ * gone (2026-08-04): it looked pressable but never was, and its label repeated
+ * the retired "when you have a product and a price" claim.
  */
 function FirstProfitPayCard() {
   const fpp = PROVIDERS.first_profit_pay;
   return (
     <div className="w-full rounded-[16px] border-2 border-[hsl(25_34%_20%/0.15)] bg-white p-5">
       <div className="flex items-center gap-3">
-        <ProviderLogo id={fpp.id} className="h-8 w-8 shrink-0" />
+        <ProviderLogo id={fpp.id} className="h-9 w-9 shrink-0" />
         <p className="font-display text-[20px] font-black text-[hsl(25_34%_20%)]">{fpp.name}</p>
       </div>
       <p className="mt-2 text-[14px] font-semibold text-[hsl(25_34%_20%)]">{FPP_SUBHEAD}</p>
@@ -97,15 +128,7 @@ function FirstProfitPayCard() {
         This is where your money will come in.
       </p>
 
-      <button
-        type="button"
-        disabled
-        aria-disabled="true"
-        className="mt-3.5 flex min-h-[44px] w-full cursor-not-allowed items-center justify-center gap-2 rounded-[10px] bg-[hsl(25_34%_20%/0.12)] px-5 text-sm font-semibold text-[hsl(25_20%_38%)] opacity-70"
-      >
-        <Lock size={18} aria-hidden className="shrink-0" />
-        <span>Live Checkout Page when you have a product and a price</span>
-      </button>
+      <UnlockNotice />
     </div>
   );
 }
@@ -132,15 +155,19 @@ function ChosenSummary() {
 
   return (
     <div className="w-full rounded-[16px] border-2 border-[hsl(25_34%_20%/0.15)] bg-white p-5">
-      <p className="font-display text-[22px] font-black text-[hsl(25_34%_20%)]">{name}</p>
+      {/* The brand mark the card state always had (First Profit's own LogoMark
+          for First Profit Pay); this state used to show a bare name. */}
+      <div className="flex items-center gap-3">
+        <ProviderLogo id={chosenProvider.providerId} className="h-9 w-9 shrink-0" />
+        <p className="font-display text-[20px] font-black text-[hsl(25_34%_20%)]">{name}</p>
+      </div>
       {provider && (
-        <p className="mt-1 text-[13px] text-[hsl(25_20%_38%)]">
+        <p className="mt-2 text-[13px] text-[hsl(25_20%_38%)]">
           {isFpp ? FPP_SUBHEAD : `${feeLabel(provider)} · ${subscriptionLabel(provider)}`}
         </p>
       )}
-      <p className="mt-2 text-[13px] leading-[1.5] text-[hsl(25_34%_20%)]">
-        You chose this. It collects your money on every sale.
-      </p>
+
+      <UnlockNotice />
 
       {subSoFarCents != null && (
         <div className="mt-3 rounded-[12px] border-2 border-[hsl(25_34%_20%/0.12)] bg-[hsl(40_55%_97%)] p-3.5">

@@ -72,10 +72,12 @@ function StageRouter() {
   // gate (byte-identical 401 → the staff-only refusal).
   const [adminRoute] = useState(() => isAdminPath());
 
-  // The idea-switcher open-state lives HERE (above the stage render) because
-  // its opener is the GlobalNav's idea chip while the dialog itself stays
-  // mounted inside Factory (it must cancel an in-flight walk on a switch).
-  const [switcherOpen, setSwitcherOpen] = useState(false);
+  // The idea switcher is a DROPDOWN owned entirely by the GlobalNav chip
+  // (2026-08-04), so no open-state crosses this boundary any more. What still
+  // has to cross is the SWITCH EVENT: Factory cancels an in-flight walk when
+  // the kid switches ideas, and the nav sits above it. This monotonic counter
+  // is that signal — bumped per explicit switch, watched by Factory.
+  const [switchSignal, setSwitchSignal] = useState(0);
 
   // The verify-return token, read ONCE from the boot URL and then stripped from
   // the address bar so a refresh never re-triggers it and the one-time token
@@ -182,7 +184,7 @@ function StageRouter() {
       case "onboard":
         return <Onboarding />;
       case "app":
-        return <Factory switcherOpen={switcherOpen} onSwitcherOpenChange={setSwitcherOpen} />;
+        return <Factory switchSignal={switchSignal} />;
       default:
         return <Boot />;
     }
@@ -197,7 +199,7 @@ function StageRouter() {
   // docs/superpowers/specs/2026-08-02-global-nav-design.md
   return (
     <>
-      {stage !== "boot" ? <GlobalNav onOpenSwitcher={() => setSwitcherOpen(true)} /> : null}
+      {stage !== "boot" ? <GlobalNav onSwitched={() => setSwitchSignal((n) => n + 1)} /> : null}
       {content}
     </>
   );

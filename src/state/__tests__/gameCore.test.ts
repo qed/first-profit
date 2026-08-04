@@ -856,8 +856,6 @@ describe("field + misc reducer actions", () => {
     expect(s.room).toBe("idea");
     s = reducer(s, { type: "CLOSE_ROOM" });
     expect(s.room).toBeNull();
-    s = reducer(s, { type: "SET_PICK_FOR", pickFor: "1.1" });
-    expect(s.pickFor).toBe("1.1");
     s = reducer(s, { type: "DISMISS_CELEBRATION" });
     expect(s.celebrate).toBeNull();
   });
@@ -1102,7 +1100,6 @@ describe("RESET_SESSION (shared-device state clear)", () => {
     expect(reset.ideas).toEqual([]);
     expect(reset.ledger).toEqual([]);
     expect(reset.activeIdea).toBe(0);
-    expect(reset.pickFor).toBeNull();
     expect(reset.runnerOpen).toBe(false);
     expect(reset.runnerStep).toBeNull();
     expect(reset.runnerIndex).toBe(0);
@@ -2648,11 +2645,9 @@ describe("DELETE_IDEA (Change #7: delete forever + tombstone)", () => {
       expect(next.activeIdea).toBe(0);
     });
 
-    it("pickFor and celebrate stay untouched", () => {
-      let s = withDeletableIdeas(2);
-      s = reducer(s, { type: "SET_PICK_FOR", pickFor: "1.2" });
+    it("celebrate stays untouched", () => {
+      const s = withDeletableIdeas(2);
       const next = reducer(s, { type: "DELETE_IDEA", ideaId: "idea-1" });
-      expect(next.pickFor).toBe("1.2");
       expect(next.celebrate).toBeNull();
     });
   });

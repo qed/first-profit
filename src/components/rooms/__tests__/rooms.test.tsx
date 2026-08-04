@@ -196,23 +196,32 @@ describe("Checkout Booth (simplified): only First Profit Pay, locked checkout", 
     ).toBe(false);
   });
 
-  it("the checkout affordance is a DISABLED locked button with the lock icon", async () => {
+  it("the unlock line is the booth's main message, as static text and not a dead button", async () => {
     renderBooth();
     await waitFor(() => expect(api?.stage).toBe("landing"));
 
-    const locked = button((b) =>
-      (b.textContent || "").includes("Live Checkout Page when you have a product and a price"),
+    expect(document.body.textContent).toContain(
+      "You can unlock a live checkout page in the app.",
     );
-    // Disabled + aria-disabled: it never writes chosenProvider (a static lock).
-    expect(locked.hasAttribute("disabled")).toBe(true);
-    expect(locked.getAttribute("aria-disabled")).toBe("true");
-    // The lucide Lock icon renders inside the button, decorative (aria-hidden).
-    const icon = locked.querySelector("svg");
-    expect(icon).toBeTruthy();
-    expect(icon?.getAttribute("aria-hidden")).toBe("true");
-    // Clicking does nothing: no provider gets chosen from this room.
-    act(() => fireEvent.click(locked));
-    expect(getApi().chosenProvider).toBeNull();
+    // It is NOT a button: the old locked pseudo-button looked pressable but
+    // could never do anything, so nothing in this room is clickable-but-dead.
+    expect(
+      Array.from(document.querySelectorAll("button")).some((b) =>
+        (b.textContent || "").includes("unlock a live checkout page"),
+      ),
+    ).toBe(false);
+    // The lucide Lock icon still renders alongside it, decorative.
+    const icons = Array.from(document.querySelectorAll("svg[aria-hidden='true']"));
+    expect(icons.length).toBeGreaterThan(0);
+  });
+
+  it("shows the First Profit logo mark in the unchosen state", async () => {
+    renderBooth();
+    await waitFor(() => expect(api?.stage).toBe("landing"));
+
+    expect(
+      document.querySelector("svg[aria-label^='First Profit logo mark']"),
+    ).toBeTruthy();
   });
 
   it("none of the retired copy renders (unchosen state)", async () => {
@@ -225,6 +234,9 @@ describe("Checkout Booth (simplified): only First Profit Pay, locked checkout", 
     expect(document.body.textContent).not.toMatch(/log a real sale/i);
     expect(document.body.textContent).not.toMatch(/Set it up for real/i);
     expect(document.body.textContent).not.toMatch(/Compare providers/i);
+    // Retired 2026-08-04 (owner spec): the locked button's product-and-price
+    // claim, in the room body AND in the dialog tagline.
+    expect(document.body.textContent).not.toMatch(/when you have a product and a price/i);
   });
 
   it("a legacy chosen provider still shows its summary, without the retired label or CTAs", async () => {
@@ -233,8 +245,7 @@ describe("Checkout Booth (simplified): only First Profit Pay, locked checkout", 
     // Legacy account: a provider was chosen before the simplification.
     act(() => getApi().dispatch({ type: "SET_PROVIDER", providerId: "shopify", chosenAt: 1 }));
 
-    await waitFor(() => expect(document.body.textContent).toMatch(/You chose this/));
-    expect(document.body.textContent).toMatch(/Shopify Starter Plan/);
+    await waitFor(() => expect(document.body.textContent).toMatch(/Shopify Starter Plan/));
     // The summary fee line still reads from providers.ts data.
     expect(document.body.textContent).toMatch(/\$5\/mo/);
     // The retired label and CTAs are gone from the chosen view too.
@@ -242,6 +253,11 @@ describe("Checkout Booth (simplified): only First Profit Pay, locked checkout", 
     expect(document.body.textContent).not.toMatch(/Set it up for real/i);
     expect(document.body.textContent).not.toMatch(/Compare providers/i);
     expect(document.body.textContent).not.toMatch(/log a real sale/i);
+    // Retired 2026-08-04 (owner spec); the unlock line took its place.
+    expect(document.body.textContent).not.toMatch(/You chose this/);
+    expect(document.body.textContent).toContain(
+      "You can unlock a live checkout page in the app.",
+    );
   });
 
   it("a legacy chosen First Profit Pay shows the SAME fee and hold subhead (states agree)", async () => {
@@ -249,10 +265,13 @@ describe("Checkout Booth (simplified): only First Profit Pay, locked checkout", 
     await waitFor(() => expect(api?.stage).toBe("landing"));
     act(() => getApi().dispatch({ type: "SET_PROVIDER", providerId: "first_profit_pay", chosenAt: 1 }));
 
-    await waitFor(() => expect(document.body.textContent).toMatch(/You chose this/));
-    expect(document.body.textContent).toContain("5% of every sale. 90 day hold before transfer.");
+    await waitFor(() =>
+      expect(document.body.textContent).toContain("5% of every sale. 90 day hold before transfer."),
+    );
     // No subscription estimate for a no-subscription provider.
     expect(document.body.textContent).not.toMatch(/Subscription so far/);
+    // A chosen First Profit Pay shows the First Profit logo mark too.
+    expect(document.querySelector("svg[aria-label^='First Profit logo mark']")).toBeTruthy();
   });
 
   it("keeps the light 'subscription so far' estimate for a legacy subscription provider", async () => {
@@ -269,8 +288,7 @@ describe("Checkout Booth (simplified): only First Profit Pay, locked checkout", 
       const twoMonthsAgo = NOW - 2 * MS_PER_MONTH;
       act(() => getApi().dispatch({ type: "SET_PROVIDER", providerId: "shopify", chosenAt: twoMonthsAgo }));
 
-      await waitFor(() => expect(document.body.textContent).toMatch(/You chose this/));
-      expect(document.body.textContent).toMatch(/Subscription so far \(estimate\)/);
+      await waitFor(() => expect(document.body.textContent).toMatch(/Subscription so far \(estimate\)/));
       expect(document.body.textContent).toMatch(/about \$10 so far/);
     } finally {
       nowSpy.mockRestore();

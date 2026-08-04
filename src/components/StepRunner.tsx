@@ -311,7 +311,14 @@ export function StepRunner() {
         </header>
 
         {/* Task rail — one segment per REAL task (counts vary per criterion:
-            2.3 has six, 3.4 has four — always step.tasks.length) */}
+            2.3 has six, 3.4 has four — always step.tasks.length).
+            Every segment is a BUTTON as of 2026-08-04: tapping one jumps
+            straight to that task, so the rail is navigation and not just a
+            progress readout. Jumping only moves `runnerIndex` (the same
+            OPEN_RUNNER the Back/Next CTAs dispatch) — it never completes or
+            un-completes anything, so a kid can read ahead and come back
+            without touching their record. The current segment is
+            aria-current and inert (tapping it is a no-op). */}
         <div className="flex gap-1.5 border-b-2 border-[hsl(25_34%_20%/0.1)] px-5 py-3 sm:px-6">
           {step.tasks.map((raw, i) => {
             const done = isTaskDone(activeIdea, runnerStep, i);
@@ -322,16 +329,26 @@ export function StepRunner() {
               : i === idx
                 ? accent
                 : "hsl(25 34% 20% / .12)";
+            const title = taskTitleForBand(taskIdFor(runnerStep, i), band) ?? parseTask(raw).label;
             return (
-              <div key={i} className="min-w-0 flex-1">
-                <div className="h-1.5 rounded-full" style={{ background: color }} />
-                <p
-                  className="mt-1.5 text-[9.5px] leading-[1.3] text-[hsl(25_20%_38%)]"
+              <button
+                key={i}
+                type="button"
+                onClick={() => {
+                  if (i !== idx) dispatch({ type: "OPEN_RUNNER", stepId: runnerStep, index: i });
+                }}
+                aria-current={i === idx ? "step" : undefined}
+                aria-label={`Task ${i + 1} of ${total}: ${title}`}
+                className="min-w-0 flex-1 rounded-md text-left focus:outline-none focus-visible:ring-2 focus-visible:ring-sell/40"
+              >
+                <span className="block h-1.5 rounded-full" style={{ background: color }} />
+                <span
+                  className="mt-1.5 block text-[9.5px] leading-[1.3] text-[hsl(25_20%_38%)]"
                   style={{ fontWeight: i === idx ? 700 : 400 }}
                 >
-                  {taskTitleForBand(taskIdFor(runnerStep, i), band) ?? parseTask(raw).label}
-                </p>
-              </div>
+                  {title}
+                </span>
+              </button>
             );
           })}
         </div>
@@ -430,15 +447,18 @@ export function StepRunner() {
             <p className="mt-0.5 break-words text-[13.5px] leading-[1.55] text-[hsl(25_34%_20%)]">{taskDoneWhen}</p>
           </div>
 
-          {/* Actions (Change #8): a compact bottom-right row. "More tools
-              please" opens the separate Improve First Profit modal; the green
-              CTA keeps the exact done/advance/complete semantics it always had,
-              just smaller and right-aligned. Closing is the header ✕ only. */}
+          {/* Actions row (Change #8), rebalanced 2026-08-04 for beta testing:
+              "More tools please" sits at the BOTTOM LEFT in the First Profit
+              logo blue (the `build` token) with white text, so the route for
+              telling us what is missing is impossible to miss; `mr-auto`
+              pushes it left while the green CTA stays right. The CTA keeps the
+              exact done/advance/complete semantics it always had. Closing is
+              the header ✕ only. */}
           <div className="mt-6 flex flex-wrap items-center justify-end gap-3">
             <button
               type="button"
               onClick={() => setMoreToolsOpen(true)}
-              className="inline-flex min-h-[44px] items-center justify-center rounded-xl border-2 border-[hsl(25_34%_20%/0.2)] px-4 font-display text-sm font-bold text-[hsl(25_34%_20%)] hover:border-[hsl(25_34%_20%/0.5)]"
+              className="mr-auto inline-flex min-h-[44px] items-center justify-center rounded-xl bg-build px-4 font-display text-sm font-bold text-white shadow-[0_3px_0_hsl(217_74%_36%)] transition active:translate-y-px active:shadow-[0_1px_0_hsl(217_74%_36%)] focus:outline-none focus-visible:ring-4 focus-visible:ring-build/40"
             >
               More tools please
             </button>

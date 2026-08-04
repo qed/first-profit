@@ -36,7 +36,7 @@ import { Pencil } from "lucide-react";
 import { useGame } from "../state/GameContext";
 import { TOMBSTONE_CAP } from "../state/gameCore";
 import { isPublicSiteEnabled } from "../config";
-import { firstIncompleteTaskIndex, ideaOneLiner, ideaProgressLabel, ideaSummaryName, NAMING_STEP_ID, nextCoachTarget, roomEntryFor } from "../state/floorSelectors";
+import { ideaProgressLabel, ideaSummaryName, NAMING_STEP_ID, nextCoachTarget, roomEntryFor } from "../state/floorSelectors";
 import { stepById, type RoomId } from "../data/path";
 import { FIELD_HOOKS } from "../data/pathHooks";
 import { SITE_ONE_LINER_MAX_CHARS } from "../lib/siteCopy";
@@ -52,34 +52,17 @@ import { CheckoutBooth } from "../components/rooms/CheckoutBooth";
 import { SalesRoom } from "../components/rooms/SalesRoom";
 import { IdeaRoom } from "../components/rooms/IdeaRoom";
 
-/** Room-id → dialog chrome (sign / name / tagline) + body. Only these four fpv2
- *  rooms have real surfaces in Slice A; any other RoomId is inert (no dialog). */
-const ROOM_META: Partial<Record<RoomId, { sign: string; name: string; tagline: string; Body: () => React.JSX.Element }>> = {
+/** Room-id → dialog chrome (sign / name / optional tagline) + body. Only these
+ *  four fpv2 rooms have real surfaces in Slice A; any other RoomId is inert (no
+ *  dialog). `tagline` is OPTIONAL: a room whose body already states its one
+ *  message omits it rather than repeating itself in the header (the Checkout
+ *  Booth, whose body carries the unlock line). Absent -> no <p> at all. */
+const ROOM_META: Partial<Record<RoomId, { sign: string; name: string; tagline?: string; Body: () => React.JSX.Element }>> = {
   website: { sign: "🌐", name: "Your Site", tagline: "Your real page on the internet.", Body: YourSite },
-  checkout: { sign: "💳", name: "The Checkout Booth", tagline: "Your checkout page opens when you have a product and a price.", Body: CheckoutBooth },
+  checkout: { sign: "💳", name: "The Checkout Booth", Body: CheckoutBooth },
   market: { sign: "🛒", name: "The Sales Room", tagline: "Strangers, asks, yeses and nos.", Body: SalesRoom },
   idea: { sign: "💡", name: "The Idea Room", tagline: "Pick one thing to sell. Say it in a sentence.", Body: IdeaRoom },
 };
-
-function Modal({ children, onClose, label }: { children: React.ReactNode; onClose?: () => void; label: string }) {
-  return (
-    <div
-      className="fixed inset-0 z-[55] flex items-center justify-center bg-[hsl(25_34%_20%/0.55)] p-4"
-      role="dialog"
-      aria-modal="true"
-      aria-label={label}
-      onClick={onClose}
-    >
-      <div
-        className="fp-rise w-full max-w-[560px] overflow-hidden rounded-[24px] border-2 border-[hsl(25_34%_20%/0.15)] bg-[hsl(40_55%_97%)] shadow-[0_8px_0_rgba(120,80,40,.1)]"
-        style={{ animation: "fp-rise .3s cubic-bezier(.22,1,.36,1) both" }}
-        onClick={(e) => e.stopPropagation()}
-      >
-        {children}
-      </div>
-    </div>
-  );
-}
 
 /**
  * The room dialog (handoff §Rooms): Your Site / Checkout Booth / Sales Room / Idea
@@ -134,7 +117,7 @@ function RoomDialog() {
             </span>
             <div className="min-w-0">
               <h2 className="truncate font-display text-[19px] font-black text-[hsl(25_34%_20%)]">{name}</h2>
-              <p className="truncate text-xs text-[hsl(25_20%_38%)]">{tagline}</p>
+              {tagline ? <p className="truncate text-xs text-[hsl(25_20%_38%)]">{tagline}</p> : null}
             </div>
           </div>
           <button
@@ -151,49 +134,6 @@ function RoomDialog() {
         </div>
       </div>
     </div>
-  );
-}
-
-/** "Which idea?" picker (handoff Multi-idea model). Small but fully functional. */
-function PickerDialog() {
-  const game = useGame();
-  const { pickFor, ideasEligibleFor, dispatch } = game;
-  if (!pickFor) return null;
-  const eligible = ideasEligibleFor(pickFor);
-  const close = () => dispatch({ type: "SET_PICK_FOR", pickFor: null });
-  const choose = (ideaIndex: number) => {
-    dispatch({ type: "SET_ACTIVE_IDEA", ideaIndex });
-    dispatch({ type: "OPEN_RUNNER", stepId: pickFor, index: firstIncompleteTaskIndex(game, ideaIndex, pickFor) ?? 0 });
-    close();
-  };
-  return (
-    <Modal label="Which idea?" onClose={close}>
-      <div className="px-6 py-7">
-        <h2 className="font-display text-xl font-black text-[hsl(25_34%_20%)]">Which idea?</h2>
-        <p className="mt-1 text-[13px] text-[hsl(25_20%_38%)]">Pick the product you are working on for {pickFor}.</p>
-        <div className="mt-4 flex flex-col gap-2">
-          {eligible.map((n) => {
-            // Product name first and foremost (ideaSummaryName prefers it); the
-            // one-liner drops to a secondary line when a name exists.
-            const name = ideaSummaryName(game, n);
-            const oneLiner = ideaOneLiner(game, n);
-            const showLiner = oneLiner.length > 0 && oneLiner !== name;
-            return (
-              <button
-                key={n}
-                type="button"
-                onClick={() => choose(n)}
-                className="flex min-h-[48px] flex-col rounded-2xl border-2 border-[hsl(25_34%_20%/0.15)] bg-white px-4 py-3 text-left hover:border-sell"
-              >
-                <span className="font-mono text-[11px] font-bold text-[hsl(14_78%_44%)]">Idea #{n + 1}</span>
-                <span className="text-[13px] font-bold text-[hsl(25_34%_20%)]">{name}</span>
-                {showLiner && <span className="text-[12px] text-[hsl(25_20%_38%)]">{oneLiner}</span>}
-              </button>
-            );
-          })}
-        </div>
-      </div>
-    </Modal>
   );
 }
 
@@ -236,7 +176,7 @@ export function NextStepCoach({
   useEffect(() => {
     if (roomOpen === "website") setSiteHintUsed(true);
   }, [roomOpen]);
-  if (overlayOpen || game.runnerOpen || game.room || game.celebrate || game.pickFor) return null;
+  if (overlayOpen || game.runnerOpen || game.room || game.celebrate) return null;
 
   // "none" → invite the claim; "claimed" → the go-live never landed (a parked
   // completion flush, Unit 7 review P2: without a nudge back to the room —
@@ -286,15 +226,16 @@ export function NextStepCoach({
 /** The coach's docked green button chrome, shared by the normal next-step
  *  target and the Unit 6 one-shot claim hint (identical markup either way).
  *  Positioning note (Change #9): the button no longer carries its own absolute
- *  dock — Factory owns ONE bottom-right dock (see CoachDock) that stacks the
- *  blue Improve First Profit CTA above this green button, so the pair can
- *  never overlap and both stay tappable at every viewport. */
+ *  dock — Factory owns ONE bottom dock that puts the blue Improve First Profit
+ *  CTA at the lower-left and this green button at the lower-right (the ml-auto
+ *  here pins it right even when the dock row wraps on narrow viewports), so
+ *  the pair can never overlap and both stay tappable at every viewport. */
 function CoachButton({ label, onClick }: { label: string; onClick: () => void }) {
   return (
     <button
       type="button"
       onClick={onClick}
-      className="pointer-events-auto flex min-h-[52px] items-center gap-3 rounded-2xl bg-verified px-5 py-3 text-left text-white shadow-[0_6px_0_hsl(150_52%_26%)] transition hover:-translate-y-0.5 active:translate-y-0.5 active:shadow-[0_3px_0_hsl(150_52%_26%)] focus:outline-none focus-visible:ring-4 focus-visible:ring-verified/40"
+      className="pointer-events-auto ml-auto flex min-h-[52px] items-center gap-3 rounded-2xl bg-verified px-5 py-3 text-left text-white shadow-[0_6px_0_hsl(150_52%_26%)] transition hover:-translate-y-0.5 active:translate-y-0.5 active:shadow-[0_3px_0_hsl(150_52%_26%)] focus:outline-none focus-visible:ring-4 focus-visible:ring-verified/40"
     >
       <span>
         <span className="block font-display text-lg font-black leading-none">Next Step</span>
@@ -313,9 +254,10 @@ function CoachButton({ label, onClick }: { label: string; onClick: () => void })
  * The compact blue "Improve First Profit" CTA (Change #9): the secondary,
  * always-available suggestion entry point on EVERY floor view (phases overview
  * and each criterion floor, mobile and desktop). Rendered inside Factory's
- * shared bottom-right dock directly ABOVE the green coach; hidden while any
- * overlay is open, exactly like the coach. Blue = the house `build` token
- * (hsl(217 74% 56%)), white text, >= 44px target.
+ * shared bottom dock at the lower-LEFT corner, opposite the green coach, with
+ * the coach's exact button chrome (52px, rounded-2xl, hard 6px shadow) so the
+ * pair read as equals; hidden while any overlay is open, exactly like the
+ * coach. Blue = the house `build` token (hsl(217 74% 56%)), white text.
  */
 function ImproveFpCta({ onOpen }: { onOpen: () => void }) {
   return (
@@ -323,71 +265,10 @@ function ImproveFpCta({ onOpen }: { onOpen: () => void }) {
       type="button"
       data-testid="fp-improve-cta"
       onClick={onOpen}
-      className="pointer-events-auto inline-flex min-h-[44px] items-center rounded-xl bg-build px-4 font-display text-sm font-bold text-white shadow-[0_4px_0_hsl(217_74%_36%)] transition hover:-translate-y-0.5 active:translate-y-0.5 active:shadow-[0_2px_0_hsl(217_74%_36%)] focus:outline-none focus-visible:ring-4 focus-visible:ring-build/40"
+      className="pointer-events-auto flex min-h-[52px] items-center rounded-2xl bg-build px-5 py-3 font-display text-lg font-black text-white shadow-[0_6px_0_hsl(217_74%_36%)] transition hover:-translate-y-0.5 active:translate-y-0.5 active:shadow-[0_3px_0_hsl(217_74%_36%)] focus:outline-none focus-visible:ring-4 focus-visible:ring-build/40"
     >
       Improve First Profit
     </button>
-  );
-}
-
-/**
- * The idea-switcher dialog (Unit 8; origin IA decision): the Path shows the
- * ACTIVE idea, and this dialog is the one-tap route to any other. It reuses
- * the existing picker pattern (Modal + idea rows) but lists EVERY idea — a
- * switch is SET_ACTIVE_IDEA only; entry into a criterion stays with the
- * floor cards/coach, which now target any built phase for the newly active
- * idea. Exported for the component test suite; only Factory mounts it.
- */
-export function SwitcherDialog({
-  open,
-  onClose,
-  onSwitched,
-}: {
-  open: boolean;
-  onClose: () => void;
-  /** Fired on an explicit idea choice (unit review FIX 1c): Factory cancels
-   *  any in-flight walk here — the kid's switch wins over a pending arrival. */
-  onSwitched?: () => void;
-}) {
-  const game = useGame();
-  const { ideas, activeIdea, dispatch } = game;
-  if (!open) return null;
-  const choose = (ideaIndex: number) => {
-    onSwitched?.();
-    dispatch({ type: "SET_ACTIVE_IDEA", ideaIndex });
-    onClose();
-  };
-  return (
-    <Modal label="Switch idea" onClose={onClose}>
-      <div className="px-6 py-7">
-        <h2 className="font-display text-xl font-black text-[hsl(25_34%_20%)]">Switch idea</h2>
-        <p className="mt-1 text-[13px] text-[hsl(25_20%_38%)]">
-          The Path shows one idea at a time. Which one are you working on?
-        </p>
-        <div className="mt-4 flex flex-col gap-2">
-          {ideas.map((_, n) => (
-            <button
-              key={n}
-              type="button"
-              onClick={() => choose(n)}
-              className="flex min-h-[48px] flex-col rounded-2xl border-2 bg-white px-4 py-3 text-left hover:border-sell"
-              style={{ borderColor: n === activeIdea ? "hsl(14 78% 54%)" : "hsl(25 34% 20% / .15)" }}
-            >
-              <span className="flex items-center gap-2">
-                <span className="font-mono text-[11px] font-bold text-[hsl(14_78%_44%)]">Idea #{n + 1}</span>
-                {n === activeIdea ? (
-                  <span className="rounded-full bg-[hsl(14_78%_54%/0.12)] px-2 py-0.5 font-mono text-[8.5px] font-bold uppercase tracking-[0.06em] text-[hsl(14_78%_44%)]">
-                    current
-                  </span>
-                ) : null}
-              </span>
-              <span className="text-[13px] text-[hsl(25_34%_20%)]">{ideaSummaryName(game, n)}</span>
-              <span className="font-mono text-[9px] text-[hsl(25_20%_38%)]">{ideaProgressLabel(game, n)}</span>
-            </button>
-          ))}
-        </div>
-      </div>
-    </Modal>
   );
 }
 
@@ -763,15 +644,15 @@ export function IdeaSummaryDialog({
 }
 
 export function Factory({
-  switcherOpen: controlledSwitcherOpen,
-  onSwitcherOpenChange,
+  switchSignal,
 }: {
-  /** When provided (App threads these), the SwitcherDialog is CONTROLLED by
-   *  App-level state — the GlobalNav's idea chip is the opener, and the
-   *  open-state lives above the stage render. When absent (test mounts), the
-   *  internal useState below keeps the dialog fully self-contained. */
-  switcherOpen?: boolean;
-  onSwitcherOpenChange?: (open: boolean) => void;
+  /** Bumped by App every time the kid switches ideas from the GlobalNav's
+   *  dropdown (the switcher stopped being a Factory-owned modal on
+   *  2026-08-04). Factory watches it purely to CANCEL AN IN-FLIGHT WALK: a
+   *  switch must win over a pending arrival, which is what the old dialog's
+   *  `onSwitched` callback did while it still lived here. Absent in test
+   *  mounts that never switch. */
+  switchSignal?: number;
 } = {}) {
   const game = useGame();
   const { dispatch } = game;
@@ -803,9 +684,6 @@ export function Factory({
   // The "Improve First Profit" suggestion modal (Change #9): pure UI
   // open-state, same placement rule as promoteOpen (survives the lg swap).
   const [improveOpen, setImproveOpen] = useState(false);
-  const [internalSwitcherOpen, setInternalSwitcherOpen] = useState(false);
-  const switcherOpen = controlledSwitcherOpen ?? internalSwitcherOpen;
-  const setSwitcherOpen = onSwitcherOpenChange ?? setInternalSwitcherOpen;
 
   // Race-proof arrival (unit review FIX 1a): the floor variants fire their
   // arrival timer ~550ms after the tap, during which the game state may have
@@ -825,12 +703,15 @@ export function Factory({
           dispatch({ type: "OPEN_ROOM", room: intent.room });
           break;
         case "enterCriterion": {
+          // No "which idea?" prompt any more (2026-08-04): roomEntryFor
+          // resolves to the nav's active idea whenever it is eligible, so a
+          // room tap goes straight in. SET_ACTIVE_IDEA still fires because the
+          // fallback case (active idea not eligible here) moves the nav chip
+          // to whatever the room actually opened.
           const entry = roomEntryFor(game, intent.stepId);
           if (entry.action === "enter") {
             dispatch({ type: "SET_ACTIVE_IDEA", ideaIndex: entry.ideaIndex });
             dispatch({ type: "OPEN_RUNNER", stepId: intent.stepId, index: entry.index });
-          } else if (entry.action === "pick") {
-            dispatch({ type: "SET_PICK_FOR", pickFor: intent.stepId });
           }
           // "noop" → nothing (no eligible idea)
           break;
@@ -862,17 +743,29 @@ export function Factory({
   // the intent never fires.
   const cancelWalk = useCallback(() => setWalkTo(null), []);
 
+  // A switch from the nav dropdown cancels a pending arrival (FIX 1c, kept
+  // across the modal → dropdown move). Keyed on the App-owned counter rather
+  // than on activeIdea itself: only an EXPLICIT switch should kill a walk, and
+  // activeIdea also moves for reasons that must not (a fresh idea's create
+  // flow, a cross-tab union). The initial mount value is skipped, so simply
+  // rendering Factory never clears a walk.
+  const lastSwitchSignal = useRef(switchSignal);
+  useEffect(() => {
+    if (switchSignal === lastSwitchSignal.current) return;
+    lastSwitchSignal.current = switchSignal;
+    cancelWalk();
+  }, [switchSignal, cancelWalk]);
+
   // One lifted overlay truth (unit review FIX 5): the reducer-owned overlays
   // (runner / room / celebration / picker) plus the two Factory-owned ones.
   // Every overlay here is a modal takeover (full-screen below sm, floating
   // aria-modal dialog from sm up), so while ANY is open the floor container
   // goes `inert` and the floating helpers hide.
   const anyOverlayOpen =
-    Boolean(game.runnerOpen || game.room || game.celebrate || game.pickFor) ||
+    Boolean(game.runnerOpen || game.room || game.celebrate) ||
     promoteOpen ||
     ideaSummary !== null ||
-    improveOpen ||
-    switcherOpen;
+    improveOpen;
   // React 18's types don't know the `inert` attribute yet; apply it through a
   // spread so the DOM gets the real attribute without a ts-expect-error.
   const inertProps = (anyOverlayOpen ? { inert: "" } : {}) as React.HTMLAttributes<HTMLDivElement>;
@@ -892,13 +785,14 @@ export function Factory({
             setFloorView("phases");
           }}
         />
-        {/* The ONE bottom-right dock (Change #9): the former CoachButton dock
-            classes, now flex-col so the blue Improve CTA stacks above the green
-            coach with a small gap — both visible, both tappable, never
-            overlapping, on every floor view (this mounts above the floorView
-            switch AND the lg breakpoint conditional). Both hide while any
-            overlay is open, same rule as before. */}
-        <div className="pointer-events-none absolute inset-x-0 bottom-7 z-40 flex flex-col items-end gap-2 px-4 lg:bottom-11 lg:px-6">
+        {/* The ONE bottom dock (Change #9): blue Improve CTA at the lower-left
+            corner, green coach at the lower-right (CoachButton's ml-auto),
+            both bottom-aligned. flex-wrap keeps them tappable and never
+            overlapping on narrow viewports: when both cannot fit on one row
+            the blue CTA wraps onto its own row above the coach. Mounts above
+            the floorView switch AND the lg breakpoint conditional. Both hide
+            while any overlay is open, same rule as before. */}
+        <div className="pointer-events-none absolute inset-x-0 bottom-7 z-40 flex flex-wrap items-end justify-between gap-2 px-4 lg:bottom-11 lg:px-6">
           {!anyOverlayOpen ? <ImproveFpCta onOpen={() => setImproveOpen(true)} /> : null}
           <NextStepCoach onWalk={setWalkTo} overlayOpen={anyOverlayOpen} />
         </div>
@@ -910,13 +804,7 @@ export function Factory({
       <StepRunner />
       <Celebration />
       <RoomDialog />
-      <PickerDialog />
       <PromoteBusiness open={promoteOpen} onClose={() => setPromoteOpen(false)} />
-      <SwitcherDialog
-        open={switcherOpen}
-        onClose={() => setSwitcherOpen(false)}
-        onSwitched={cancelWalk}
-      />
       {improveOpen ? <ImproveAppModal onClose={() => setImproveOpen(false)} /> : null}
       {ideaSummaryIndex >= 0 ? (
         // Keyed per idea ID so the local drafts reset when a different slot
