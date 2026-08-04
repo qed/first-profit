@@ -54,7 +54,9 @@ describe("PhasesFloor — real phase cards (Unit 8)", () => {
     const { walks } = mount(withIdeas(2));
     const card = screen.getByRole("button", { name: /Open Idea #2/i });
     fireEvent.click(card);
-    expect(walks).toEqual([{ kind: "openIdea", ideaIndex: 1 }]);
+    // Identity, not index (Change #7 review P1): the intent carries the
+    // idea's stable ID so an in-flight walk survives a cross-tab reindex.
+    expect(walks).toEqual([{ kind: "openIdea", ideaId: "idea-1" }]);
   });
 
   it("empty Products slots stay inert (no button, no intent)", () => {

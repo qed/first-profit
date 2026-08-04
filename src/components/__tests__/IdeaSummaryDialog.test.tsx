@@ -22,8 +22,8 @@ vi.mock("../../state/GameContext", async () => {
 import * as GameContext from "../../state/GameContext";
 import { Factory, IdeaSummaryDialog, IDEA_NAME_MAX_CHARS } from "../../screens/Factory";
 import { SITE_ONE_LINER_MAX_CHARS } from "../../lib/siteCopy";
-import { reducer, type Action, type GameState } from "../../state/gameCore";
-import { FloorHarness, apply, completeStep, withIdeas } from "../../testSupport/floorHarness";
+import { TOMBSTONE_CAP, reducer, toSaveDoc, type Action, type GameState } from "../../state/gameCore";
+import { FloorHarness, apply, completeStep, validatedIdea, withIdeas } from "../../testSupport/floorHarness";
 
 const Ctx = (GameContext as unknown as { __ctx: React.Context<unknown> }).__ctx;
 
@@ -35,11 +35,14 @@ function Harness({
   seed,
   onAction,
   flushNow,
+  deleteIdea,
   children,
 }: {
   seed: GameState;
   onAction?: (a: Action) => void;
   flushNow?: () => Promise<string>;
+  /** Override the bound deleteIdea (e.g. a forced-refusal probe). */
+  deleteIdea?: (ideaId: string) => boolean;
   children: React.ReactNode;
 }) {
   const [state, rawDispatch] = React.useReducer(reducer, seed);
@@ -47,7 +50,20 @@ function Harness({
     onAction?.(action);
     rawDispatch(action);
   };
-  const value = { ...state, dispatch, flushNow };
+  // Bound deleteIdea mirrors GameContext's caller boundary (Change #7):
+  // honest refusal boolean (any-business + cap-full), dispatch + one flush on
+  // success.
+  const boundDelete = (ideaId: string): boolean => {
+    if (!state.ideas.some((i) => i.id === ideaId)) return false;
+    if (state.businesses?.some((b) => b.ideaId === ideaId)) return false;
+    if (state.deletedIdeaIds.length >= TOMBSTONE_CAP && !state.deletedIdeaIds.includes(ideaId)) {
+      return false;
+    }
+    dispatch({ type: "DELETE_IDEA", ideaId });
+    void flushNow?.();
+    return true;
+  };
+  const value = { ...state, dispatch, flushNow, deleteIdea: deleteIdea ?? boundDelete };
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }
 
@@ -60,12 +76,21 @@ function twoIdeaSeed(): GameState {
   );
 }
 
-function mountDialog(seed = twoIdeaSeed(), ideaIndex = 0) {
+function mountDialog(
+  seed = twoIdeaSeed(),
+  ideaIndex = 0,
+  opts: { deleteIdea?: (ideaId: string) => boolean } = {},
+) {
   const actions: Action[] = [];
   const closes: number[] = [];
   const flushNow = vi.fn().mockResolvedValue("landed");
   const utils = render(
-    <Harness seed={seed} onAction={(a) => actions.push(a)} flushNow={flushNow}>
+    <Harness
+      seed={seed}
+      onAction={(a) => actions.push(a)}
+      flushNow={flushNow}
+      deleteIdea={opts.deleteIdea}
+    >
       <IdeaSummaryDialog ideaIndex={ideaIndex} onClose={() => closes.push(1)} />
     </Harness>,
   );
@@ -252,6 +277,191 @@ describe("IdeaSummaryDialog — close discards drafts (X and Escape alike)", () 
   });
 });
 
+describe("IdeaSummaryDialog — delete this idea (Change #7)", () => {
+  /** Two ideas with a first name on the profile (the type-to-confirm gate). */
+  function namedFamilySeed(): GameState {
+    return apply(twoIdeaSeed(), {
+      type: "SET_PROFILE",
+      patch: { firstName: "Cedric" },
+    });
+  }
+
+  const deleteTrigger = () => screen.queryByText("Delete this idea")?.closest("button") ?? null;
+  const deleteButton = () => screen.queryByText("Delete")?.closest("button") ?? null;
+  const confirmInput = () =>
+    screen.queryByLabelText(/Type your first name to delete\.|Type DELETE to delete\./) as
+      | HTMLInputElement
+      | null;
+  const startTypeStep = () => {
+    fireEvent.click(deleteTrigger()!);
+    fireEvent.click(screen.getByText("Continue"));
+  };
+
+  it("shows a quiet red trigger (44px+) in read mode; nothing dispatches until confirmed", () => {
+    const { actions } = mountDialog(namedFamilySeed(), 0);
+    const trigger = deleteTrigger()!;
+    expect(trigger.className).toContain("min-h-[44px]");
+    expect(trigger.className).toContain("hsl(4_72%_42%)"); // red text button
+    expect(actions).toEqual([]);
+  });
+
+  it("is HIDDEN for the active business's promoted idea (and refusal-guarded beneath)", () => {
+    let seed = validatedIdea(namedFamilySeed(), 0);
+    seed = apply(seed, {
+      type: "PROMOTE_IDEA",
+      ideaId: seed.ideas[0].id!,
+      businessId: "biz-1",
+      at: 100,
+    });
+    mountDialog(seed, 0);
+    expect(deleteTrigger()).toBeNull();
+  });
+
+  it("stays HIDDEN for an ARCHIVED business's idea (any business record protects it)", () => {
+    let seed = validatedIdea(namedFamilySeed(), 0);
+    seed = apply(
+      seed,
+      { type: "PROMOTE_IDEA", ideaId: seed.ideas[0].id!, businessId: "biz-1", at: 100 },
+      { type: "ARCHIVE_BUSINESS", businessId: "biz-1", at: 200 },
+    );
+    mountDialog(seed, 0);
+    expect(deleteTrigger()).toBeNull();
+  });
+
+  it("stays OFFERED for a non-promoted idea while a business is active", () => {
+    let seed = validatedIdea(namedFamilySeed(), 0);
+    seed = apply(seed, {
+      type: "PROMOTE_IDEA",
+      ideaId: seed.ideas[0].id!,
+      businessId: "biz-1",
+      at: 100,
+    });
+    mountDialog(seed, 1); // idea #2 is not the business
+    expect(deleteTrigger()).toBeTruthy();
+  });
+
+  it("is HIDDEN for an id-less legacy idea (nothing to tombstone this session)", () => {
+    const seed = apply(
+      { ...namedFamilySeed(), ideas: [], activeIdea: 0 },
+      { type: "CREATE_IDEA" }, // no ideaId: legacy in-memory shape
+      { type: "CLOSE_RUNNER" },
+    );
+    mountDialog(seed, 0);
+    expect(deleteTrigger()).toBeNull();
+  });
+
+  it("STEP 1: the trigger opens an inline confirm with the idea's name and Cancel/Continue", () => {
+    mountDialog(namedFamilySeed(), 0);
+    fireEvent.click(deleteTrigger()!);
+    expect(
+      screen.getByText(/Delete Slime Kits\? Everything about this idea goes away forever\. This cannot be undone\./),
+    ).toBeTruthy();
+    expect(screen.getByText("Cancel")).toBeTruthy();
+    expect(screen.getByText("Continue")).toBeTruthy();
+    expect(confirmInput()).toBeNull(); // no input yet
+  });
+
+  it("STEP 1 Cancel returns to the quiet trigger without dispatching", () => {
+    const { actions } = mountDialog(namedFamilySeed(), 0);
+    fireEvent.click(deleteTrigger()!);
+    fireEvent.click(screen.getByText("Cancel"));
+    expect(deleteTrigger()).toBeTruthy();
+    expect(screen.queryByText("Continue")).toBeNull();
+    expect(actions).toEqual([]);
+  });
+
+  it("STEP 2: type-to-confirm gates the red Delete button on the first name, case-insensitive + trimmed", () => {
+    const { actions, flushNow } = mountDialog(namedFamilySeed(), 0);
+    startTypeStep();
+    const del = deleteButton()!;
+    expect(del.className).toContain("min-h-[44px]");
+    expect((del as HTMLButtonElement).disabled).toBe(true);
+    // Wrong name keeps it disabled.
+    fireEvent.change(confirmInput()!, { target: { value: "Bob" } });
+    expect((deleteButton() as HTMLButtonElement).disabled).toBe(true);
+    // A disabled click cannot dispatch.
+    fireEvent.click(deleteButton()!);
+    expect(actions).toEqual([]);
+    expect(flushNow).not.toHaveBeenCalled();
+    // Case-insensitive + trimmed match enables it.
+    fireEvent.change(confirmInput()!, { target: { value: "  cedric " } });
+    expect((deleteButton() as HTMLButtonElement).disabled).toBe(false);
+  });
+
+  it("falls back to requiring the word DELETE when the profile has no first name", () => {
+    mountDialog(twoIdeaSeed(), 0); // firstName is "" in the base seed
+    startTypeStep();
+    expect(screen.getByLabelText("Type DELETE to delete.")).toBeTruthy();
+    expect((deleteButton() as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.change(confirmInput()!, { target: { value: "delete" } });
+    expect((deleteButton() as HTMLButtonElement).disabled).toBe(false);
+  });
+
+  it("STEP 2 Cancel backs all the way out; reopening starts fresh (no sticky typed text)", () => {
+    const { actions } = mountDialog(namedFamilySeed(), 0);
+    startTypeStep();
+    fireEvent.change(confirmInput()!, { target: { value: "Cedric" } });
+    fireEvent.click(screen.getByText("Cancel"));
+    expect(deleteTrigger()).toBeTruthy();
+    startTypeStep();
+    expect(confirmInput()!.value).toBe(""); // reset, not remembered
+    expect((deleteButton() as HTMLButtonElement).disabled).toBe(true);
+    expect(actions).toEqual([]);
+  });
+
+  it("Escape cancels the flow (closes the dialog, nothing dispatched)", () => {
+    const { actions, closes, flushNow } = mountDialog(namedFamilySeed(), 0);
+    startTypeStep();
+    fireEvent.change(confirmInput()!, { target: { value: "Cedric" } });
+    fireEvent.keyDown(window, { key: "Escape" });
+    expect(closes).toEqual([1]);
+    expect(actions).toEqual([]);
+    expect(flushNow).not.toHaveBeenCalled();
+  });
+
+  it("confirmed delete dispatches DELETE_IDEA exactly once, flushes once, and closes", () => {
+    const { actions, closes, flushNow } = mountDialog(namedFamilySeed(), 0);
+    startTypeStep();
+    fireEvent.change(confirmInput()!, { target: { value: "cedric" } });
+    fireEvent.click(deleteButton()!);
+    expect(actions).toEqual([{ type: "DELETE_IDEA", ideaId: "idea-0" }]);
+    expect(flushNow).toHaveBeenCalledTimes(1);
+    expect(closes).toEqual([1]);
+  });
+
+  it("a REFUSAL (idea became a business's mid-flow) shows the kid-friendly note and does NOT close", () => {
+    const refused = vi.fn().mockReturnValue(false);
+    const { closes } = mountDialog(namedFamilySeed(), 0, { deleteIdea: refused });
+    startTypeStep();
+    fireEvent.change(confirmInput()!, { target: { value: "Cedric" } });
+    fireEvent.click(deleteButton()!);
+    expect(refused).toHaveBeenCalledWith("idea-0");
+    expect(
+      screen.getByText("This idea belongs to a business, so it cannot be deleted."),
+    ).toBeTruthy();
+    expect(closes).toEqual([]);
+  });
+
+  it("a CAP-FULL refusal shows the removed-a-lot note and does NOT close (no false success)", () => {
+    const seed: GameState = {
+      ...namedFamilySeed(),
+      deletedIdeaIds: Array.from({ length: TOMBSTONE_CAP }, (_, i) => `old-${i}`),
+    };
+    const { actions, closes, flushNow } = mountDialog(seed, 0);
+    startTypeStep();
+    fireEvent.change(confirmInput()!, { target: { value: "Cedric" } });
+    fireEvent.click(deleteButton()!);
+    // The bound deleteIdea refused (cap full, id not tombstoned): nothing
+    // dispatched, nothing flushed, dialog open with the honest cap note.
+    expect(actions).toEqual([]);
+    expect(flushNow).not.toHaveBeenCalled();
+    expect(closes).toEqual([]);
+    expect(
+      screen.getByText("You have removed a lot of ideas. This one cannot be deleted right now."),
+    ).toBeTruthy();
+  });
+});
+
 describe("Factory — Your Ideas slots route to the summary dialog (rule 2)", () => {
   beforeEach(() => {
     vi.useFakeTimers();
@@ -276,11 +486,21 @@ describe("Factory — Your Ideas slots route to the summary dialog (rule 2)", ()
     vi.useRealTimers();
   });
 
+  // Captures the harness's live dispatch so a test can inject engine-side
+  // actions (UNION_REMOTE) exactly as GameContext's onRebasedDoc wiring does.
+  let latestDispatch: ((a: Action) => void) | null = null;
+  function DispatchProbe() {
+    const g = React.useContext(Ctx) as { dispatch: (a: Action) => void };
+    latestDispatch = g.dispatch;
+    return null;
+  }
+
   function mountFactory(seed: GameState) {
     const actions: Action[] = [];
     const utils = render(
       <FloorHarness seed={seed} Ctx={Ctx} onAction={(a) => actions.push(a)}>
         <Factory />
+        <DispatchProbe />
       </FloorHarness>,
     );
     return { actions, ...utils };
@@ -318,6 +538,56 @@ describe("Factory — Your Ideas slots route to the summary dialog (rule 2)", ()
     arrive();
     expect(actions.some((a) => a.type === "CREATE_IDEA")).toBe(true);
     expect(screen.queryByLabelText("Edit name")).toBeNull();
+  });
+
+  it("a union-driven reindex under the OPEN dialog keeps the SAME idea (identity, not index)", () => {
+    const seed = apply(withIdeas(2), {
+      type: "SET_FIELD",
+      ideaIndex: 1,
+      key: "productName",
+      value: "Keeper",
+    });
+    mountFactory(seed);
+    openSellFloor();
+    fireEvent.click(screen.getByText("Idea #2").closest("button")!);
+    arrive();
+    expect(screen.getByTestId("fp-idea-name-bubble").textContent).toBe("Keeper");
+    // Another tab deleted idea-0; its rebased doc feeds back MID-DIALOG and
+    // reindexes the ideas array (idea-1 shifts to index 0).
+    const remoteDoc = toSaveDoc(reducer(seed, { type: "DELETE_IDEA", ideaId: "idea-0" }));
+    act(() => latestDispatch!({ type: "UNION_REMOTE", doc: remoteDoc }));
+    // The dialog still shows the SAME idea (by id) — never a silent swap.
+    expect(screen.getByTestId("fp-idea-name-bubble").textContent).toBe("Keeper");
+    expect(screen.getByLabelText("Idea #1")).toBeTruthy(); // its resolved index is 0 now
+  });
+
+  it("the dialog CLOSES itself when ITS idea is deleted remotely", () => {
+    const seed = withIdeas(2);
+    mountFactory(seed);
+    openSellFloor();
+    fireEvent.click(screen.getByText("Idea #1").closest("button")!);
+    arrive();
+    expect(screen.getByLabelText("Idea #1")).toBeTruthy(); // the dialog
+    const remoteDoc = toSaveDoc(reducer(seed, { type: "DELETE_IDEA", ideaId: "idea-0" }));
+    act(() => latestDispatch!({ type: "UNION_REMOTE", doc: remoteDoc }));
+    // Not showing/editing a DIFFERENT idea: the dialog is gone entirely (and
+    // the stale open-state cleared, so the floor is interactive again).
+    expect(screen.queryByLabelText("Edit name")).toBeNull();
+    expect(screen.queryByLabelText("Back to the floor")).toBeNull();
+  });
+
+  it("an openIdea walk arriving AFTER a remote deletion no-ops (stale in-flight intent)", () => {
+    const seed = withIdeas(2);
+    mountFactory(seed);
+    openSellFloor();
+    fireEvent.click(screen.getByText("Idea #1").closest("button")!); // walk starts (~550ms)
+    // The deletion lands while the avatar is still walking.
+    const remoteDoc = toSaveDoc(reducer(seed, { type: "DELETE_IDEA", ideaId: "idea-0" }));
+    act(() => latestDispatch!({ type: "UNION_REMOTE", doc: remoteDoc }));
+    arrive();
+    // Arrival resolved the id against live state, found nothing, opened nothing.
+    expect(screen.queryByLabelText("Edit name")).toBeNull();
+    expect(screen.queryByLabelText("Back to the floor")).toBeNull();
   });
 
   it("naming an idea via icon → type → Save moves the coach off 1.1.1 (rule 1 + rule 2)", () => {

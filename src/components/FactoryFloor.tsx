@@ -30,7 +30,12 @@ export type WalkIntent =
   | { kind: "openPhaseFloor"; phase: PhaseId }
   | { kind: "openRoom"; room: RoomId }
   | { kind: "enterCriterion"; stepId: string }
-  | { kind: "openIdea"; ideaIndex: number }
+  /** Open the idea summary dialog. Carries the idea's stable ID, not an index
+   *  (Change #7 review P1): a cross-tab deletion can reindex the ideas array
+   *  while the ~550ms walk is in flight, and an index-addressed intent would
+   *  silently arrive on a DIFFERENT idea. Arrival resolves the id against
+   *  live state and no-ops when it is gone. */
+  | { kind: "openIdea"; ideaId: string }
   | { kind: "createIdea" }
   /** Open the PromoteBusiness screen (Unit 8 Tier C2) — coach CTA + Grow card. */
   | { kind: "openPromote" };

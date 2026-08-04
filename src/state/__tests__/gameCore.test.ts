@@ -2459,3 +2459,374 @@ describe("site slice (SET_SITE / RESET_SESSION / save-doc exclusion)", () => {
     expect(fresh.site).toEqual({ handle: null, status: "unknown", projected: null });
   });
 });
+
+// ── Idea deletion (Change #7): DELETE_IDEA + tombstones ──────────────────────
+
+/** N ideas with stable ids idea-0..idea-{n-1}, runner closed. */
+function withDeletableIdeas(n: number): GameState {
+  let s = initialState();
+  for (let i = 0; i < n; i++) {
+    s = apply(s, { type: "CREATE_IDEA", ideaId: `idea-${i}` }, { type: "CLOSE_RUNNER" });
+  }
+  return s;
+}
+
+describe("DELETE_IDEA (Change #7: delete forever + tombstone)", () => {
+  it("removes the idea WITH its full history (fields/done/doneAt/doneByTask) and tombstones the id", () => {
+    let s = withDeletableIdeas(2);
+    s = apply(
+      s,
+      { type: "SET_FIELD", ideaIndex: 0, key: "productName", value: "Slime Kits" },
+      { type: "COMPLETE_TASK", ideaIndex: 0, stepId: "1.1", index: 0, at: 111 },
+    );
+    const next = reducer(s, { type: "DELETE_IDEA", ideaId: "idea-0" });
+    expect(next.ideas.map((i) => i.id)).toEqual(["idea-1"]);
+    expect(next.deletedIdeaIds).toEqual(["idea-0"]);
+    // The object carried ALL history — nothing of it survives anywhere.
+    const serialized = JSON.stringify(next.ideas);
+    expect(serialized).not.toContain("Slime Kits");
+    expect(serialized).not.toContain("1.1#0");
+    expect(serialized).not.toContain("1.1.1");
+  });
+
+  it("REFUSES an unknown id (same state reference)", () => {
+    const s = withDeletableIdeas(1);
+    expect(reducer(s, { type: "DELETE_IDEA", ideaId: "nope" })).toBe(s);
+  });
+
+  it("REFUSES any business-referenced idea, ARCHIVED included (a business's idea is never deletable)", () => {
+    let s = withTwoValidatedIdeas();
+    s = reducer(s, { type: "PROMOTE_IDEA", ideaId: "idea-a", businessId: "biz-1", at: 100 });
+    expect(reducer(s, { type: "DELETE_IDEA", ideaId: "idea-a" })).toBe(s);
+    // The OTHER (non-promoted) idea deletes fine.
+    const next = reducer(s, { type: "DELETE_IDEA", ideaId: "idea-b" });
+    expect(next.ideas.map((i) => i.id)).toEqual(["idea-a"]);
+    // An ARCHIVED business's idea is refused TOO (deadlock defense): deleting
+    // it would let a later unarchive restore an active business whose idea is
+    // gone — Grow/Scale progress unreachable AND promotion blocked forever.
+    const archived = reducer(s, { type: "ARCHIVE_BUSINESS", businessId: "biz-1", at: 200 });
+    expect(reducer(archived, { type: "DELETE_IDEA", ideaId: "idea-a" })).toBe(archived);
+    expect(archived.deletedIdeaIds).toEqual([]);
+  });
+
+  it("archive → delete-refused → unarchive still works (no orphaned-business deadlock)", () => {
+    let s = withTwoValidatedIdeas();
+    s = reducer(s, { type: "PROMOTE_IDEA", ideaId: "idea-a", businessId: "biz-1", at: 100 });
+    s = reducer(s, { type: "COMPLETE_TASK", ideaIndex: 0, stepId: "4.1", index: 0, at: 111 });
+    s = reducer(s, { type: "ARCHIVE_BUSINESS", businessId: "biz-1", at: 200 });
+    // The archived business's idea cannot be deleted out from under it…
+    expect(reducer(s, { type: "DELETE_IDEA", ideaId: "idea-a" })).toBe(s);
+    // …so unarchiving later restores a business whose idea (and Grow progress)
+    // is still fully reachable.
+    const restored = reducer(s, { type: "UNARCHIVE_BUSINESS", businessId: "biz-1", at: 300 });
+    expect(activeBusiness(restored)?.id).toBe("biz-1");
+    expect(isTaskDone(restored, 0, "4.1", 0)).toBe(true);
+  });
+
+  it("UNARCHIVE_BUSINESS refuses an ORPHAN record (ideaId unresolvable — doc written by another build)", () => {
+    // Hand-crafted orphan doc shape: an archived business whose idea is gone.
+    const orphan: GameState = {
+      ...withDeletableIdeas(1), // only idea-0 exists
+      businesses: [
+        { id: "biz-x", ideaId: "idea-gone", archived: true, promotedAt: 10, doneByTask: { "4.1.1": true } },
+      ],
+      deletedIdeaIds: ["idea-gone"],
+    };
+    // Restoring it would deadlock the account (active business with no
+    // reachable progress, promotion blocked) — refused, same reference.
+    expect(reducer(orphan, { type: "UNARCHIVE_BUSINESS", businessId: "biz-x", at: 20 })).toBe(orphan);
+    // An ideaId-LESS record is refused for the same reason.
+    const idless: GameState = {
+      ...withDeletableIdeas(1),
+      businesses: [{ id: "biz-y", archived: true, promotedAt: 10 }],
+    };
+    expect(reducer(idless, { type: "UNARCHIVE_BUSINESS", businessId: "biz-y", at: 20 })).toBe(idless);
+    // The record itself is KEPT (never dropped) — only restoring is refused.
+    expect(orphan.businesses).toHaveLength(1);
+  });
+
+  it("REFUSES the 101st deletion (cap full, id not yet tombstoned) instead of a false success", () => {
+    let s = withDeletableIdeas(1);
+    s = { ...s, deletedIdeaIds: Array.from({ length: 100 }, (_, i) => `old-${i}`) };
+    // The tombstone could not land (unionTombstones would silently drop it),
+    // so the delete itself is refused — no zombie resurrection later.
+    expect(reducer(s, { type: "DELETE_IDEA", ideaId: "idea-0" })).toBe(s);
+    expect(s.ideas).toHaveLength(1);
+    // Belt-and-suspenders: an id ALREADY tombstoned (degenerate state) may
+    // still delete at the cap — the tombstone is already durable.
+    const weird = { ...s, deletedIdeaIds: [...s.deletedIdeaIds.slice(1), "idea-0"] };
+    const deleted = reducer(weird, { type: "DELETE_IDEA", ideaId: "idea-0" });
+    expect(deleted.ideas).toHaveLength(0);
+    expect(deleted.deletedIdeaIds).toContain("idea-0");
+  });
+
+  it("an id-LESS idea is unreachable (belt-and-suspenders: nothing matches, nothing tombstones)", () => {
+    const s = apply(initialState(), { type: "CREATE_IDEA" }, { type: "CLOSE_RUNNER" });
+    expect(s.ideas[0].id).toBeUndefined();
+    const next = reducer(s, { type: "DELETE_IDEA", ideaId: "anything" });
+    expect(next).toBe(s);
+    expect(next.deletedIdeaIds).toEqual([]);
+  });
+
+  it("tombstone append is deduped and capped at 100 (guard v2 clamp)", () => {
+    let s = withDeletableIdeas(1);
+    // A resident tombstone list at the cap boundary (e.g. adopted via union).
+    s = { ...s, deletedIdeaIds: Array.from({ length: 99 }, (_, i) => `old-${i}`) };
+    const next = reducer(s, { type: "DELETE_IDEA", ideaId: "idea-0" });
+    expect(next.deletedIdeaIds).toHaveLength(100);
+    expect(next.deletedIdeaIds[99]).toBe("idea-0");
+    // Dedupe: a tombstone already present is not appended twice.
+    let dup = withDeletableIdeas(1);
+    dup = { ...dup, deletedIdeaIds: ["idea-0"] }; // simulates a stale union echo
+    const after = reducer(dup, { type: "DELETE_IDEA", ideaId: "idea-0" });
+    expect(after.deletedIdeaIds).toEqual(["idea-0"]);
+  });
+
+  describe("activeIdea reindexing", () => {
+    it("deleting BEFORE the active idea shifts activeIdea down (same idea stays active)", () => {
+      let s = withDeletableIdeas(3);
+      s = reducer(s, { type: "SET_ACTIVE_IDEA", ideaIndex: 2 });
+      const next = reducer(s, { type: "DELETE_IDEA", ideaId: "idea-0" });
+      expect(next.activeIdea).toBe(1);
+      expect(next.ideas[next.activeIdea].id).toBe("idea-2");
+    });
+
+    it("deleting AFTER the active idea leaves activeIdea untouched", () => {
+      let s = withDeletableIdeas(3);
+      s = reducer(s, { type: "SET_ACTIVE_IDEA", ideaIndex: 0 });
+      const next = reducer(s, { type: "DELETE_IDEA", ideaId: "idea-2" });
+      expect(next.activeIdea).toBe(0);
+      expect(next.ideas[next.activeIdea].id).toBe("idea-0");
+    });
+
+    it("deleting the ACTIVE middle idea keeps the position (the next idea slides up)", () => {
+      let s = withDeletableIdeas(3);
+      s = reducer(s, { type: "SET_ACTIVE_IDEA", ideaIndex: 1 });
+      const next = reducer(s, { type: "DELETE_IDEA", ideaId: "idea-1" });
+      expect(next.activeIdea).toBe(1);
+      expect(next.ideas[next.activeIdea].id).toBe("idea-2");
+    });
+
+    it("deleting the ACTIVE last idea clamps to the new last idea", () => {
+      let s = withDeletableIdeas(2);
+      s = reducer(s, { type: "SET_ACTIVE_IDEA", ideaIndex: 1 });
+      const next = reducer(s, { type: "DELETE_IDEA", ideaId: "idea-1" });
+      expect(next.activeIdea).toBe(0);
+      expect(next.ideas[next.activeIdea].id).toBe("idea-0");
+    });
+
+    it("deleting the ONLY idea leaves zero ideas and activeIdea 0 (the pre-first-idea shape)", () => {
+      const s = withDeletableIdeas(1);
+      const next = reducer(s, { type: "DELETE_IDEA", ideaId: "idea-0" });
+      expect(next.ideas).toEqual([]);
+      expect(next.activeIdea).toBe(0);
+      // The zero-ideas shape is the same one every consumer already tolerates
+      // (it IS initialState's shape) and CREATE_IDEA works from it.
+      const recreated = reducer(next, { type: "CREATE_IDEA", ideaId: "idea-new" });
+      expect(recreated.ideas.map((i) => i.id)).toEqual(["idea-new"]);
+      expect(recreated.activeIdea).toBe(0);
+      // The tombstone survives the recreate (append-only monotonic).
+      expect(recreated.deletedIdeaIds).toEqual(["idea-0"]);
+    });
+  });
+
+  describe("runner interaction (LOCAL action, deliberate exception to union invariants)", () => {
+    it("closes the runner when it is open on the deleted (active) idea", () => {
+      let s = withDeletableIdeas(2);
+      s = reducer(s, { type: "SET_ACTIVE_IDEA", ideaIndex: 0 });
+      s = reducer(s, { type: "OPEN_RUNNER", stepId: "1.1" });
+      const next = reducer(s, { type: "DELETE_IDEA", ideaId: "idea-0" });
+      expect(next.runnerOpen).toBe(false);
+    });
+
+    it("leaves the runner open when a NON-active idea is deleted", () => {
+      let s = withDeletableIdeas(2);
+      s = reducer(s, { type: "SET_ACTIVE_IDEA", ideaIndex: 0 });
+      s = reducer(s, { type: "OPEN_RUNNER", stepId: "1.1" });
+      const next = reducer(s, { type: "DELETE_IDEA", ideaId: "idea-1" });
+      expect(next.runnerOpen).toBe(true);
+      expect(next.activeIdea).toBe(0);
+    });
+
+    it("pickFor and celebrate stay untouched", () => {
+      let s = withDeletableIdeas(2);
+      s = reducer(s, { type: "SET_PICK_FOR", pickFor: "1.2" });
+      const next = reducer(s, { type: "DELETE_IDEA", ideaId: "idea-1" });
+      expect(next.pickFor).toBe("1.2");
+      expect(next.celebrate).toBeNull();
+    });
+  });
+});
+
+describe("deletedIdeaIds persistence (additive-optional, NO DOC_VERSION bump)", () => {
+  it("toSaveDoc OMITS the field while empty (byte-stable pre-#7 docs) and emits it after a delete", () => {
+    const clean = toSaveDoc(withDeletableIdeas(2));
+    expect("deletedIdeaIds" in clean).toBe(false);
+    const deleted = reducer(withDeletableIdeas(2), { type: "DELETE_IDEA", ideaId: "idea-0" });
+    expect(toSaveDoc(deleted).deletedIdeaIds).toEqual(["idea-0"]);
+    expect(toSaveDoc(deleted).docVersion).toBe(DOC_VERSION); // no bump
+  });
+
+  it("round-trips: delete → toSaveDoc → fromSaveDoc → HYDRATE re-sources the list", () => {
+    const deleted = reducer(withDeletableIdeas(2), { type: "DELETE_IDEA", ideaId: "idea-0" });
+    const loaded = fromSaveDoc(JSON.parse(JSON.stringify(toSaveDoc(deleted))));
+    expect(loaded.ok).toBe(true);
+    if (!loaded.ok) return;
+    expect(loaded.doc.deletedIdeaIds).toEqual(["idea-0"]);
+    const hydrated = reducer(initialState(), { type: "HYDRATE", doc: loaded.doc });
+    expect(hydrated.deletedIdeaIds).toEqual(["idea-0"]);
+    expect(hydrated.ideas.map((i) => i.id)).toEqual(["idea-1"]);
+  });
+
+  it("HYDRATE with a doc WITHOUT the field clears any resident list (split-storage: every slice re-sourced)", () => {
+    let s = reducer(withDeletableIdeas(1), { type: "DELETE_IDEA", ideaId: "idea-0" });
+    expect(s.deletedIdeaIds).toEqual(["idea-0"]);
+    s = reducer(s, { type: "HYDRATE", doc: toSaveDoc(withOneIdea()) });
+    expect(s.deletedIdeaIds).toEqual([]);
+  });
+
+  it("RESET_SESSION clears the list (per-account child data)", () => {
+    const s = reducer(withDeletableIdeas(1), { type: "DELETE_IDEA", ideaId: "idea-0" });
+    expect(reducer(s, { type: "RESET_SESSION" }).deletedIdeaIds).toEqual([]);
+  });
+
+  it("fromSaveDoc clamps adversarial shapes: non-arrays are ABSENT, garbage leaves dropped, 1..64 chars enforced", () => {
+    const base = toSaveDoc(withDeletableIdeas(1));
+    for (const bad of [42, "ids", { 0: "idea-x" }, null, true]) {
+      const loaded = fromSaveDoc({ ...base, deletedIdeaIds: bad });
+      expect(loaded.ok).toBe(true);
+      if (loaded.ok) expect("deletedIdeaIds" in loaded.doc).toBe(false);
+    }
+    // Mixed garbage: only valid string ids (1..64 chars) survive, deduped.
+    const mixed = fromSaveDoc({
+      ...base,
+      deletedIdeaIds: ["ok-1", "", 7, null, "x".repeat(65), { evil: 1 }, "ok-1", "x".repeat(64)],
+    });
+    expect(mixed.ok).toBe(true);
+    if (mixed.ok) expect(mixed.doc.deletedIdeaIds).toEqual(["ok-1", "x".repeat(64)]);
+    // An all-garbage array cleans to empty → ABSENT (absent-stays-absent).
+    const empty = fromSaveDoc({ ...base, deletedIdeaIds: [7, "", null] });
+    expect(empty.ok).toBe(true);
+    if (empty.ok) expect("deletedIdeaIds" in empty.doc).toBe(false);
+    // A giant array is capped at the first 100 valid entries.
+    const giant = fromSaveDoc({
+      ...base,
+      deletedIdeaIds: Array.from({ length: 500 }, (_, i) => `id-${i}`),
+    });
+    expect(giant.ok).toBe(true);
+    if (giant.ok) {
+      expect(giant.doc.deletedIdeaIds).toHaveLength(100);
+      expect(giant.doc.deletedIdeaIds?.[0]).toBe("id-0");
+      expect(giant.doc.deletedIdeaIds?.[99]).toBe("id-99");
+    }
+  });
+});
+
+describe("unionCompletionMaps honors tombstones (the client mirror of guard v2)", () => {
+  it("merged deletedIdeaIds = local ∪ server (deduped), absent when both sides are empty", () => {
+    const local = { ...toSaveDoc(withDeletableIdeas(1)), deletedIdeaIds: ["a", "b"] };
+    const server = { ...toSaveDoc(withDeletableIdeas(1)), deletedIdeaIds: ["b", "c"] };
+    expect(unionCompletionMaps(local, server).deletedIdeaIds).toEqual(["a", "b", "c"]);
+    // Absent both sides → absent on the result.
+    const clean = unionCompletionMaps(toSaveDoc(withDeletableIdeas(1)), toSaveDoc(withDeletableIdeas(1)));
+    expect("deletedIdeaIds" in clean).toBe(false);
+  });
+
+  it("SKIPS the tail-append of an unmatched server idea whose id is tombstoned (no resurrection)", () => {
+    // Local deleted idea-1; a stale server doc still carries it (old-build save).
+    const localState = reducer(withDeletableIdeas(1), { type: "DELETE_IDEA", ideaId: "idea-0" });
+    const local = toSaveDoc(apply(localState, { type: "CREATE_IDEA", ideaId: "idea-keep" }));
+    const staleServer = toSaveDoc(withDeletableIdeas(1)); // still has idea-0
+    const merged = unionCompletionMaps(local, staleServer);
+    expect(merged.ideas.map((i) => i.id)).toEqual(["idea-keep"]); // idea-0 NOT re-appended
+    expect(merged.deletedIdeaIds).toEqual(["idea-0"]);
+    // A NON-tombstoned unmatched server idea still appends (unchanged behavior).
+    const serverWithNew = toSaveDoc(
+      apply(withDeletableIdeas(1), { type: "CREATE_IDEA", ideaId: "idea-new" }),
+    );
+    const merged2 = unionCompletionMaps(local, serverWithNew);
+    expect(merged2.ideas.map((i) => i.id)).toEqual(["idea-keep", "idea-new"]);
+  });
+
+  it("a server-side tombstone also blocks the append (deletion propagates toward the stale side)", () => {
+    const local = toSaveDoc(withDeletableIdeas(1)); // still carries idea-0... as a MATCH
+    // Server: idea-0 deleted, plus an unmatched leftover copy of it in a doc
+    // constructed adversarially (matched local ideas are NOT dropped here —
+    // that is the UNION_REMOTE reducer's job).
+    const server = { ...toSaveDoc(initialState()), deletedIdeaIds: ["idea-0"] };
+    const merged = unionCompletionMaps(local, server);
+    // The pure doc merge keeps the local idea (drop is reducer-only)…
+    expect(merged.ideas.map((i) => i.id)).toEqual(["idea-0"]);
+    // …but the tombstone is adopted, so the reducer/guard can converge.
+    expect(merged.deletedIdeaIds).toEqual(["idea-0"]);
+  });
+});
+
+describe("residual risk pins: orphan business records survive the union safely", () => {
+  it("unionBusinesses KEEPS a server record whose idea is tombstoned (never dropped), archived-safe", () => {
+    // Another build's doc carries a business record for an idea this side
+    // tombstoned. The record is monotonic state and is KEPT by the union;
+    // only UNARCHIVE refuses to activate an orphan.
+    const local = { ...toSaveDoc(withDeletableIdeas(1)), deletedIdeaIds: ["idea-gone"] };
+    const server = {
+      ...toSaveDoc(withDeletableIdeas(1)),
+      businesses: [{ id: "biz-x", ideaId: "idea-gone", archived: true, promotedAt: 5 }],
+    };
+    const merged = unionCompletionMaps(local, server);
+    expect(merged.businesses?.map((b) => b.id)).toEqual(["biz-x"]);
+    expect(merged.deletedIdeaIds).toEqual(["idea-gone"]);
+  });
+
+  it("consumers tolerate an orphan: findIndex -1 guards hold, grow reads are false, unarchive refused", () => {
+    const orphan: GameState = {
+      ...withDeletableIdeas(1),
+      businesses: [{ id: "biz-x", ideaId: "idea-gone", archived: true, promotedAt: 5 }],
+    };
+    // The floor surfaces resolve the business's idea via findIndex and guard
+    // on -1 ("Your business" fallback) — pin the -1 itself.
+    expect(orphan.ideas.findIndex((i) => i.id === "idea-gone")).toBe(-1);
+    expect(businessFor(orphan, "idea-gone")?.id).toBe("biz-x"); // record readable
+    expect(activeBusinessExists(orphan)).toBe(false); // archived: not blocking
+    // No read path throws; grow/scale stays uncompletable, promotion stays open.
+    expect(isTaskDone(orphan, 0, "4.1", 0)).toBe(false);
+    expect(reducer(orphan, { type: "UNARCHIVE_BUSINESS", businessId: "biz-x", at: 9 })).toBe(orphan);
+  });
+});
+
+describe("UNION_REMOTE deletion convergence (Change #7)", () => {
+  it("runner CLOSED: a server-tombstoned local idea is dropped and activeIdea reindexes", () => {
+    let local = withDeletableIdeas(3);
+    local = reducer(local, { type: "SET_ACTIVE_IDEA", ideaIndex: 2 });
+    // Another tab deleted idea-0 and its doc came back rebased.
+    const remote = { ...toSaveDoc(local), ideas: toSaveDoc(local).ideas.slice(1), deletedIdeaIds: ["idea-0"] };
+    const merged = reducer(local, { type: "UNION_REMOTE", doc: remote });
+    expect(merged.ideas.map((i) => i.id)).toEqual(["idea-1", "idea-2"]);
+    expect(merged.activeIdea).toBe(1); // still idea-2
+    expect(merged.deletedIdeaIds).toEqual(["idea-0"]); // adopted (monotonic)
+  });
+
+  it("runner CLOSED: dropping the ACTIVE idea clamps activeIdea like DELETE_IDEA", () => {
+    let local = withDeletableIdeas(2);
+    local = reducer(local, { type: "SET_ACTIVE_IDEA", ideaIndex: 1 });
+    const remote = { ...toSaveDoc(local), ideas: [toSaveDoc(local).ideas[0]], deletedIdeaIds: ["idea-1"] };
+    const merged = reducer(local, { type: "UNION_REMOTE", doc: remote });
+    expect(merged.ideas.map((i) => i.id)).toEqual(["idea-0"]);
+    expect(merged.activeIdea).toBe(0);
+  });
+
+  it("runner OPEN: the drop is DEFERRED (the union can never close the runner) but the tombstone is adopted", () => {
+    let local = withDeletableIdeas(2);
+    local = reducer(local, { type: "SET_ACTIVE_IDEA", ideaIndex: 0 });
+    local = reducer(local, { type: "OPEN_RUNNER", stepId: "1.1" });
+    const remote = { ...toSaveDoc(local), ideas: [toSaveDoc(local).ideas[1]], deletedIdeaIds: ["idea-0"] };
+    const merged = reducer(local, { type: "UNION_REMOTE", doc: remote });
+    // The idea the child may be LOOKING AT stays this union; the runner stays open.
+    expect(merged.ideas.map((i) => i.id)).toEqual(["idea-0", "idea-1"]);
+    expect(merged.runnerOpen).toBe(true);
+    expect(merged.activeIdea).toBe(0);
+    // The tombstone still lands, so the NEXT save cannot resurrect the idea
+    // server-side and the next HYDRATE (guard-stripped doc) converges.
+    expect(merged.deletedIdeaIds).toEqual(["idea-0"]);
+    expect(toSaveDoc(merged).deletedIdeaIds).toEqual(["idea-0"]);
+  });
+});

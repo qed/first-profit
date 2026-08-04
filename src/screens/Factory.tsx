@@ -34,6 +34,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Pencil } from "lucide-react";
 import { useGame } from "../state/GameContext";
+import { TOMBSTONE_CAP } from "../state/gameCore";
 import { isPublicSiteEnabled } from "../config";
 import { firstIncompleteTaskIndex, ideaOneLiner, ideaProgressLabel, ideaSummaryName, NAMING_STEP_ID, nextCoachTarget, roomEntryFor } from "../state/floorSelectors";
 import { stepById, type RoomId } from "../data/path";
@@ -440,6 +441,11 @@ export function IdeaSummaryDialog({
   const [liner, setLiner] = useState(storedLiner);
   const [editingName, setEditingName] = useState(false);
   const [editingLiner, setEditingLiner] = useState(false);
+  // Delete flow (Change #7): idle → inline confirm → type-to-confirm. All
+  // local state; closing the dialog (X or Escape) cancels the whole flow.
+  const [deleteStage, setDeleteStage] = useState<"idle" | "confirm" | "type">("idle");
+  const [deleteText, setDeleteText] = useState("");
+  const [deleteRefused, setDeleteRefused] = useState<"business" | "cap" | null>(null);
 
   useEffect(() => {
     panelRef.current?.focus();
@@ -479,6 +485,42 @@ export function IdeaSummaryDialog({
     if (changedName || changedLiner) void game.flushNow?.();
     setEditingName(false);
     setEditingLiner(false);
+  };
+
+  // The delete affordance is HIDDEN for an idea referenced by ANY business
+  // record — ARCHIVED included (deleting one would orphan the record and
+  // deadlock unarchive; the reducer refuses too) — and for an id-less legacy
+  // idea (nothing to tombstone this session). Belt-and-suspenders both ways.
+  const belongsToBusiness = (game.businesses ?? []).some((b) => b.ideaId === idea.id);
+  const canOfferDelete = Boolean(idea.id) && !belongsToBusiness;
+  // Type-to-confirm gate: the child's first name, case-insensitive, trimmed.
+  // Some accounts carry an EMPTY firstName (the profile can arrive blank); an
+  // empty required word would make the gate pass instantly, so fall back to
+  // requiring the word DELETE instead.
+  const requiredWord = (game.profile?.firstName ?? "").trim() || "DELETE";
+  const usesNameGate = Boolean((game.profile?.firstName ?? "").trim());
+  const typedOk = deleteText.trim().toLowerCase() === requiredWord.toLowerCase();
+
+  const resetDeleteFlow = () => {
+    setDeleteStage("idle");
+    setDeleteText("");
+    setDeleteRefused(null);
+  };
+  const confirmDelete = () => {
+    if (!idea.id || !typedOk) return;
+    // deleteIdea dispatches + kicks a flush and answers honestly (the
+    // promoteIdea refusal pattern). Optional-called defensively for stubbed
+    // test contexts. A refusal shows the fitting kid-friendly note instead of
+    // closing: the tombstone cap being full, or the idea having become a
+    // business's in another tab mid-flow.
+    if (game.deleteIdea?.(idea.id)) {
+      onClose();
+      return;
+    }
+    const capFull =
+      (game.deletedIdeaIds?.length ?? 0) >= TOMBSTONE_CAP &&
+      !(game.deletedIdeaIds ?? []).includes(idea.id);
+    setDeleteRefused(capFull ? "cap" : "business");
   };
 
   const sectionLabel =
@@ -622,6 +664,98 @@ export function IdeaSummaryDialog({
               </button>
             </div>
           ) : null}
+
+          {/* ── Delete this idea (Change #7) ─────────────────────────────
+              A quiet affordance docked bottom-left, hidden for the promoted
+              business idea. Two steps: inline confirm, then type-to-confirm
+              (first name, case-insensitive; DELETE fallback when the profile
+              has no first name). Cancel at every step; X/Escape cancel too. */}
+          {canOfferDelete ? (
+            <div className="mt-auto flex justify-start pt-8">
+              {deleteStage === "idle" ? (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setDeleteStage("confirm");
+                    setDeleteText("");
+                    setDeleteRefused(null);
+                  }}
+                  className="min-h-[44px] rounded-xl px-2 text-left text-sm font-bold text-[hsl(4_72%_42%)] underline-offset-2 hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-[hsl(4_72%_42%/0.4)]"
+                >
+                  Delete this idea
+                </button>
+              ) : (
+                <div className="w-full rounded-[10px] border-2 border-[hsl(4_72%_42%/0.35)] bg-[hsl(4_80%_97%)] p-4">
+                  {deleteStage === "confirm" ? (
+                    <>
+                      <p className="text-sm leading-relaxed text-[hsl(25_34%_20%)]">
+                        Delete {storedName || "this idea"}? Everything about this idea goes
+                        away forever. This cannot be undone.
+                      </p>
+                      <div className="mt-3 flex flex-wrap gap-2">
+                        <button
+                          type="button"
+                          onClick={resetDeleteFlow}
+                          className="min-h-[44px] rounded-xl border-2 border-[hsl(25_34%_20%/0.15)] bg-white px-5 text-sm font-bold text-[hsl(25_34%_20%)] hover:border-[hsl(25_34%_20%/0.4)]"
+                        >
+                          Cancel
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setDeleteStage("type")}
+                          className="min-h-[44px] rounded-xl bg-[hsl(4_72%_42%)] px-5 text-sm font-bold text-white hover:bg-[hsl(4_72%_36%)]"
+                        >
+                          Continue
+                        </button>
+                      </div>
+                    </>
+                  ) : (
+                    <>
+                      <label
+                        htmlFor="fp-idea-delete-confirm"
+                        className="block text-sm font-bold text-[hsl(25_34%_20%)]"
+                      >
+                        {usesNameGate
+                          ? "Type your first name to delete."
+                          : "Type DELETE to delete."}
+                      </label>
+                      <input
+                        id="fp-idea-delete-confirm"
+                        value={deleteText}
+                        onChange={(e) => setDeleteText(e.target.value)}
+                        autoFocus
+                        className={`mt-2 min-h-[44px] ${inputClass}`}
+                      />
+                      {deleteRefused ? (
+                        <p className="mt-2 text-sm text-[hsl(4_72%_42%)]">
+                          {deleteRefused === "cap"
+                            ? "You have removed a lot of ideas. This one cannot be deleted right now."
+                            : "This idea belongs to a business, so it cannot be deleted."}
+                        </p>
+                      ) : null}
+                      <div className="mt-3 flex flex-wrap gap-2">
+                        <button
+                          type="button"
+                          onClick={resetDeleteFlow}
+                          className="min-h-[44px] rounded-xl border-2 border-[hsl(25_34%_20%/0.15)] bg-white px-5 text-sm font-bold text-[hsl(25_34%_20%)] hover:border-[hsl(25_34%_20%/0.4)]"
+                        >
+                          Cancel
+                        </button>
+                        <button
+                          type="button"
+                          onClick={confirmDelete}
+                          disabled={!typedOk}
+                          className="min-h-[44px] rounded-xl bg-[hsl(4_72%_42%)] px-5 text-sm font-bold text-white hover:bg-[hsl(4_72%_36%)] disabled:cursor-not-allowed disabled:opacity-40"
+                        >
+                          Delete
+                        </button>
+                      </div>
+                    </>
+                  )}
+                </div>
+              )}
+            </div>
+          ) : null}
         </div>
       </div>
     </div>
@@ -647,11 +781,25 @@ export function Factory({
   // reducer action ever needs to drive, held above the breakpoint conditional
   // mount so both survive the lg swap (see PromoteBusiness's doc comment).
   const [promoteOpen, setPromoteOpen] = useState(false);
-  // Which idea the summary dialog shows (null = closed). Same placement rule
-  // as promoteOpen: Factory never unmounts across lg, so the open-state
-  // survives the breakpoint swap; the slots inside CriterionFloor reach it
-  // through the SAME onWalk intent channel as every other card tap.
-  const [ideaSummary, setIdeaSummary] = useState<number | null>(null);
+  // Which idea the summary dialog shows, BY STABLE ID (null = closed). Same
+  // placement rule as promoteOpen: Factory never unmounts across lg, so the
+  // open-state survives the breakpoint swap; the slots inside CriterionFloor
+  // reach it through the SAME onWalk intent channel as every other card tap.
+  // IDENTITY, not index (Change #7 review P1): a cross-tab deletion can
+  // reindex `ideas` under the open dialog via UNION_REMOTE — an index would
+  // silently swap the dialog onto a DIFFERENT idea. The current index is
+  // re-resolved from the id on every render, and the dialog closes itself
+  // when the id no longer resolves (the idea was deleted remotely).
+  const [ideaSummary, setIdeaSummary] = useState<string | null>(null);
+  const ideaSummaryIndex =
+    ideaSummary !== null ? game.ideas.findIndex((idea) => idea.id === ideaSummary) : -1;
+  useEffect(() => {
+    // Close the dialog when its idea disappears (remote deletion): without
+    // this reset the stale non-null id would keep the floor inert forever.
+    if (ideaSummary !== null && !game.ideas.some((idea) => idea.id === ideaSummary)) {
+      setIdeaSummary(null);
+    }
+  }, [ideaSummary, game.ideas]);
   // The "Improve First Profit" suggestion modal (Change #9): pure UI
   // open-state, same placement rule as promoteOpen (survives the lg swap).
   const [improveOpen, setImproveOpen] = useState(false);
@@ -691,7 +839,12 @@ export function Factory({
           // A filled "Your Ideas" slot opens the idea SUMMARY dialog (2026-08-03
           // rule 2) — never direct path entry. The path stays reachable through
           // the room cards and the coach; the dialog itself edits name/one-liner.
-          setIdeaSummary(intent.ideaIndex);
+          // Resolved BY ID against LIVE state at arrival (Change #7 review P1):
+          // if the idea was deleted (e.g. a cross-tab union landed during the
+          // ~550ms walk) the intent no-ops instead of opening a swapped idea.
+          if (game.ideas.some((idea) => idea.id === intent.ideaId)) {
+            setIdeaSummary(intent.ideaId);
+          }
           break;
         case "createIdea":
           // The idea's stable id is minted at this caller boundary (Unit 7).
@@ -765,11 +918,15 @@ export function Factory({
         onSwitched={cancelWalk}
       />
       {improveOpen ? <ImproveAppModal onClose={() => setImproveOpen(false)} /> : null}
-      {ideaSummary !== null && game.ideas[ideaSummary] ? (
-        // Keyed per idea so the local drafts reset when a different slot opens.
+      {ideaSummaryIndex >= 0 ? (
+        // Keyed per idea ID so the local drafts reset when a different slot
+        // opens — and SURVIVE a union-driven reindex of the same idea (the id
+        // is stable where an index key would remount and drop drafts).
+        // ideaIndex is the resolved-CURRENT index, so SET_FIELD dispatches
+        // inside always address the right idea even after a reindex.
         <IdeaSummaryDialog
           key={ideaSummary}
-          ideaIndex={ideaSummary}
+          ideaIndex={ideaSummaryIndex}
           onClose={() => setIdeaSummary(null)}
         />
       ) : null}

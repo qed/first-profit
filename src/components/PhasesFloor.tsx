@@ -118,7 +118,13 @@ export function PhasesFloor({ onWalk }: { onWalk: (intent: WalkIntent) => void }
                 num={n + 1}
                 name={ideaSummaryName(game, n)}
                 progress={ideaProgressLabel(game, n)}
-                onOpen={() => onWalk({ kind: "openIdea", ideaIndex: n })}
+                onOpen={() => {
+                  // Identity, not index (Change #7 review P1): an id-less
+                  // legacy in-memory idea has no summary target this session
+                  // (fromSaveDoc mints its id on the next load) — skip.
+                  const ideaId = ideas[n].id;
+                  if (ideaId) onWalk({ kind: "openIdea", ideaId });
+                }}
               />
             ) : (
               <ProductEmpty key={n} num={n + 1} />

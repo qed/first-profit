@@ -38,6 +38,7 @@ import {
   isStepUnlocked as isStepUnlockedFn,
   ideasEnterableFor as ideasEnterableForFn,
   activeBusiness as activeBusinessFn,
+  TOMBSTONE_CAP,
   isPhaseComplete as isPhaseCompleteFn,
   type GameState,
   type Action,
@@ -125,6 +126,19 @@ export interface GameApi extends GameState {
    * means the PROMOTE_IDEA action was dispatched with the minted id/timestamp.
    */
   promoteIdea: (ideaIndex: number) => boolean;
+  /**
+   * Delete an idea forever (Change #7) — the object (and with it all field
+   * text and completion history) is removed and the id is tombstoned so no
+   * stale tab or old-build save can resurrect it (the120 guard v2 honors the
+   * tombstones server-side). Returns false when the deletion is REFUSED
+   * (unknown id; the idea belongs to ANY business record, archived included;
+   * or the tombstone cap is full for a new id — the promoteIdea
+   * caller-boundary refusal pattern: a false is a guaranteed no-op); true
+   * means DELETE_IDEA was dispatched AND a flush was kicked off
+   * (`void flushNow()`) so the tombstone lands promptly — the projection
+   * updates the public page's products too.
+   */
+  deleteIdea: (ideaId: string) => boolean;
   /** Archive the currently active business (record + 4-5 progress preserved;
    *  stamps archiveStateAt = Date.now() for the cross-tab archived union). */
   archiveBusiness: () => void;
@@ -867,6 +881,33 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
     return true;
   }, []);
 
+  // ── Idea deletion (Change #7) ─────────────────────────────────────────────
+  const deleteIdea = useCallback(
+    (ideaId: string): boolean => {
+      // Mirror the reducer's refusal conditions against live state so the
+      // caller gets an honest boolean (the promoteIdea pattern): false is a
+      // guaranteed no-op. Id-less legacy in-memory ideas can never match, so
+      // they are unreachable (and correctly refused) here too.
+      const s = stateRef.current;
+      if (!s.ideas.some((idea) => idea.id === ideaId)) return false;
+      // ANY business record (archived included) protects its idea — see the
+      // DELETE_IDEA reducer case for the unarchive-deadlock rationale.
+      if (s.businesses?.some((b) => b.ideaId === ideaId)) return false;
+      // Tombstone cap full for a new id: the delete could not be made durable
+      // (guard-v2 clamp), so it is refused rather than reported as success.
+      if (s.deletedIdeaIds.length >= TOMBSTONE_CAP && !s.deletedIdeaIds.includes(ideaId)) {
+        return false;
+      }
+      dispatch({ type: "DELETE_IDEA", ideaId });
+      // Land the tombstone promptly: the projection refresh also updates the
+      // public page's products, so a deleted idea should disappear there in
+      // seconds, not at the next debounce/window boundary.
+      void flushNow();
+      return true;
+    },
+    [flushNow],
+  );
+
   const archiveBusiness = useCallback(() => {
     const active = activeBusinessFn(stateRef.current);
     if (!active) return;
@@ -921,6 +962,7 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
       grossSalesSumCents: () => grossSalesSumCentsFn(state),
       salesSumCents: () => salesSumCentsFn(state),
       promoteIdea,
+      deleteIdea,
       archiveBusiness,
       unarchiveBusiness,
       refreshSiteStatus,
@@ -941,6 +983,7 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
       state,
       syncStatus,
       promoteIdea,
+      deleteIdea,
       archiveBusiness,
       unarchiveBusiness,
       refreshSiteStatus,

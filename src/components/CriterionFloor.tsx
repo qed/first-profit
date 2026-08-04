@@ -147,7 +147,13 @@ export function CriterionFloor({
                     name={ideaSummaryName(game, n)}
                     progress={ideaProgressLabel(game, n)}
                     current={n === activeIdea}
-                    onClick={() => onWalk({ kind: "openIdea", ideaIndex: n })}
+                    onClick={() => {
+                      // Identity, not index (Change #7 review P1; see the
+                      // WalkIntent doc): id-less legacy ideas have no summary
+                      // target this session — skip.
+                      const ideaId = ideas[n].id;
+                      if (ideaId) onWalk({ kind: "openIdea", ideaId });
+                    }}
                   />
                 );
               }

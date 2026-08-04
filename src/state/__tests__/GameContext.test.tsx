@@ -63,6 +63,7 @@ interface FakeEngine {
   notifyLedger: ReturnType<typeof vi.fn>;
   notifyFeedback: ReturnType<typeof vi.fn>;
   notifySnapshotChange: ReturnType<typeof vi.fn>;
+  flushPending: ReturnType<typeof vi.fn>;
   flushOnHide: ReturnType<typeof vi.fn>;
   /** The deps GameContext handed createSyncEngine (to drive its callbacks). */
   deps: Record<string, unknown>;
@@ -95,6 +96,7 @@ vi.mock("../../lib/sync", () => ({
       notifyLedger: vi.fn(),
       notifyFeedback: vi.fn().mockResolvedValue("sent"),
       notifySnapshotChange: vi.fn(),
+      flushPending: vi.fn().mockResolvedValue("landed"),
       flushOnHide: vi.fn(),
       deps,
     };
@@ -617,6 +619,55 @@ describe("promoteIdea / archiveBusiness / unarchiveBusiness (caller boundary)", 
       stepId: "4.1",
       room: step41?.room,
     });
+  });
+});
+
+describe("deleteIdea (caller boundary, Change #7)", () => {
+  it("deletes the idea, tombstones its id, and returns true (dispatch + prompt flush)", async () => {
+    await bootToApp();
+    act(() => {
+      getApi().dispatch({ type: "CREATE_IDEA", ideaId: "idea-a" });
+      getApi().dispatch({ type: "CLOSE_RUNNER" });
+      getApi().dispatch({ type: "CREATE_IDEA", ideaId: "idea-b" });
+      getApi().dispatch({ type: "CLOSE_RUNNER" });
+    });
+    let outcome: boolean | undefined;
+    act(() => {
+      outcome = getApi().deleteIdea("idea-a");
+    });
+    expect(outcome).toBe(true);
+    expect(getApi().ideas.map((i) => i.id)).toEqual(["idea-b"]);
+    expect(getApi().deletedIdeaIds).toEqual(["idea-a"]);
+    // The tombstone is pushed toward the server promptly (void flushNow()):
+    // the projection refresh also updates the public page's products.
+    expect(engines[0].flushPending).toHaveBeenCalled();
+  });
+
+  it("returns FALSE (guaranteed no-op) on unknown id and on the active business's idea", async () => {
+    await bootToApp();
+    act(() => {
+      getApi().dispatch({ type: "CREATE_IDEA", ideaId: "idea-a" });
+      getApi().dispatch({ type: "CLOSE_RUNNER" });
+    });
+    // Unknown id -> refused (also covers id-less legacy ideas: unaddressable).
+    expect(getApi().deleteIdea("nope")).toBe(false);
+    expect(getApi().ideas).toHaveLength(1);
+
+    completeThroughValidate(0);
+    act(() => {
+      expect(getApi().promoteIdea(0)).toBe(true);
+    });
+    // The business's idea can never be deleted.
+    expect(getApi().deleteIdea("idea-a")).toBe(false);
+    expect(getApi().ideas).toHaveLength(1);
+    // ARCHIVING does not open the door either: ANY business record protects
+    // its idea (the orphaned-business deadlock defense).
+    act(() => {
+      getApi().archiveBusiness();
+    });
+    expect(getApi().deleteIdea("idea-a")).toBe(false);
+    expect(getApi().ideas).toHaveLength(1);
+    expect(getApi().deletedIdeaIds).toEqual([]);
   });
 });
 

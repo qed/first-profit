@@ -295,6 +295,16 @@ export interface GameState {
    * the authenticated self-read (SET_SITE); see the SiteState doc.
    */
   site: SiteState;
+  /**
+   * Tombstones of DELETED ideas (Change #7): an append-only MONOTONIC set of
+   * idea ids, mirrored exactly by the120's save-doc guard v2 (live), which
+   * skips re-appending tombstoned ideas and unions OLD+NEW tombstones so an
+   * old-build save can never resurrect a deleted idea. Entries are string ids
+   * 1..64 chars, deduped, capped at 100 (see TOMBSTONE_CAP). Written by
+   * DELETE_IDEA and by UNION_REMOTE (adopting server-side tombstones);
+   * cleared by RESET_SESSION; sourced from the doc on HYDRATE.
+   */
+  deletedIdeaIds: string[];
   /** True once onboarding screens 2..5 are complete (persisted in the save doc). */
   onboardingComplete: boolean;
   docVersion: number;
@@ -316,6 +326,7 @@ export function initialState(): GameState {
     room: null,
     chosenProvider: null,
     site: { handle: null, status: "unknown", projected: null },
+    deletedIdeaIds: [],
     onboardingComplete: false,
     docVersion: DOC_VERSION,
   };
@@ -341,6 +352,16 @@ export interface SaveDoc {
    * absent-stays-absent discipline); coerced defensively on load.
    */
   businesses?: Business[];
+  /**
+   * Deleted-idea tombstones (Change #7). ADDITIVE OPTIONAL, NO DOC_VERSION
+   * bump (the chosenProvider/businesses precedent): absent on every pre-#7 doc
+   * and stays absent until a deletion happens. The EXACT contract of the120's
+   * save-doc guard v2 (live in production): string ids 1..64 chars, append-only
+   * monotonic, at most the first 100 entries per side are scanned when
+   * unioning, deduped, capped at 100 total; adversarial shapes contribute
+   * nothing. Coerced defensively on load (coerceDeletedIdeaIds).
+   */
+  deletedIdeaIds?: string[];
 }
 
 /** Deep-copy one business record (its completion maps must never be aliased). */
@@ -381,6 +402,10 @@ export function toSaveDoc(state: GameState): SaveDoc {
     // emits a byte-identical doc to before the field existed. Per-business
     // completion maps are deep-copied so the doc never aliases live state.
     ...(state.businesses ? { businesses: state.businesses.map(copyBusiness) } : {}),
+    // Deleted-idea tombstones (Change #7): re-emitted ONLY when non-empty, so
+    // a never-deleted account's doc stays byte-identical to before the field
+    // existed (absent-stays-absent).
+    ...(state.deletedIdeaIds.length ? { deletedIdeaIds: [...state.deletedIdeaIds] } : {}),
   };
 }
 
@@ -595,6 +620,56 @@ function coerceBusinesses(value: unknown): Business[] | undefined {
   return businesses;
 }
 
+// ── Deleted-idea tombstones (Change #7) ──────────────────────────────────
+
+/**
+ * The tombstone clamp, mirroring the120's save-doc guard v2 EXACTLY: at most
+ * 100 tombstones ever; at most the first 100 entries of any incoming list are
+ * even scanned (an adversarial giant array contributes nothing past that).
+ */
+export const TOMBSTONE_CAP = 100;
+
+/** A valid tombstone entry: a string idea id, 1..64 chars (guard v2 contract). */
+function isValidTombstone(value: unknown): value is string {
+  return typeof value === "string" && value.length >= 1 && value.length <= 64;
+}
+
+/**
+ * Union tombstone lists under the guard-v2 clamp: scan at most the first
+ * TOMBSTONE_CAP entries PER SIDE, keep only valid string ids (1..64 chars),
+ * dedupe preserving first-seen order (local first), cap the result at
+ * TOMBSTONE_CAP. Adversarial shapes (non-arrays, non-string leaves, huge
+ * strings, giant arrays) contribute nothing. Also serves single-list coercion
+ * (pass one side).
+ */
+function unionTombstones(local: unknown, server?: unknown): string[] {
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const side of [local, server]) {
+    if (!Array.isArray(side)) continue;
+    const scan = side.slice(0, TOMBSTONE_CAP); // per-side scan clamp
+    for (const leaf of scan) {
+      if (out.length >= TOMBSTONE_CAP) break;
+      if (!isValidTombstone(leaf) || seen.has(leaf)) continue;
+      seen.add(leaf);
+      out.push(leaf);
+    }
+  }
+  return out;
+}
+
+/**
+ * Coerce a persisted deletedIdeaIds leaf. ADDITIVE OPTIONAL: absent (or not an
+ * array) stays ABSENT; a present array is cleaned under the guard-v2 clamp,
+ * and an array that cleans to empty is ALSO absent (absent-stays-absent:
+ * toSaveDoc only ever re-emits non-empty, so round-trips stay byte-stable).
+ */
+function coerceDeletedIdeaIds(value: unknown): string[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const cleaned = unionTombstones(value);
+  return cleaned.length ? cleaned : undefined;
+}
+
 /**
  * Parse a loaded save doc into a validated `SaveDoc`, or signal that the caller
  * should DISCARD it. An unknown/absent docVersion is signaled for discard so a
@@ -619,8 +694,11 @@ export function fromSaveDoc(
         // (never crypto-random here): two tabs/devices independently loading
         // the same legacy doc must mint IDENTICAL ids, or the rebase-union
         // path would fork the idea's identity and orphan any business promoted
-        // from it in the other tab. Idea order is append-only (ideas are never
-        // reordered or deleted), so the index is stable. NEW ideas get
+        // from it in the other tab. Idea order is append-only for ID-LESS
+        // docs (deletion (Change #7) only exists on builds that persist ids —
+        // the save recording a deletion always carries every survivor's id —
+        // so no id is ever minted from a post-deletion index), so the index is
+        // stable. NEW ideas get
         // caller-minted crypto UUIDs via CREATE_IDEA's `ideaId` instead.
         // (Id first, matching coerceIdea's key order, so a minted doc is
         // byte-identical to its own re-load.)
@@ -635,6 +713,9 @@ export function fromSaveDoc(
   // load so the one-active invariant holds even for a doc written before the
   // normalization existed (or hand-edited): see normalizeBusinesses.
   const businesses = coerceBusinesses(raw.businesses);
+  // Additive-optional tombstones (Change #7): absent stays absent; a present
+  // list is cleaned under the guard-v2 clamp.
+  const deletedIdeaIds = coerceDeletedIdeaIds(raw.deletedIdeaIds);
   return {
     ok: true,
     doc: {
@@ -645,6 +726,7 @@ export function fromSaveDoc(
       onboardingComplete,
       chosenProvider,
       ...(businesses ? { businesses: normalizeBusinesses(businesses) } : {}),
+      ...(deletedIdeaIds ? { deletedIdeaIds } : {}),
     },
   };
 }
@@ -786,6 +868,11 @@ function unionBusinesses(
  */
 export function unionCompletionMaps(localDoc: SaveDoc, serverDoc: SaveDoc | null): SaveDoc {
   if (!serverDoc) return localDoc;
+  // Deleted-idea tombstones (Change #7) are a MONOTONIC set: merged =
+  // local ∪ server under the guard-v2 clamp (the exact mirror of the120's
+  // server-side union), absent from the result when both sides are empty.
+  const deletedIdeaIds = unionTombstones(localDoc.deletedIdeaIds, serverDoc.deletedIdeaIds);
+  const tombstoned = new Set(deletedIdeaIds);
   // Match ideas by id (index fallback for id-less local legacy ideas).
   const usedServer = new Set<number>();
   const ideas = localDoc.ideas.map((idea, i) => {
@@ -800,10 +887,23 @@ export function unionCompletionMaps(localDoc: SaveDoc, serverDoc: SaveDoc | null
     return unionIdeaCompletions(idea, serverDoc.ideas[si]);
   });
   for (let j = 0; j < serverDoc.ideas.length; j++) {
-    if (!usedServer.has(j)) ideas.push(serverDoc.ideas[j]); // appended at tail, never dropped
+    if (usedServer.has(j)) continue;
+    // Tail-append SKIP (Change #7, the client mirror of the server guard): an
+    // unmatched server idea whose id is in the MERGED tombstone set is a
+    // deleted idea still resident in another tab's stale doc — re-appending it
+    // here would resurrect it. Local ideas are NOT dropped in this pure doc
+    // merge; the safe local drop lives in the UNION_REMOTE reducer path only.
+    const sid = serverDoc.ideas[j].id;
+    if (sid && tombstoned.has(sid)) continue;
+    ideas.push(serverDoc.ideas[j]); // appended at tail, never dropped
   }
   const businesses = unionBusinesses(localDoc.businesses, serverDoc.businesses);
-  return { ...localDoc, ideas, ...(businesses ? { businesses } : {}) };
+  return {
+    ...localDoc,
+    ideas,
+    ...(businesses ? { businesses } : {}),
+    ...(deletedIdeaIds.length ? { deletedIdeaIds } : {}),
+  };
 }
 
 // ── Selectors (pure functions of state) ──────────────────────────────────
@@ -1084,6 +1184,22 @@ export type Action =
    * an idea created without one gets a deterministic id on the next load.
    */
   | { type: "CREATE_IDEA"; ideaId?: string }
+  /**
+   * Delete an idea forever (Change #7): the idea object goes away — its
+   * fields/done/doneAt/doneByTask history goes WITH the object (that IS the
+   * full history wipe) — and its id is tombstoned in `deletedIdeaIds` so the
+   * server guard (v2, live) and the cross-tab union can never resurrect it.
+   * REFUSED (state unchanged): unknown id; the idea is referenced by ANY
+   * business record, archived included (a business's idea is never deletable
+   * — deleting an archived one's idea would deadlock the account on
+   * unarchive, see the reducer case); or the tombstone cap is full for a
+   * not-yet-tombstoned id (a delete whose tombstone cannot land must not
+   * report success). An id-LESS in-memory idea is unreachable by
+   * construction — this action addresses by id, so it can only ever match a
+   * tombstonable idea (fromSaveDoc guarantees ids on load;
+   * belt-and-suspenders).
+   */
+  | { type: "DELETE_IDEA"; ideaId: string }
   | { type: "SET_ACTIVE_IDEA"; ideaIndex: number }
   | { type: "SET_FIELD"; ideaIndex: number; key: string; value: string }
   /**
@@ -1316,6 +1432,59 @@ export function reducer(state: GameState, action: Action): GameState {
       };
     }
 
+    case "DELETE_IDEA": {
+      // REFUSALS (state unchanged, never a throw):
+      //  - unknown id (which also covers id-less in-memory ideas — they cannot
+      //    be addressed, and an untombstonable delete must never happen);
+      //  - the idea is referenced by ANY business record, ARCHIVED included
+      //    (a business's idea is simply never deletable): deleting an archived
+      //    business's idea would let a later UNARCHIVE restore an ACTIVE
+      //    business whose ideaId resolves to nothing — its Grow/Scale progress
+      //    unreachable forever AND PROMOTE_IDEA blocked by
+      //    activeBusinessExists, deadlocking the account. The UI hides the
+      //    affordance; this is the belt-and-suspenders layer;
+      //  - the tombstone set is FULL (guard-v2 cap) and this id is not already
+      //    in it: removing the idea while unionTombstones silently dropped the
+      //    new id would report success and then let any stale-doc union
+      //    resurrect a zombie copy — refuse instead, honestly.
+      const deleteIndex = state.ideas.findIndex((idea) => idea.id === action.ideaId);
+      if (deleteIndex < 0) return state;
+      if (state.businesses?.some((b) => b.ideaId === action.ideaId)) return state;
+      if (
+        state.deletedIdeaIds.length >= TOMBSTONE_CAP &&
+        !state.deletedIdeaIds.includes(action.ideaId)
+      ) {
+        return state;
+      }
+      // Removing the idea object IS the full history wipe: fields, done,
+      // doneAt, doneByTask, doneAtByTask all live on it and go with it.
+      const ideas = state.ideas.filter((_, i) => i !== deleteIndex);
+      // Tombstone the id (append-only monotonic, deduped/capped per guard v2).
+      const deletedIdeaIds = unionTombstones(state.deletedIdeaIds, [action.ideaId]);
+      // Reindex activeIdea: after the deleted index -> shift down one; the
+      // deleted index itself -> clamp to the nearest sane neighbor (same
+      // position if one moved up into it, else the new last idea, else 0 —
+      // zero-ideas states are the pre-first-idea shape every consumer already
+      // tolerates). Before the deleted index -> unchanged.
+      let activeIdea = state.activeIdea;
+      if (activeIdea > deleteIndex) activeIdea -= 1;
+      else if (activeIdea === deleteIndex) {
+        activeIdea = Math.max(0, Math.min(activeIdea, ideas.length - 1));
+      }
+      // A runner open on the DELETED idea's state must not keep showing it:
+      // close it. This is a LOCAL user action, not a remote union, so the
+      // "the union can never close the runner" invariant does not apply here
+      // (deliberate exception). pickFor/celebrate stay untouched.
+      const closeRunner = state.runnerOpen && state.activeIdea === deleteIndex;
+      return {
+        ...state,
+        ideas,
+        activeIdea,
+        deletedIdeaIds,
+        ...(closeRunner ? { runnerOpen: false } : {}),
+      };
+    }
+
     case "SET_ACTIVE_IDEA": {
       if (!hasIdea(state, action.ideaIndex)) return state;
       return { ...state, activeIdea: action.ideaIndex };
@@ -1526,6 +1695,14 @@ export function reducer(state: GameState, action: Action): GameState {
       const target = state.businesses?.find((b) => b.id === action.businessId);
       if (!target || !target.archived) return state;
       if (activeBusinessExists(state)) return state;
+      // ORPHAN DEFENSE (Change #7 review): refused when the record's ideaId no
+      // longer resolves to a live idea (or was never set). DELETE_IDEA refuses
+      // any business-referenced idea, so this state is unreachable from THIS
+      // build — but a doc written by another build could carry the orphan, and
+      // restoring it would mint an active business whose progress is
+      // unreachable (isTaskDone scopes to the promoted idea) while
+      // activeBusinessExists blocks every future promotion: a deadlock.
+      if (!target.ideaId || !state.ideas.some((idea) => idea.id === target.ideaId)) return state;
       const stampValid =
         typeof action.at === "number" && Number.isFinite(action.at) && action.at >= 0;
       return {
@@ -1594,10 +1771,41 @@ export function reducer(state: GameState, action: Action): GameState {
       // written back here. Like the load migration this MARKS state only —
       // it can never close the runner, move it, or fire a celebration.
       const merged = unionCompletionMaps(toSaveDoc(state), action.doc);
+      const mergedTombstones = merged.deletedIdeaIds ?? [];
+      // CROSS-TAB DELETION CONVERGENCE (Change #7): an idea the SERVER doc
+      // tombstoned (deleted in another tab) is dropped from live state here —
+      // but ONLY when safe. The documented invariant above says this union can
+      // NEVER close the runner, so while the runner is open AT ALL the drop is
+      // DEFERRED: the idea is kept this union (the tombstone is still adopted,
+      // so the next save cannot resurrect it server-side) and convergence
+      // happens at the next HYDRATE, whose doc the server guard has already
+      // stripped. When dropping, activeIdea reindexes exactly as DELETE_IDEA
+      // does. This drop is the ONLY place a union removes a local idea —
+      // unionCompletionMaps itself never drops (pure doc merge).
+      const tombstoned = new Set(mergedTombstones);
+      let ideas = merged.ideas;
+      let activeIdea = state.activeIdea;
+      if (!state.runnerOpen && mergedTombstones.length) {
+        const surviving = ideas.filter((idea) => !(idea.id && tombstoned.has(idea.id)));
+        if (surviving.length !== ideas.length) {
+          const activeObj = ideas[activeIdea];
+          if (activeObj && !(activeObj.id && tombstoned.has(activeObj.id))) {
+            activeIdea = surviving.indexOf(activeObj); // shifted, still the same idea
+          } else {
+            // The active idea itself was dropped: clamp to the DELETE_IDEA
+            // neighbor rule (same position if one slid up, else the last, else 0).
+            const before = ideas
+              .slice(0, activeIdea)
+              .filter((idea) => !(idea.id && tombstoned.has(idea.id))).length;
+            activeIdea = Math.max(0, Math.min(before, surviving.length - 1));
+          }
+          ideas = surviving;
+        }
+      }
       return {
         ...state,
         // Deep-copy every map so live state never aliases the engine's doc.
-        ideas: merged.ideas.map((idea) => ({
+        ideas: ideas.map((idea) => ({
           ...(idea.id ? { id: idea.id } : {}),
           fields: { ...idea.fields },
           done: { ...idea.done },
@@ -1605,7 +1813,11 @@ export function reducer(state: GameState, action: Action): GameState {
           ...(idea.doneByTask ? { doneByTask: { ...idea.doneByTask } } : {}),
           ...(idea.doneAtByTask ? { doneAtByTask: { ...idea.doneAtByTask } } : {}),
         })),
+        activeIdea,
         ...(merged.businesses ? { businesses: merged.businesses.map(copyBusiness) } : {}),
+        // Tombstones are MONOTONIC (like completions), so adopting the merged
+        // set is union-safe — never a latest-intent overwrite.
+        deletedIdeaIds: mergedTombstones,
       };
     }
 
@@ -1643,6 +1855,10 @@ export function reducer(state: GameState, action: Action): GameState {
         // clears any resident list (undefined), absent-stays-absent. Deep copy
         // so the doc's per-business maps are never aliased into live state.
         businesses: doc.businesses?.map(copyBusiness),
+        // Deleted-idea tombstones (Change #7), sourced per the split-storage
+        // learning: HYDRATE resets every persisted slice — a doc without the
+        // field clears any resident list to [] (the in-state default).
+        deletedIdeaIds: doc.deletedIdeaIds ? [...doc.deletedIdeaIds] : [],
         onboardingComplete: doc.onboardingComplete,
         docVersion: DOC_VERSION,
         stage: doc.onboardingComplete ? "app" : "onboard",
