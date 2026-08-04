@@ -474,13 +474,22 @@ describe("StepRunner", () => {
     expect(screen.getByText("Task 2 of 5")).toBeTruthy();
   });
 
-  it("review mode on the DONE last task: the compact CTA is the disabled ✓ Done", () => {
+  it("review mode on the DONE last task: ✓ Done is LIVE and returns to the floor", () => {
+    // 2026-08-04: finishing a room used to leave a greyed-out dead end here.
     const s = seedAtLastTaskOf11();
     const done = { ...s.ideas[0].done, [taskKey("1.1", 4)]: true };
-    render(<Harness seed={{ ...s, ideas: [{ fields: {}, done }] }} />);
+    const actions: unknown[] = [];
+    render(
+      <Harness seed={{ ...s, ideas: [{ fields: {}, done }] }} onAction={(a) => actions.push(a)} />,
+    );
     const doneBtn = screen.getByText("✓ Done") as HTMLButtonElement;
-    expect(doneBtn.disabled).toBe(true);
+    expect(doneBtn.disabled).toBe(false);
     expect(doneBtn.className).toContain("min-h-[44px]");
+    expect(doneBtn.className).not.toContain("opacity-60");
+    fireEvent.click(doneBtn);
+    // Same exit the ✕ fires, and it completes nothing on the way out.
+    expect(actions).toContainEqual({ type: "CLOSE_RUNNER" });
+    expect(actions.some((a) => (a as { type: string }).type === "COMPLETE_TASK")).toBe(false);
   });
 });
 

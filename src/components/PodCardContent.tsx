@@ -18,6 +18,14 @@ import { PHASES } from "../data/path";
 const INK = "hsl(25 34% 20%)";
 const INK_SOFT = "hsl(25 20% 38%)";
 const CARD_SHADOW = "0 6px 0 rgba(120,80,40,.1)";
+/**
+ * First Profit green, used for EVERY progress signal on a criterion room card
+ * (owner spec 2026-08-04): the pips read as progress no matter which brand
+ * color the room itself wears. This is the app-wide completion green already
+ * used by the "You are here" badge and the runner's task rail, so all green
+ * signals match exactly rather than differing by an invisible 2% lightness.
+ */
+const PROGRESS_GREEN = "hsl(150 52% 40%)";
 
 /** A row of progress pips filled left-to-right. */
 export function Pips({ pips, color }: { pips: boolean[]; color: string }) {
@@ -274,7 +282,10 @@ export function CriterionRoomCard({
   pips: boolean[];
   meta: string;
   hint: string;
-  /** The phase accent color (PHASES data) — pips, id, and complete border. */
+  /** The ROOM's brand color (the caller picks it by position within the
+   *  phase, so room 1 is red, room 2 blue, room 3 purple, and so on):
+   *  the card border and the wax-stamp rest state. NOT the pips, which
+   *  are always PROGRESS_GREEN. */
   accent: string;
   /** The phase's darker text color (PHASES data) — the criterion id label. */
   text: string;
@@ -334,7 +345,14 @@ export function CriterionRoomCard({
   }
   // Half-alpha accent for a completed card's border (the wax-stamp rest state).
   const halfAccent = accent.replace(/\)$/, " / .5)");
-  const border = isNext ? "hsl(150 52% 40%)" : complete ? halfAccent : "hsl(25 34% 20% / .15)";
+  // The border is ALWAYS the room's own brand color (owner spec 2026-08-04:
+  // room 1 red, room 2 blue, room 3 purple, room 4 green, room 5 amber — the
+  // caller picks it by position), softened to half alpha once the room is
+  // complete. "You are here" does NOT recolor it: that state is carried by
+  // the green badge below, so the room keeps its identity while you stand in
+  // it — otherwise room 1 would read green rather than red exactly when the
+  // learner is looking at it.
+  const border = complete ? halfAccent : accent;
   return (
     <button
       type="button"
@@ -345,7 +363,7 @@ export function CriterionRoomCard({
       {isNext ? (
         <span
           className="absolute -top-2.5 right-2.5 rounded-full px-2.5 py-0.5 font-mono text-[9px] font-bold uppercase tracking-[0.08em] text-white"
-          style={{ background: "hsl(150 52% 40%)" }}
+          style={{ background: PROGRESS_GREEN }}
         >
           You are here
         </span>
@@ -375,7 +393,8 @@ export function CriterionRoomCard({
         </span>
       </span>
       <span className="block">
-        <Pips pips={pips} color={accent} />
+        {/* Always green: progress is progress, whatever color the room is. */}
+        <Pips pips={pips} color={PROGRESS_GREEN} />
         <span className="mt-1.5 block font-mono text-[9px]" style={{ color: INK_SOFT }}>
           {meta}
         </span>

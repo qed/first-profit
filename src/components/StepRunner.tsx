@@ -316,9 +316,15 @@ export function StepRunner() {
       role="dialog"
       aria-labelledby="fp-runner-title"
       tabIndex={-1}
-      className="fp-rise absolute inset-0 z-[55] flex flex-col overflow-hidden rounded-[22px] border-2 border-[hsl(14_78%_54%/0.5)] bg-[hsl(40_55%_97%)] outline-none"
+      className="fp-rise fp-grid absolute inset-0 z-[55] rounded-[22px] border-2 border-[hsl(14_78%_54%/0.5)] bg-[hsl(38_40%_92%)] p-4 outline-none sm:p-7"
       style={{ animation: "fp-rise .3s cubic-bezier(.22,1,.36,1) both" }}
     >
+      {/* The room's own FLOOR shows through around this panel (owner spec
+          2026-08-04): the outer box wears the floor's grid, surface color and
+          red border, and pads its content by the same amount the phase floor
+          pads its cards (p-4 at 390px, p-7 from sm) — so a unit task sits ON
+          the floor of the room instead of covering it wall to wall. */}
+      <div className="flex h-full w-full flex-col overflow-hidden rounded-[16px] border-2 border-[hsl(25_34%_20%/0.15)] bg-[hsl(40_55%_97%)] shadow-[0_6px_0_rgba(120,80,40,.1)]">
       {/* The accessible name for the whole view. The visible criterion title
           lives in the Overview section, which is not always mounted, so the
           labelledby target is this always-present heading. */}
@@ -397,7 +403,7 @@ export function StepRunner() {
       <div className="flex min-h-0 flex-1 flex-col sm:flex-row">
         <nav
           aria-label="Task sections"
-          className="flex shrink-0 gap-1 overflow-x-auto border-b-2 border-[hsl(25_34%_20%/0.1)] px-3 py-2.5 sm:w-[184px] sm:flex-col sm:gap-1.5 sm:overflow-x-visible sm:border-b-0 sm:border-r-2 sm:px-3 sm:py-4"
+          className="flex shrink-0 gap-0.5 overflow-x-auto border-b-2 border-[hsl(25_34%_20%/0.1)] px-2 py-2.5 sm:w-[184px] sm:flex-col sm:gap-1.5 sm:overflow-x-visible sm:border-b-0 sm:border-r-2 sm:px-3 sm:py-4"
         >
           {SECTIONS.map((s) => {
             const selected = s.id === section;
@@ -407,7 +413,7 @@ export function StepRunner() {
                 type="button"
                 onClick={() => setSection(s.id)}
                 aria-current={selected ? "true" : undefined}
-                className={`flex min-h-[44px] shrink-0 items-center whitespace-nowrap rounded-xl px-2.5 font-display text-[13px] font-bold transition-colors sm:w-full sm:px-3.5 sm:text-sm ${
+                className={`flex min-h-[44px] shrink-0 items-center whitespace-nowrap rounded-xl px-2 font-display text-[13px] font-bold transition-colors sm:w-full sm:px-3.5 sm:text-sm ${
                   selected ? "text-white" : "text-[hsl(25_20%_38%)] hover:bg-[hsl(25_34%_20%/0.06)]"
                 }`}
                 style={selected ? { background: accent } : undefined}
@@ -568,10 +574,14 @@ export function StepRunner() {
           More tools please
         </button>
         {alreadyDone && isLast ? (
+          // The room is finished. This used to be a greyed-out dead end
+          // (owner spec 2026-08-04): it is now the way OUT — same CLOSE_RUNNER
+          // the ✕ fires, so the last task hands you back to the floor instead
+          // of stranding you on a disabled button.
           <button
             type="button"
-            disabled
-            className="inline-flex min-h-[44px] items-center justify-center gap-1.5 rounded-xl bg-verified px-4 font-display text-sm font-bold text-white opacity-60 shadow-[0_3px_0_hsl(150_52%_26%)]"
+            onClick={close}
+            className="inline-flex min-h-[44px] items-center justify-center gap-1.5 rounded-xl bg-verified px-4 font-display text-sm font-bold text-white shadow-[0_3px_0_hsl(150_52%_26%)]"
             style={ctaStyle}
           >
             ✓ Done
@@ -595,6 +605,7 @@ export function StepRunner() {
             ✓ I did it
           </button>
         )}
+      </div>
       </div>
     </div>
   );
