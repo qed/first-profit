@@ -16,8 +16,14 @@
  * there is more than one idea), the Sales / Profit stats, and the save
  * indicator. The row wraps at narrow widths so nothing overflows at 390px.
  *
- * Full-screen mobile overlays (`fixed inset-0`, higher z) cover this bar by
- * design; desktop floating dialogs leave it visible. No em dashes in copy.
+ * LAYERING (owner spec 2026-08-04, change 30). The bar sits at z-50, which
+ * puts it ABOVE the unit task room (z-45, a room-scoped view that only ever
+ * covers the factory floor) and BELOW every full-screen takeover (z-55/z-60:
+ * room dialogs, promote, celebration, the suggestion modals). So the bar's
+ * dropdowns open OVER a room the learner is standing in, while a real
+ * takeover still covers the bar. `sticky` + z-index makes this bar its own
+ * stacking context, so the menus' own z-50 is relative to the bar, not to the
+ * page — raising the BAR is what lifts the menus. No em dashes in copy.
  */
 import { useEffect, useRef, useState } from "react";
 import { ChevronDown } from "lucide-react";
@@ -72,7 +78,7 @@ function MoneyStat({ label, cents }: { label: string; cents: number }) {
  *
  * Interaction is the AccountMenu contract verbatim (one dropdown convention in
  * this bar): mousedown outside closes, Escape closes and returns focus to the
- * chip, z-50 so it floats above the sticky z-40 bar, right-aligned so it never
+ * chip, z-50 so it floats above the sticky bar, right-aligned so it never
  * overflows at 390px. Choosing an idea dispatches SET_ACTIVE_IDEA and then
  * fires `onSwitched` so Factory can cancel an in-flight walk (the kid's switch
  * wins over a pending arrival — the behavior the modal's onSwitched carried).
@@ -231,7 +237,7 @@ function AppNavStats() {
  * The founder chip as an Account dropdown: clicking the chip opens a small
  * menu (title "Account") holding the Log out action. Dependency-free —
  * useState + refs + a document mousedown listener; Escape closes and returns
- * focus to the chip. The menu is z-50 so it floats above the sticky z-40 bar's
+ * focus to the chip. The menu is z-50 so it floats above the sticky bar's
  * floor content, right-aligned under the chip so it never overflows at 390px.
  */
 function AccountMenu({ founder, onLogout }: { founder: string; onLogout: () => void }) {
@@ -338,7 +344,7 @@ export function GlobalNav({ onSwitched }: { onSwitched?: () => void } = {}) {
     <nav
       ref={navRef}
       aria-label="First Profit"
-      className="sticky top-0 z-40 border-b border-[hsl(40_14%_89%)] bg-[hsl(40_30%_99%)] text-ink"
+      className="sticky top-0 z-50 border-b border-[hsl(40_14%_89%)] bg-[hsl(40_30%_99%)] text-ink"
     >
       <div className="mx-auto flex min-h-[52px] max-w-[1120px] flex-wrap items-center justify-between gap-y-1 px-4 py-1 sm:px-8">
         {loggedIn ? (

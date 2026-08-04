@@ -315,6 +315,18 @@ describe("GlobalNav app stage — the one bar's game section", () => {
     expect(screen.getByRole("button", { name: "Switch idea" }).className).toMatch(/text-build/);
   });
 
+  it("the bar sits ABOVE the unit task room so its dropdowns open over it", () => {
+    // Change 30. `sticky` + z-index makes the bar its own stacking context, so
+    // the menus' z-50 is relative to the BAR: the bar's own z is what decides
+    // whether a dropdown clears the room (z-45). Full-screen takeovers stay
+    // higher still (z-55/z-60), so they keep covering the bar.
+    stage = "app";
+    const { container } = render(<GlobalNav />);
+    const bar = container.querySelector("nav") as HTMLElement;
+    expect(bar.className).toContain("z-50");
+    expect(bar.className).toContain("sticky");
+  });
+
   it("the founder chip is GREEN with no bubble: no pill background, border, or rounding", () => {
     stage = "app";
     profile = { firstName: "Cedric", handle: "cedric" };
