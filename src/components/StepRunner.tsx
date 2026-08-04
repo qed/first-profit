@@ -668,11 +668,15 @@ export function StepRunner() {
           {section === "tools" ? (
             <div>
               {currentTaskId === PITCH_TASK_ID ? (
-                <PitchBuilderTool
-                  fields={idea?.fields ?? {}}
-                  onFieldChange={onFieldChange}
-                  runAfterWalk={walkThen}
-                />
+                // Mini-tool interaction stays inside the work surface. Letting
+                // clicks bubble to the room makes the avatar walk over the
+                // timer/text controls and visually cover the thing in use.
+                <div onClick={(event) => event.stopPropagation()}>
+                  <PitchBuilderTool
+                    fields={idea?.fields ?? {}}
+                    onFieldChange={onFieldChange}
+                  />
+                </div>
               ) : (
                 <>
                   <h3 className={SECTION_HEADLINE}>{TOOLS_HEADING}</h3>

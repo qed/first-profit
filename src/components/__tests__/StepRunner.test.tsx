@@ -248,6 +248,11 @@ describe("StepRunner", () => {
       key: "pitch",
       value: "What if your neighborhood stories could fit in your pocket?",
     });
+
+    // Tool controls respond immediately to mouse clicks and do not use the
+    // room's move-first delay, which would park the avatar over the timer.
+    fireEvent.click(screen.getByRole("button", { name: "Start run" }), { detail: 1 });
+    expect(screen.getByRole("button", { name: "Pause run" })).toBeTruthy();
   });
 
   it("fills the FLOOR box, not the viewport, and is not a floating modal card", () => {
