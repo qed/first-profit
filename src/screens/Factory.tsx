@@ -54,7 +54,7 @@ import { IdeaRoom } from "../components/rooms/IdeaRoom";
  *  rooms have real surfaces in Slice A; any other RoomId is inert (no dialog). */
 const ROOM_META: Partial<Record<RoomId, { sign: string; name: string; tagline: string; Body: () => React.JSX.Element }>> = {
   website: { sign: "🌐", name: "Your Site", tagline: "Your real page on the internet.", Body: YourSite },
-  checkout: { sign: "💳", name: "The Checkout Booth", tagline: "Take real money. Backers get store credit.", Body: CheckoutBooth },
+  checkout: { sign: "💳", name: "The Checkout Booth", tagline: "Your checkout page opens when you have a product and a price.", Body: CheckoutBooth },
   market: { sign: "🛒", name: "The Sales Room", tagline: "Strangers, asks, yeses and nos.", Body: SalesRoom },
   idea: { sign: "💡", name: "The Idea Room", tagline: "Pick one thing to sell. Say it in a sentence.", Body: IdeaRoom },
 };

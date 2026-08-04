@@ -4,10 +4,10 @@
 //   - The Sales Room "Log a sale" form appends a {kind:'sale'} row through
 //     ADD_LEDGER with a caller-minted id/timestamp and completes 1.2's last task
 //     for the active idea (firing the 1.2 celebration when it is the last task).
-//   - The Checkout Booth provider-choice lesson (PP2 Unit 4, replacing the retired
-//     mock Stripe overlay): with no provider chosen it shows the 3-provider
-//     comparison; choosing dispatches SET_PROVIDER; once chosen it shows the
-//     chosen-provider summary with a "Compare providers again" re-entry.
+//   - The simplified Checkout Booth (owner spec 2026-08-03): ONLY First Profit
+//     Pay, exact fee/hold subhead, a LOCKED disabled affordance, no comparison,
+//     no log-a-real-sale card, no setup/compare CTAs. Legacy accounts with a
+//     chosenProvider keep a compact summary (the reducer state is untouched).
 import { describe, it, expect, vi, beforeEach, afterEach, beforeAll } from "vitest";
 import React from "react";
 import { render, act, fireEvent, waitFor, cleanup } from "@testing-library/react";
@@ -178,97 +178,89 @@ describe("Sales Room — Log a sale", () => {
   });
 });
 
-describe("Checkout Booth — provider choice", () => {
-  it("with no provider chosen, shows the 3-provider comparison as the booth body", async () => {
+describe("Checkout Booth (simplified): only First Profit Pay, locked checkout", () => {
+  it("shows a single First Profit Pay card with the exact fee and hold subhead", async () => {
     renderBooth();
     await waitFor(() => expect(api?.stage).toBe("landing"));
-
-    // No provider chosen yet (reachable on first booth entry, R24.3).
     expect(getApi().chosenProvider).toBeNull();
 
-    // One "Choose <name>" action per provider, in PROVIDER_IDS order.
-    const chooseButtons = Array.from(document.querySelectorAll("button")).filter((b) =>
-      /^Choose /.test(b.textContent || ""),
-    );
-    expect(chooseButtons.map((b) => b.textContent)).toEqual([
-      "Choose First Profit Pay",
-      "Choose Shopify Starter Plan",
-      "Choose Replit",
-    ]);
-
-    // First Profit Pay is present + pickable, framed AS A PROVIDER (not "the course").
-    expect(button((b) => b.textContent === "Choose First Profit Pay")).toBeTruthy();
-    expect(document.body.textContent).not.toMatch(/the course/i);
-    // Its 50% fee copy is shown (sourced from providers.ts).
-    expect(document.body.textContent).toMatch(/50% of every sale/);
-    // The real options' fee copy is shown too.
-    expect(document.body.textContent).toMatch(/2\.9% \+ 30c per sale/);
-    // Each card's cost line (costLine): FPP has no subscription suffix,
-    // Replit adds $25/mo, Shopify Starter adds $5/mo.
-    expect(document.body.textContent).toMatch(/\$25\/mo/);
-    expect(document.body.textContent).toMatch(/\$5\/mo/);
-    // And each card's one-line pitch.
-    expect(document.body.textContent).toMatch(/Works right now/);
-    expect(document.body.textContent).toMatch(/Sell online quickly/);
-    expect(document.body.textContent).toMatch(/Build your own store/);
-  });
-
-  it("choosing a provider dispatches SET_PROVIDER with the id and shows the summary", async () => {
-    renderBooth();
-    await waitFor(() => expect(api?.stage).toBe("landing"));
-
-    act(() => fireEvent.click(button((b) => b.textContent === "Choose Replit")));
-
-    const after = getApi();
-    expect(after.chosenProvider?.providerId).toBe("replit");
-    expect(typeof after.chosenProvider?.chosenAt).toBe("number");
-
-    // The booth now shows the chosen-provider summary, not the comparison.
-    await waitFor(() => expect(document.body.textContent).toMatch(/You chose this/));
-    expect(document.body.textContent).toMatch(/Replit/);
-    // The comparison's "Choose" actions are gone once a provider is chosen.
+    // The one and only provider on offer.
+    expect(document.body.textContent).toMatch(/First Profit Pay/);
+    // The subhead copy is EXACT (owner spec).
+    expect(document.body.textContent).toContain("5% of every sale. 90 day hold before transfer.");
+    // No other providers and no comparison: zero "Choose <name>" actions.
+    expect(document.body.textContent).not.toMatch(/Shopify/);
+    expect(document.body.textContent).not.toMatch(/Replit/);
     expect(
       Array.from(document.querySelectorAll("button")).some((b) => /^Choose /.test(b.textContent || "")),
     ).toBe(false);
   });
 
-  it("First Profit Pay is pickable and labeled as a provider (not the course)", async () => {
+  it("the checkout affordance is a DISABLED locked button with the lock icon", async () => {
     renderBooth();
     await waitFor(() => expect(api?.stage).toBe("landing"));
 
-    act(() => fireEvent.click(button((b) => b.textContent === "Choose First Profit Pay")));
-
-    const after = getApi();
-    expect(after.chosenProvider?.providerId).toBe("first_profit_pay");
-    await waitFor(() => expect(document.body.textContent).toMatch(/First Profit Pay/));
-    expect(document.body.textContent).toMatch(/You chose this/);
+    const locked = button((b) =>
+      (b.textContent || "").includes("Live Checkout Page when you have a product and a price"),
+    );
+    // Disabled + aria-disabled: it never writes chosenProvider (a static lock).
+    expect(locked.hasAttribute("disabled")).toBe(true);
+    expect(locked.getAttribute("aria-disabled")).toBe("true");
+    // The lucide Lock icon renders inside the button, decorative (aria-hidden).
+    const icon = locked.querySelector("svg");
+    expect(icon).toBeTruthy();
+    expect(icon?.getAttribute("aria-hidden")).toBe("true");
+    // Clicking does nothing: no provider gets chosen from this room.
+    act(() => fireEvent.click(locked));
+    expect(getApi().chosenProvider).toBeNull();
   });
 
-  it("with a provider already chosen, the summary offers a 'Compare providers again' re-entry", async () => {
+  it("none of the retired copy renders (unchosen state)", async () => {
     renderBooth();
     await waitFor(() => expect(api?.stage).toBe("landing"));
+
+    expect(document.body.textContent).not.toMatch(/Take real money/i);
+    expect(document.body.textContent).not.toMatch(/Your payment provider/i);
+    expect(document.body.textContent).not.toMatch(/Works right now/i);
+    expect(document.body.textContent).not.toMatch(/log a real sale/i);
+    expect(document.body.textContent).not.toMatch(/Set it up for real/i);
+    expect(document.body.textContent).not.toMatch(/Compare providers/i);
+  });
+
+  it("a legacy chosen provider still shows its summary, without the retired label or CTAs", async () => {
+    renderBooth();
+    await waitFor(() => expect(api?.stage).toBe("landing"));
+    // Legacy account: a provider was chosen before the simplification.
     act(() => getApi().dispatch({ type: "SET_PROVIDER", providerId: "shopify", chosenAt: 1 }));
 
-    // Summary state: name + fee + the "compare again" entry, no comparison cards.
     await waitFor(() => expect(document.body.textContent).toMatch(/You chose this/));
-    expect(document.body.textContent).toMatch(/Shopify/);
-    const compareAgain = button((b) => b.textContent === "Compare providers again");
-
-    // Re-opening surfaces the comparison again (all three Choose actions return).
-    act(() => fireEvent.click(compareAgain));
-    await waitFor(() =>
-      expect(
-        Array.from(document.querySelectorAll("button")).filter((b) => /^Choose /.test(b.textContent || "")),
-      ).toHaveLength(3),
-    );
+    expect(document.body.textContent).toMatch(/Shopify Starter Plan/);
+    // The summary fee line still reads from providers.ts data.
+    expect(document.body.textContent).toMatch(/\$5\/mo/);
+    // The retired label and CTAs are gone from the chosen view too.
+    expect(document.body.textContent).not.toMatch(/Your payment provider/i);
+    expect(document.body.textContent).not.toMatch(/Set it up for real/i);
+    expect(document.body.textContent).not.toMatch(/Compare providers/i);
+    expect(document.body.textContent).not.toMatch(/log a real sale/i);
   });
 
-  it("shows a light 'subscription so far' estimate for a subscription provider (R24.8)", async () => {
+  it("a legacy chosen First Profit Pay shows the SAME fee and hold subhead (states agree)", async () => {
+    renderBooth();
+    await waitFor(() => expect(api?.stage).toBe("landing"));
+    act(() => getApi().dispatch({ type: "SET_PROVIDER", providerId: "first_profit_pay", chosenAt: 1 }));
+
+    await waitFor(() => expect(document.body.textContent).toMatch(/You chose this/));
+    expect(document.body.textContent).toContain("5% of every sale. 90 day hold before transfer.");
+    // No subscription estimate for a no-subscription provider.
+    expect(document.body.textContent).not.toMatch(/Subscription so far/);
+  });
+
+  it("keeps the light 'subscription so far' estimate for a legacy subscription provider", async () => {
     // Freeze the wall clock so the CONCRETE dollar figure is deterministic:
     // ChosenSummary reads Date.now() at render, so a frozen now makes elapsed
     // exactly two months. Spying only Date.now (not full fake timers) keeps
-    // waitFor's real-timer polling working. Shopify Starter is 500c/mo, so two months
-    // -> Math.round(500 * 2) = 1000c -> formatWholeDollars -> "$10".
+    // waitFor's real-timer polling working. Shopify Starter is 500c/mo, so two
+    // months -> Math.round(500 * 2) = 1000c -> "$10".
     const NOW = 1_700_000_000_000;
     const nowSpy = vi.spyOn(Date, "now").mockReturnValue(NOW);
     try {
@@ -278,114 +270,28 @@ describe("Checkout Booth — provider choice", () => {
       act(() => getApi().dispatch({ type: "SET_PROVIDER", providerId: "shopify", chosenAt: twoMonthsAgo }));
 
       await waitFor(() => expect(document.body.textContent).toMatch(/You chose this/));
-      // The directional estimate line is present + labeled as an estimate.
       expect(document.body.textContent).toMatch(/Subscription so far \(estimate\)/);
-      // ...and its CONCRETE value renders through the summary, not just the label:
-      // 2 months of Shopify Starter's $5/mo = $10. (A $0 / wrong-multiplier / cents-as-
-      // dollars bug would slip past a bare /\$/ check; this pins the real figure.)
       expect(document.body.textContent).toMatch(/about \$10 so far/);
     } finally {
       nowSpy.mockRestore();
     }
   });
 
-  it("the chosen summary's fee line shows the provider's subscription (subscriptionLabel)", async () => {
-    // The summary fee line renders `{feeLabel} · {subscriptionLabel}`. Assert the
-    // subscription HALF through the rendered summary for each provider shape:
-    // Replit + Shopify subscribe, First Profit Pay does not.
-    const replit = renderBooth();
-    await waitFor(() => expect(api?.stage).toBe("landing"));
-    act(() => getApi().dispatch({ type: "SET_PROVIDER", providerId: "replit", chosenAt: 1 }));
-    await waitFor(() => expect(document.body.textContent).toMatch(/You chose this/));
-    expect(document.body.textContent).toMatch(/\$25\/mo/);
-    replit.unmount();
-
-    const shopify = renderBooth();
-    await waitFor(() => expect(api?.stage).toBe("landing"));
-    act(() => getApi().dispatch({ type: "SET_PROVIDER", providerId: "shopify", chosenAt: 1 }));
-    await waitFor(() => expect(document.body.textContent).toMatch(/You chose this/));
-    expect(document.body.textContent).toMatch(/\$5\/mo/);
-    shopify.unmount();
-
+  it("the ledger of existing sale rows stays visible in the booth", async () => {
     renderBooth();
     await waitFor(() => expect(api?.stage).toBe("landing"));
-    act(() => getApi().dispatch({ type: "SET_PROVIDER", providerId: "first_profit_pay", chosenAt: 1 }));
-    await waitFor(() => expect(document.body.textContent).toMatch(/You chose this/));
-    expect(document.body.textContent).toMatch(/No monthly fee/);
-  });
 
-  it("omits the 'subscription so far' estimate for First Profit Pay (no subscription)", async () => {
-    renderBooth();
-    await waitFor(() => expect(api?.stage).toBe("landing"));
-    act(() => getApi().dispatch({ type: "SET_PROVIDER", providerId: "first_profit_pay", chosenAt: 1 }));
-
-    await waitFor(() => expect(document.body.textContent).toMatch(/You chose this/));
-    expect(document.body.textContent).not.toMatch(/Subscription so far/);
-  });
-
-  it("'Set it up for real' opens the SetupGuide dialog for the chosen provider (R24.10)", async () => {
-    renderBooth();
-    await waitFor(() => expect(api?.stage).toBe("landing"));
-    act(() => getApi().dispatch({ type: "SET_PROVIDER", providerId: "replit", chosenAt: 1 }));
-
-    await waitFor(() => expect(document.body.textContent).toMatch(/You chose this/));
-    // No dialog until the affordance is used.
-    expect(document.querySelector('[role="dialog"]')).toBeNull();
-
-    act(() => fireEvent.click(button((b) => b.textContent === "Set it up for real")));
-    await waitFor(() => expect(document.querySelector('[role="dialog"]')).toBeTruthy());
-    expect(document.body.textContent).toMatch(/Go live with Replit/);
-  });
-
-  it("switching to a DIFFERENT provider shows the coach beat; dismissing lands on the new provider (R24.6)", async () => {
-    renderBooth();
-    await waitFor(() => expect(api?.stage).toBe("landing"));
-    // Start on First Profit Pay.
-    act(() => getApi().dispatch({ type: "SET_PROVIDER", providerId: "first_profit_pay", chosenAt: 1 }));
-    await waitFor(() => expect(document.body.textContent).toMatch(/You chose this/));
-
-    // Re-open and choose a DIFFERENT provider -> a real switch.
-    act(() => fireEvent.click(button((b) => b.textContent === "Compare providers again")));
-    act(() => fireEvent.click(button((b) => b.textContent === "Choose Replit")));
-
-    // The coach beat renders and names the lesson.
-    await waitFor(() => expect(document.querySelector('[role="dialog"]')).toBeTruthy());
-    expect(document.body.textContent).toMatch(/First Profit Pay was taking half of every sale/);
-    expect(getApi().chosenProvider?.providerId).toBe("replit");
-
-    // Dismissing returns to the chosen summary with the NEW provider active.
-    act(() => fireEvent.click(button((b) => b.textContent === "Got it")));
-    await waitFor(() => expect(document.querySelector('[role="dialog"]')).toBeNull());
-    expect(document.body.textContent).toMatch(/You chose this/);
-    expect(document.body.textContent).toMatch(/Replit/);
-  });
-
-  it("the FIRST-EVER provider choice (from null) raises NO coach beat", async () => {
-    renderBooth();
-    await waitFor(() => expect(api?.stage).toBe("landing"));
-    // No provider chosen yet: this is a first choice, not a switch.
-    expect(getApi().chosenProvider).toBeNull();
-
-    act(() => fireEvent.click(button((b) => b.textContent === "Choose Replit")));
-
-    // The choice landed, and the summary is shown WITHOUT a coach dialog (a
-    // first choice has no "old" provider to reflect against).
-    await waitFor(() => expect(document.body.textContent).toMatch(/You chose this/));
-    expect(getApi().chosenProvider?.providerId).toBe("replit");
-    expect(document.querySelector('[role="dialog"]')).toBeNull();
-  });
-
-  it("choosing the SAME provider again does NOT show the coach beat (no-op switch)", async () => {
-    renderBooth();
-    await waitFor(() => expect(api?.stage).toBe("landing"));
-    act(() => getApi().dispatch({ type: "SET_PROVIDER", providerId: "replit", chosenAt: 1 }));
-    await waitFor(() => expect(document.body.textContent).toMatch(/You chose this/));
-
-    act(() => fireEvent.click(button((b) => b.textContent === "Compare providers again")));
-    act(() => fireEvent.click(button((b) => b.textContent === "Choose Replit")));
-
-    // Back to the summary, and NO coach dialog appeared.
-    await waitFor(() => expect(document.body.textContent).toMatch(/You chose this/));
-    expect(document.querySelector('[role="dialog"]')).toBeNull();
+    act(() =>
+      getApi().dispatch({
+        type: "ADD_LEDGER",
+        id: "row-1",
+        kind: "sale",
+        payer: "Ms. Okafor",
+        amountCents: 1200,
+        createdAt: new Date().toISOString(),
+      }),
+    );
+    await waitFor(() => expect(document.body.textContent).toMatch(/Ledger/));
+    expect(document.body.textContent).toMatch(/Ms\. Okafor/);
   });
 });

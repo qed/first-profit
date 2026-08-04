@@ -1,34 +1,33 @@
 /**
- * The Checkout Booth room body (PP2 Unit 4). The old First Profit-branded Stripe
- * mock is retired; the booth now teaches the provider-choice lesson.
+ * The Checkout Booth room body. Simplified 2026-08-03 (owner spec): the booth
+ * offers ONLY First Profit Pay. The three-provider comparison, the log-a-real-
+ * sale card, the "set it up for real" walkthrough entry, and the "compare
+ * providers again" re-entry are all gone from this room. The provider DATA in
+ * src/data/providers.ts is untouched (fee modeling elsewhere depends on it);
+ * only this room's UI narrows.
  *
  * Two states:
- *   - NO provider chosen yet  -> the ProviderComparison lesson is the booth's
- *     primary content (the choice is available the moment the booth is first
- *     reachable, R24.3, and is NOT gated behind logging a sale).
- *   - A provider ALREADY chosen -> a compact chosen-provider SUMMARY (name, its
- *     per-sale fee, "you chose this") plus a "Compare providers again" entry that
- *     re-opens the comparison.
+ *   - NO provider chosen (the norm now) -> a single First Profit Pay card with
+ *     the fee/hold subhead and a LOCKED, disabled affordance ("Live Checkout
+ *     Page when you have a product and a price"). Nothing here writes
+ *     chosenProvider; the lock is static, no unlock logic.
+ *   - A provider ALREADY chosen (legacy accounts; the reducer keeps
+ *     SET_PROVIDER + chosenProvider) -> a compact chosen summary (name + fee
+ *     line + the subscription-so-far proxy for subscription providers). It has
+ *     no actions; this room mints no new choices.
  *
- * SWITCH flow + coach beat (Unit 6, R24.6): re-opening the comparison and
- * choosing a DIFFERENT provider is a real switch (old id != new id) and shows the
- * ProviderSwitchCoach reflection overlay. Choosing the SAME provider is a no-op
- * (the reducer no-ops a same-id SET_PROVIDER, and no coach fires). Dismissing the
- * coach returns to the chosen summary with the NEW provider active. Past sales are
- * UNTOUCHED: each ledger row carries its own Unit 5 fee snapshot, so a switch
- * never rewrites history.
- *
- * The append-only Ledger list (the sale record) stays visible in both states.
- * Mobile-first at ~390px; no em dashes.
+ * The append-only Ledger list (existing sale records) stays visible in both
+ * states. Mobile-first at ~390px; no em dashes; 44px tap targets.
  */
-import { useState } from "react";
+import { Lock } from "lucide-react";
 import { useGame } from "../../state/GameContext";
 import { LedgerList } from "./LedgerList";
-import { LogSaleForm } from "./LogSaleForm";
-import { ProviderComparison, feeLabel, subscriptionLabel } from "./ProviderComparison";
-import { ProviderSwitchCoach } from "./ProviderSwitchCoach";
-import { SetupGuide } from "./SetupGuide";
-import { PROVIDERS, type Provider, type ProviderId } from "../../data/providers";
+import { feeLabel, subscriptionLabel } from "./ProviderComparison";
+import { ProviderLogo } from "./ProviderLogo";
+import { PROVIDERS, type Provider } from "../../data/providers";
+
+/** The booth card's fee/hold subhead. Exact copy per owner spec, 2026-08-03. */
+export const FPP_SUBHEAD = "5% of every sale. 90 day hold before transfer.";
 
 /** ~30-day month in ms, for the directional "subscription so far" proxy. */
 const MS_PER_MONTH = 30 * 24 * 60 * 60 * 1000;
@@ -63,64 +62,10 @@ function formatWholeDollars(cents: number): string {
 
 export function CheckoutBooth() {
   const { chosenProvider, ledger } = useGame();
-  // Re-open the comparison over an existing choice ("compare again"). Simple
-  // local toggle.
-  const [comparing, setComparing] = useState(false);
-  // The in-flight switch the coach beat is reflecting on, or null. Captured at
-  // choose time (old id from the pre-dispatch closure vs the newly chosen id).
-  const [switchCoach, setSwitchCoach] = useState<{ from: ProviderId; to: ProviderId } | null>(null);
-  // Whether the real-world SetupGuide overlay for the chosen provider is open.
-  const [setupOpen, setSetupOpen] = useState(false);
-
-  const showComparison = !chosenProvider || comparing;
-
-  // Fires from ProviderComparison AFTER it dispatched SET_PROVIDER. This closure
-  // still holds the PRE-dispatch chosenProvider, so an existing id that differs
-  // from the new one is a real switch -> raise the coach beat. First-ever choice
-  // (no prior provider) and same-provider re-pick raise nothing.
-  const handleChoose = (newId: ProviderId) => {
-    const oldId = chosenProvider?.providerId;
-    setComparing(false);
-    if (oldId && oldId !== newId) {
-      setSwitchCoach({ from: oldId, to: newId });
-    }
-  };
 
   return (
     <div>
-      {switchCoach && (
-        <ProviderSwitchCoach
-          oldProviderId={switchCoach.from}
-          newProviderId={switchCoach.to}
-          ledger={ledger}
-          onDismiss={() => setSwitchCoach(null)}
-        />
-      )}
-      {setupOpen && chosenProvider && (
-        <SetupGuide providerId={chosenProvider.providerId} onDismiss={() => setSetupOpen(false)} />
-      )}
-      {showComparison ? (
-        <div>
-          {chosenProvider && (
-            <button
-              type="button"
-              onClick={() => setComparing(false)}
-              className="mb-3 inline-flex min-h-[44px] items-center px-1 font-mono text-xs text-[hsl(25_20%_38%)] hover:text-[hsl(25_34%_20%)]"
-            >
-              ← Back to my provider
-            </button>
-          )}
-          <ProviderComparison onChoose={handleChoose} />
-        </div>
-      ) : (
-        <>
-          <ChosenSummary onCompareAgain={() => setComparing(true)} onSetup={() => setSetupOpen(true)} />
-          {/* Log real sales through the chosen provider (fee modeled per row). */}
-          <div className="mt-4">
-            <LogSaleForm onChooseProvider={() => setComparing(true)} />
-          </div>
-        </>
-      )}
+      {chosenProvider ? <ChosenSummary /> : <FirstProfitPayCard />}
 
       {/* The ledger only appears once there is a row to show; the empty state is
           deliberately silent (owner request, 2026-08-02). */}
@@ -135,21 +80,50 @@ export function CheckoutBooth() {
 }
 
 /**
- * The chosen-provider summary. `provider` may be undefined at runtime if a stale
- * or unknown id was persisted, so the name falls back to the raw id (rendered as
- * JSX text via React default escaping, never dangerouslySetInnerHTML).
+ * The single First Profit Pay card: name, the exact fee/hold subhead, and a
+ * static locked affordance. The button is decorative-disabled (disabled +
+ * aria-disabled, no onClick): there is nothing to unlock from this room.
  */
-function ChosenSummary({
-  onCompareAgain,
-  onSetup,
-}: {
-  onCompareAgain: () => void;
-  onSetup: () => void;
-}) {
+function FirstProfitPayCard() {
+  const fpp = PROVIDERS.first_profit_pay;
+  return (
+    <div className="w-full rounded-[16px] border-2 border-[hsl(25_34%_20%/0.15)] bg-white p-5">
+      <div className="flex items-center gap-3">
+        <ProviderLogo id={fpp.id} className="h-8 w-8 shrink-0" />
+        <p className="font-display text-[20px] font-black text-[hsl(25_34%_20%)]">{fpp.name}</p>
+      </div>
+      <p className="mt-2 text-[14px] font-semibold text-[hsl(25_34%_20%)]">{FPP_SUBHEAD}</p>
+      <p className="mt-1 text-[13px] leading-[1.5] text-[hsl(25_20%_38%)]">
+        This is where your money will come in.
+      </p>
+
+      <button
+        type="button"
+        disabled
+        aria-disabled="true"
+        className="mt-3.5 flex min-h-[44px] w-full cursor-not-allowed items-center justify-center gap-2 rounded-[10px] bg-[hsl(25_34%_20%/0.12)] px-5 text-sm font-semibold text-[hsl(25_20%_38%)] opacity-70"
+      >
+        <Lock size={18} aria-hidden className="shrink-0" />
+        <span>Live Checkout Page when you have a product and a price</span>
+      </button>
+    </div>
+  );
+}
+
+/**
+ * The chosen-provider summary for legacy accounts that already chose (this room
+ * writes no NEW choices). `provider` may be undefined at runtime if a stale or
+ * unknown id was persisted, so the name falls back to the raw id (rendered as
+ * JSX text via React default escaping, never dangerouslySetInnerHTML). A chosen
+ * First Profit Pay shows the same fee/hold subhead as the card, so the two
+ * states never disagree about the fee.
+ */
+function ChosenSummary() {
   const { chosenProvider } = useGame();
   if (!chosenProvider) return null;
   const provider = PROVIDERS[chosenProvider.providerId];
   const name = provider ? provider.name : chosenProvider.providerId;
+  const isFpp = chosenProvider.providerId === "first_profit_pay";
 
   // Light, directional "subscription so far" proxy (null for a no-subscription
   // provider like First Profit Pay). Date.now() is read here at render (a view),
@@ -158,13 +132,10 @@ function ChosenSummary({
 
   return (
     <div className="w-full rounded-[16px] border-2 border-[hsl(25_34%_20%/0.15)] bg-white p-5">
-      <p className="font-mono text-[10px] uppercase tracking-[0.1em] text-[hsl(25_20%_38%)]">
-        Your payment provider
-      </p>
-      <p className="mt-1 font-display text-[22px] font-black text-[hsl(25_34%_20%)]">{name}</p>
+      <p className="font-display text-[22px] font-black text-[hsl(25_34%_20%)]">{name}</p>
       {provider && (
         <p className="mt-1 text-[13px] text-[hsl(25_20%_38%)]">
-          {feeLabel(provider)} · {subscriptionLabel(provider)}
+          {isFpp ? FPP_SUBHEAD : `${feeLabel(provider)} · ${subscriptionLabel(provider)}`}
         </p>
       )}
       <p className="mt-2 text-[13px] leading-[1.5] text-[hsl(25_34%_20%)]">
@@ -185,21 +156,6 @@ function ChosenSummary({
           </p>
         </div>
       )}
-
-      <button
-        type="button"
-        onClick={onSetup}
-        className="mt-3.5 flex min-h-[44px] w-full items-center justify-center rounded-[10px] bg-build px-5 text-sm font-semibold text-white hover:brightness-110"
-      >
-        Set it up for real
-      </button>
-      <button
-        type="button"
-        onClick={onCompareAgain}
-        className="mt-2.5 flex min-h-[44px] w-full items-center justify-center rounded-[10px] border-2 border-[hsl(25_34%_20%/0.15)] bg-[hsl(40_55%_97%)] px-5 text-sm font-semibold text-[hsl(25_34%_20%)] hover:border-[hsl(25_34%_20%/0.4)]"
-      >
-        Compare providers again
-      </button>
     </div>
   );
 }
