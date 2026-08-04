@@ -5,9 +5,12 @@
  * reflects the real site's state and, when live, links to it.
  *
  * ── Flag gate (VITE_ENABLE_PUBLIC_SITE) ─────────────────────────────────────
- * Flag OFF renders ONLY the Coming Soon note (claiming needs the gated
- * backend, so no claim UI, no link, no network). Flag ON renders the real
- * room, driven by the site slice (the Unit 4 registry read-back):
+ * The status-driven room renders in EVERY build: the server's self-read
+ * (GET /api/fp/site) is deliberately ungated (own-row read-back only), so a
+ * child whose row is already published sees their real link even when the
+ * flag is off. The flag gates ONLY the claim UI (claiming and publishing need
+ * the gated backend): flag off + status `none` renders just the Coming Soon
+ * note, no claim UI. Every other state renders identically in both builds:
  *
  *   published → an open-your-site link (constructed href, new tab,
  *               rel-hardened, >=44px tap target, URL text truncates) + the
@@ -45,10 +48,10 @@ import { useGame } from "../../state/GameContext";
 import type { SiteStatus } from "../../state/gameCore";
 
 export function YourSite() {
-  // The flag is baked into the bundle (never flips at runtime), so branching
-  // to two components here is hook-safe; the flag-off body mounts no game
-  // hooks and makes no network calls.
-  return isPublicSiteEnabled() ? <RealYourSite /> : <ComingSoonOnly />;
+  // The status-driven room renders in every build (the self-read is ungated
+  // server-side); the flag only decides whether the `none` state offers the
+  // claim UI — see roomViewFor.
+  return <RealYourSite />;
 }
 
 /** The one commitment the room makes about editing (normative copy). */
@@ -60,17 +63,7 @@ function ComingSoonNote() {
   );
 }
 
-/* ─────────────────────────────────────────────────── flag OFF (note only) */
-
-function ComingSoonOnly() {
-  return (
-    <div className="flex flex-col items-start gap-3">
-      <ComingSoonNote />
-    </div>
-  );
-}
-
-/* ────────────────────────────────────────────────────────── flag ON (real) */
+/* ─────────────────────────────────────────── the status-driven room (real) */
 
 /** Kid-friendly state copy. NO em dashes (global product rule). */
 const STATE_COPY = {
@@ -108,7 +101,14 @@ function roomViewFor(status: SiteStatus): RoomView {
     case "claimed":
       return { caption: STATE_COPY.claimed, url: "none", showClaim: false, showNote: true };
     case "none":
-      return { caption: STATE_COPY.none, url: "none", showClaim: true, showNote: false };
+      // The ONE flag-sensitive state: claiming needs the gated backend, so a
+      // flag-off build offers no claim UI — just the Coming Soon note (the
+      // claim caption would lie without the claim block below it). The flag is
+      // baked into the bundle (never flips at runtime), so this branch is
+      // render-stable.
+      return isPublicSiteEnabled()
+        ? { caption: STATE_COPY.none, url: "none", showClaim: true, showNote: false }
+        : { caption: null, url: "none", showClaim: false, showNote: true };
     case "unknown":
       return { caption: STATE_COPY.unknown, url: "none", showClaim: false, showNote: false };
     default: {

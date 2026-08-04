@@ -4,9 +4,11 @@
  * longer simulates a website. These tests pin the per-state render table
  * (published link / offline plain text / claimed going-live / none claim UI /
  * unknown neutral), the Coming Soon note's normative presence, the flag-off
- * note-only render, the go-live retry sequencing (and its hard boundary:
- * NEVER for offline), the in-room claim → publish flow, and the absence of
- * every removed simulated-site string.
+ * render (the SAME status-driven room minus the claim UI — the self-read is
+ * ungated server-side, so a published link shows in every build), the go-live
+ * retry sequencing (and its hard boundary: NEVER for offline), the in-room
+ * claim → publish flow, and the absence of every removed simulated-site
+ * string.
  *
  * DELETED BY DESIGN: the legacy flag-off byte-pin block ("renders the
  * pre-Unit-6 mock exactly"). The requirements doc explicitly retires the
@@ -418,25 +420,61 @@ describe("removed simulated-site content appears NOWHERE", () => {
   });
 });
 
-// ── Flag off: the Coming Soon note ONLY ──────────────────────────────────────
-// (The legacy byte-pin block that lived here is deleted by design; see the
-// module doc comment.)
+// ── Flag off: the SAME status-driven room, minus the claim UI ────────────────
+// (room-link-flag-independent, 2026-08-03): the self-read is ungated
+// server-side, so the room renders real status in every build. The flag gates
+// ONLY the claim UI (and, via auth.ts, availability/claim/publish). The legacy
+// byte-pin block that lived here is deleted by design; see the module doc
+// comment.
 
 describe("flag off", () => {
-  it("renders ONLY the Coming Soon note: no claim UI, no link, no mock, no network", async () => {
+  it("none: just the Coming Soon note — no claim UI, no link, and the gated calls never fire", async () => {
     publicSiteFlag = false;
     mount({ handle: null, status: "none" });
     expect(screen.getByText(COMING_SOON)).toBeTruthy();
-    // No claim UI even though the slice would show `none` with the flag on.
+    // No claim UI even though the slice reads `none`.
     expect(screen.queryByText("Claim my page →")).toBeNull();
     expect(screen.queryByLabelText("Page name")).toBeNull();
+    // No claim caption either (it would lie without the claim block).
+    expect(
+      screen.queryByText("Claim your page name below and your page goes live on the real internet."),
+    ).toBeNull();
     // No links, no inputs, nothing simulated.
     expect(document.querySelectorAll("a")).toHaveLength(0);
     expect(document.querySelectorAll("input")).toHaveLength(0);
-    // Zero network / registry traffic.
+    // The room-open status refresh IS flag-independent (ungated self-read)...
+    expect(refreshSiteStatus).toHaveBeenCalledTimes(1);
+    // ...but the gated registry calls never fire.
     await drain();
-    expect(refreshSiteStatus).not.toHaveBeenCalled();
     expect(checkHandleAvailability).not.toHaveBeenCalled();
+    expect(publishSite).not.toHaveBeenCalled();
+    expect(flushNow).not.toHaveBeenCalled();
+  });
+
+  it("published: the real open-site link renders flag-off exactly as flag-on", async () => {
+    publicSiteFlag = false;
+    mount({ handle: "maya", status: "published" });
+    const links = siteLinks();
+    expect(links).toHaveLength(1);
+    const a = links[0];
+    expect(a.getAttribute("href")).toBe("https://firstprofit.school/maya");
+    expect(a.getAttribute("target")).toBe("_blank");
+    const rel = a.getAttribute("rel") ?? "";
+    expect(rel).toContain("noopener");
+    expect(rel).toContain("noreferrer");
+    expect(a.className).toContain("min-h-[44px]");
+    expect(screen.getByText(COMING_SOON)).toBeTruthy();
+    await drain();
+    expect(publishSite).not.toHaveBeenCalled();
+  });
+
+  it("offline: plain-text URL and the honest caption render flag-off too", async () => {
+    publicSiteFlag = false;
+    mount({ handle: "maya", status: "offline" });
+    expect(siteLinks()).toHaveLength(0);
+    expect(screen.getByText("firstprofit.school/maya").tagName).toBe("P");
+    expect(screen.getByText(COMING_SOON)).toBeTruthy();
+    await drain();
     expect(publishSite).not.toHaveBeenCalled();
     expect(flushNow).not.toHaveBeenCalled();
   });
