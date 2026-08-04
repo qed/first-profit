@@ -29,7 +29,7 @@
  * content, from `sm` up a left rail. That is the app's one overlay
  * breakpoint — no further tiers.
  */
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useGame } from "../state/GameContext";
 import {
   allBandsNoteFor,
@@ -118,8 +118,40 @@ const SECTIONS: { id: RunnerSection; label: string }[] = [
 /** The one thing the Tools section says until real per-task tools land. */
 export const TOOLS_PLACEHOLDER = "Tools to help you complete the unit task will go here.";
 
+/**
+ * How far above the room's bottom border the avatar stands when you arrive
+ * (owner spec 2026-08-04), matching where a Next Step walk leaves it on the
+ * floor.
+ */
+const AVATAR_BOTTOM_INSET_PX = 120;
+
+/**
+ * How long a walk inside the room takes before the click's action runs (owner
+ * spec 2026-08-04: move first, then execute). Shorter than the floor's 550ms
+ * because a room is a smaller space to cross; the CSS glide below is shorter
+ * still, so the avatar visibly ARRIVES before anything happens.
+ */
+const ROOM_WALK_MS = 380;
+
+/** Point two refs at one node (the room box is both focus target and the box
+ *  the avatar is positioned inside). */
+function mergeRoomRefs(
+  a: React.MutableRefObject<HTMLDivElement | null>,
+  b: React.MutableRefObject<HTMLDivElement | null>,
+) {
+  return (node: HTMLDivElement | null) => {
+    a.current = node;
+    b.current = node;
+  };
+}
+
 /** What the Inputs section says when the task authors no fields. */
 export const NO_INPUTS_LINE = "This task has nothing to type in.";
+
+/** Section headings (owner spec 2026-08-04): every section names itself in
+ *  bold, with its copy in the same face and size at regular weight. */
+export const INPUTS_HEADING = "Steps to finish";
+export const TOOLS_HEADING = "Available Tools";
 
 /** First Profit blue / purple - the criterion and task blocks in the header. */
 const CRITERION_BLUE = "hsl(217 74% 56%)";
@@ -132,6 +164,14 @@ const TASK_PURPLE = "hsl(265 52% 58%)";
  */
 const SECTION_HEADLINE =
   "font-display text-[22px] font-black leading-[1.2] text-[hsl(25_34%_20%)]";
+
+/**
+ * The same face and size as SECTION_HEADLINE at regular weight — for copy that
+ * sits directly under a headline and should read as its continuation rather
+ * than drop to small print (owner spec 2026-08-04, Overview's summary).
+ */
+const SECTION_HEADLINE_REGULAR =
+  "font-display text-[22px] font-normal leading-[1.35] text-[hsl(25_34%_20%)]";
 
 /**
  * A numbered block in the room header: phase, criterion, task. `dark` carries
@@ -175,6 +215,11 @@ export function StepRunner() {
   } = game;
 
   const panelRef = useRef<HTMLDivElement>(null);
+  const roomRef = useRef<HTMLDivElement>(null);
+  const walkTimer = useRef<number | null>(null);
+  // Where the avatar stands, as percentages of the room box. Null until the
+  // layout effect below measures the room, so it never paints at a guess.
+  const [avatarPos, setAvatarPos] = useState<{ x: number; y: number } | null>(null);
 
   const open = runnerOpen && Boolean(runnerStep) && !celebrate;
 
@@ -195,6 +240,23 @@ export function StepRunner() {
   useEffect(() => {
     setSection("overview");
   }, [open, runnerStep, runnerIndex]);
+
+  // Place the avatar where you arrive: bottom center, AVATAR_BOTTOM_INSET_PX
+  // above the room's bottom border. Measured in a LAYOUT effect so the correct
+  // spot is set before the browser paints (no visible jump), and re-run per
+  // task so each one starts you back at the door.
+  useLayoutEffect(() => {
+    if (!open) return;
+    const h = roomRef.current?.clientHeight ?? 0;
+    const y = h > AVATAR_BOTTOM_INSET_PX ? ((h - AVATAR_BOTTOM_INSET_PX) / h) * 100 : 85;
+    setAvatarPos({ x: 50, y });
+  }, [open, runnerStep, runnerIndex]);
+
+  useEffect(() => {
+    return () => {
+      if (walkTimer.current) window.clearTimeout(walkTimer.current);
+    };
+  }, []);
 
   // Focus the dialog on open and wire Escape → close (CLOSE_RUNNER). Guarded on
   // `open` (and suspended while the More-tools modal owns the screen — its own
@@ -298,6 +360,38 @@ export function StepRunner() {
 
   const close = () => dispatch({ type: "CLOSE_RUNNER" });
 
+  /**
+   * MOVE FIRST, THEN ACT (owner spec 2026-08-04): a mouse click anywhere in
+   * the room walks the avatar to the pointer (see onRoomClick) and only then
+   * runs the control's action, exactly like a card tap on the factory floor.
+   *
+   * A keyboard or programmatic activation (`detail === 0`) runs IMMEDIATELY:
+   * the instruction is about mouse clicks, and making a keyboard user wait out
+   * an animation they did not aim would be a straight accessibility
+   * regression. Typing is unaffected either way — inputs fire change events,
+   * not clicks, so nothing about entering text is delayed.
+   */
+  const walkThen = (run: () => void) => (e: React.MouseEvent) => {
+    if (e.detail === 0) {
+      run();
+      return;
+    }
+    if (walkTimer.current) window.clearTimeout(walkTimer.current);
+    walkTimer.current = window.setTimeout(run, ROOM_WALK_MS);
+  };
+
+  /** Point the avatar at the pointer. Every click in the room bubbles here,
+   *  so controls do not each have to place the avatar themselves. */
+  const onRoomClick = (e: React.MouseEvent<HTMLDivElement>) => {
+    if (e.detail === 0) return; // keyboard activation carries no coordinates
+    const rect = roomRef.current?.getBoundingClientRect();
+    if (!rect) return;
+    setAvatarPos({
+      x: ((e.clientX - rect.left) / rect.width) * 100,
+      y: ((e.clientY - rect.top) / rect.height) * 100,
+    });
+  };
+
   // Primary CTA per phase (PHASES data): Sell keeps the pre-Unit-8 verified
   // green EXACTLY (the classes below); the other phases take the phase's
   // ctaFill/ctaShadow tokens (unit review FIX 4) — the WCAG-safe deepened
@@ -335,7 +429,8 @@ export function StepRunner() {
     // learner can see. The floor underneath IS inert (Factory), so nothing
     // hidden behind this panel can take a tap or a tab. Escape still closes.
     <div
-      ref={panelRef}
+      ref={mergeRoomRefs(panelRef, roomRef)}
+      onClick={onRoomClick}
       role="dialog"
       aria-labelledby="fp-runner-title"
       tabIndex={-1}
@@ -362,13 +457,16 @@ export function StepRunner() {
           <NumberBlock n={critNum} bg={CRITERION_BLUE} />
           <BlockLabel>Task</BlockLabel>
           <NumberBlock n={idx + 1} bg={TASK_PURPLE} />
+          {/* The UNIT TASK's title (owner spec 2026-08-04), so the headline
+              changes as you move task to task. The criterion title was static
+              across all five and told you nothing about where you were. */}
           <h1 id="fp-runner-title" className={`${SECTION_HEADLINE} min-w-0 basis-full sm:basis-auto`}>
-            {step.title}
+            {taskLabel}
           </h1>
         </div>
         <button
           type="button"
-          onClick={close}
+          onClick={walkThen(close)}
           aria-label="Close"
           className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border-2 border-[hsl(25_34%_20%/0.15)] bg-[hsl(40_55%_97%)] text-sm text-[hsl(25_34%_20%)] hover:border-[hsl(25_34%_20%/0.4)]"
         >
@@ -401,9 +499,9 @@ export function StepRunner() {
             <button
               key={i}
               type="button"
-              onClick={() => {
+              onClick={walkThen(() => {
                 if (i !== idx) dispatch({ type: "OPEN_RUNNER", stepId: runnerStep, index: i });
-              }}
+              })}
               aria-current={i === idx ? "step" : undefined}
               aria-label={`Task ${i + 1} of ${total}: ${title}`}
               className="min-w-0 flex-1 rounded-md text-left focus:outline-none focus-visible:ring-2 focus-visible:ring-sell/40"
@@ -435,7 +533,7 @@ export function StepRunner() {
               <button
                 key={s.id}
                 type="button"
-                onClick={() => setSection(s.id)}
+                onClick={walkThen(() => setSection(s.id))}
                 aria-current={selected ? "true" : undefined}
                 className={`flex min-h-[44px] shrink-0 items-center whitespace-nowrap rounded-xl px-2 font-display text-[13px] font-bold transition-colors sm:w-full sm:px-3.5 sm:text-sm ${
                   selected ? "text-white" : "text-[hsl(25_20%_38%)] hover:bg-[hsl(25_34%_20%/0.06)]"
@@ -451,11 +549,16 @@ export function StepRunner() {
         <div className="min-h-0 flex-1 overflow-y-auto px-5 py-5 sm:px-6">
           {section === "overview" ? (
             <div>
-              {/* The eyebrow and the criterion title both moved INTO the room
-                  header, so what is left - the criterion's description - is
-                  promoted to this section's headline rather than sitting under
-                  chrome that repeats what the header already says. */}
-              <h2 className={SECTION_HEADLINE}>{step.brief}</h2>
+              {/* "Summary" names the section; the copy under it is the TASK's
+                  description (owner spec 2026-08-04), so it changes task to
+                  task like the header does — the criterion brief that used to
+                  sit here was identical on all five tasks of a room. Same face
+                  and size as the headline, regular weight, so it reads as one
+                  block rather than headline-then-small-print. */}
+              <h2 className={SECTION_HEADLINE}>Summary</h2>
+              <p className={`${SECTION_HEADLINE_REGULAR} mt-1.5 whitespace-pre-line break-words`}>
+                {taskBodyText}
+              </p>
             </div>
           ) : null}
 
@@ -494,8 +597,9 @@ export function StepRunner() {
 
           {section === "inputs" ? (
             <div>
+              <h3 className={SECTION_HEADLINE}>{INPUTS_HEADING}</h3>
               {taskFields.length === 0 ? (
-                <h3 className={SECTION_HEADLINE}>{NO_INPUTS_LINE}</h3>
+                <p className={`${SECTION_HEADLINE_REGULAR} mt-1.5`}>{NO_INPUTS_LINE}</p>
               ) : null}
               {/* maxLength caps (2000 single-line / 4000 textarea) keep the
                   aggregate save doc well under the server's 256KiB cap even at
@@ -511,7 +615,7 @@ export function StepRunner() {
                 const isPublicString = isPublicSiteEnabled() && f.key === PUBLIC_ONE_LINER_KEY;
                 const onCommit = isPublicString ? () => void game.flushNow?.() : undefined;
                 return (
-                  <div key={f.key} className={fi === 0 ? "" : "mt-[18px]"}>
+                  <div key={f.key} className={fi === 0 ? "mt-4" : "mt-[18px]"}>
                     <label
                       htmlFor={inputId}
                       className="mb-1.5 block font-mono text-[10.5px] uppercase tracking-[0.08em] text-[hsl(25_20%_38%)]"
@@ -555,7 +659,10 @@ export function StepRunner() {
           ) : null}
 
           {section === "tools" ? (
-            <h3 className={SECTION_HEADLINE}>{TOOLS_PLACEHOLDER}</h3>
+            <div>
+              <h3 className={SECTION_HEADLINE}>{TOOLS_HEADING}</h3>
+              <p className={`${SECTION_HEADLINE_REGULAR} mt-1.5`}>{TOOLS_PLACEHOLDER}</p>
+            </div>
           ) : null}
         </div>
       </div>
@@ -571,7 +678,7 @@ export function StepRunner() {
       <div className="flex flex-wrap items-center justify-end gap-3 border-t-2 border-[hsl(25_34%_20%/0.1)] px-5 py-4 sm:px-6">
         <button
           type="button"
-          onClick={() => setMoreToolsOpen(true)}
+          onClick={walkThen(() => setMoreToolsOpen(true))}
           className="mr-auto inline-flex min-h-[44px] items-center justify-center rounded-xl bg-build px-4 font-display text-sm font-bold text-white shadow-[0_3px_0_hsl(217_74%_36%)] transition active:translate-y-px active:shadow-[0_1px_0_hsl(217_74%_36%)] focus:outline-none focus-visible:ring-4 focus-visible:ring-build/40"
         >
           More tools please
@@ -583,7 +690,7 @@ export function StepRunner() {
           // of stranding you on a disabled button.
           <button
             type="button"
-            onClick={close}
+            onClick={walkThen(close)}
             className="inline-flex min-h-[44px] items-center justify-center gap-1.5 rounded-xl bg-verified px-4 font-display text-sm font-bold text-white shadow-[0_3px_0_hsl(150_52%_26%)]"
             style={ctaStyle}
           >
@@ -592,7 +699,7 @@ export function StepRunner() {
         ) : alreadyDone ? (
           <button
             type="button"
-            onClick={advance}
+            onClick={walkThen(advance)}
             className="inline-flex min-h-[44px] items-center justify-center gap-1.5 rounded-xl bg-verified px-4 font-display text-sm font-bold text-white shadow-[0_3px_0_hsl(150_52%_26%)]"
             style={ctaStyle}
           >
@@ -601,7 +708,7 @@ export function StepRunner() {
         ) : (
           <button
             type="button"
-            onClick={doIt}
+            onClick={walkThen(doIt)}
             className="inline-flex min-h-[44px] items-center justify-center gap-1.5 rounded-xl bg-verified px-4 font-display text-sm font-bold text-white shadow-[0_3px_0_hsl(150_52%_26%)]"
             style={ctaStyle}
           >
@@ -619,12 +726,21 @@ export function StepRunner() {
           border. It sits at the horizontal CENTER of the action row, which is
           empty (More tools is pushed left, the CTA right), so it never covers
           a control, and pointer-events-none keeps it out of the way anyway. */}
-      <div
-        className="pointer-events-none absolute bottom-[120px] left-1/2 z-10 -translate-x-1/2"
-        aria-hidden
-      >
-        <AvatarSprite name={game.profile.firstName || game.profile.handle || "Founder"} />
-      </div>
+      {avatarPos ? (
+        <div
+          className="pointer-events-none absolute z-10 -translate-x-1/2 -translate-y-full"
+          style={{
+            left: `${avatarPos.x}%`,
+            top: `${avatarPos.y}%`,
+            // Shorter than ROOM_WALK_MS, so the walk finishes before the
+            // click's action runs.
+            transition: "left .3s cubic-bezier(.22,1,.36,1), top .3s cubic-bezier(.22,1,.36,1)",
+          }}
+          aria-hidden
+        >
+          <AvatarSprite name={game.profile.firstName || game.profile.handle || "Founder"} />
+        </div>
+      ) : null}
     </div>
   );
 }

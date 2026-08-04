@@ -158,9 +158,10 @@ describe("StepRunner", () => {
     expect(headerBlocks()).toEqual(["1", "1", "5"]);
     expect(screen.getByText("Criterion")).toBeTruthy();
     expect(screen.getByText("Task")).toBeTruthy();
-    // ...plus the criterion headline, which is the view's accessible name.
+    // ...plus the UNIT TASK's title, which is the view's accessible name and
+    // changes task to task (the criterion title was static across all five).
     expect(document.getElementById("fp-runner-title")?.textContent).toBe(
-      "Pitch a product in 60 seconds, no notes",
+      taskTitleForBand("1.1.5", "g6_8"),
     );
     openSection("Instructions");
     expect(screen.getByText("Done when")).toBeTruthy();
@@ -176,11 +177,10 @@ describe("StepRunner", () => {
     for (const label of ["Overview", "Instructions", "Inputs", "Tools"]) {
       expect(screen.getByRole("button", { name: label })).toBeTruthy();
     }
-    // Overview by default: its headline is the criterion DESCRIPTION now (the
-    // title moved into the header), and Instructions' content is not mounted.
-    expect(
-      screen.getByText(/Pick the thing you want to sell/),
-    ).toBeTruthy();
+    // Overview by default: a "Summary" headline over the TASK's description,
+    // and Instructions' content is not mounted.
+    expect(screen.getByText("Summary")).toBeTruthy();
+    expect(document.body.textContent).toContain(taskById("1.1.5")!.body);
     expect(screen.queryByText("Done when")).toBeNull();
 
     openSection("Tools");
@@ -188,19 +188,26 @@ describe("StepRunner", () => {
       screen.getByText("Tools to help you complete the unit task will go here."),
     ).toBeTruthy();
     // Switching sections shows one at a time.
-    expect(screen.queryByText(/Pick the thing you want to sell/)).toBeNull();
+    expect(screen.queryByText("Summary")).toBeNull();
 
     // This task (index 4) has no authored fields, so Inputs says so plainly —
     // as a HEADLINE, like every other section (owner spec 2026-08-04).
     openSection("Inputs");
+    const inputsHeading = screen.getByText("Steps to finish");
+    expect(inputsHeading.tagName).toBe("H3");
+    expect(inputsHeading.className).toContain("font-black");
     const noInputs = screen.getByText(/nothing to type in/i);
-    expect(noInputs.tagName).toBe("H3");
-    expect(noInputs.className).toContain("font-black");
-    // Tools' placeholder is a headline too.
+    expect(noInputs.tagName).toBe("P");
+    expect(noInputs.className).toContain("font-normal");
+    expect(noInputs.className).toContain("text-[22px]"); // same size as the heading
+    // Tools names itself the same way.
     openSection("Tools");
+    const toolsHeading = screen.getByText("Available Tools");
+    expect(toolsHeading.tagName).toBe("H3");
+    expect(toolsHeading.className).toContain("font-black");
     const tools = screen.getByText(/Tools to help you complete/);
-    expect(tools.tagName).toBe("H3");
-    expect(tools.className).toContain("font-black");
+    expect(tools.tagName).toBe("P");
+    expect(tools.className).toContain("font-normal");
   });
 
   it("fills the FLOOR box, not the viewport, and is not a floating modal card", () => {
@@ -312,7 +319,9 @@ describe("StepRunner", () => {
     };
     render(<Harness seed={seed} />);
     expect(headerBlocks()).toEqual(["2", "1", "1"]);
-    expect(screen.getByText("Ship the smallest thing that works")).toBeTruthy();
+    expect(document.getElementById("fp-runner-title")?.textContent).toBe(
+      taskTitleForBand("2.1.1", "g6_8"),
+    );
   });
 
   it("the task rail shows SIX segments on 2.3 (variable task counts honored)", () => {
@@ -376,6 +385,28 @@ describe("StepRunner", () => {
     const cta = screen.getByText("✓ I did it") as HTMLElement;
     expect(cta.className).toContain("bg-verified");
     expect(cta.style.background).toBe("");
+  });
+
+  it("a MOUSE click walks the avatar first, then runs the action; keyboard runs at once", () => {
+    vi.useFakeTimers();
+    try {
+      render(<Harness seed={seedAtLastTaskOf11()} />);
+
+      // A real pointer click (detail 1) defers: the section has NOT switched
+      // yet, because the avatar is still walking to the pointer.
+      fireEvent.click(screen.getByRole("button", { name: "Instructions" }), { detail: 1 });
+      expect(screen.queryByText("Done when")).toBeNull();
+      // ...and it lands once the walk is over.
+      act(() => void vi.advanceTimersByTime(400));
+      expect(screen.getByText("Done when")).toBeTruthy();
+
+      // Keyboard / programmatic activation (detail 0) is immediate: a keyboard
+      // user must never wait out an animation they did not aim.
+      fireEvent.click(screen.getByRole("button", { name: "Overview" }));
+      expect(screen.getByText("Summary")).toBeTruthy();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("phase 5 (scale) takes INK text on its header block, where white is unreadable", () => {
@@ -447,8 +478,9 @@ describe("StepRunner", () => {
     };
     render(<Harness seed={seed} band="g6_8" />);
     openSection("Instructions");
-    // The banded title renders twice by design: the rail segment AND the h3.
-    expect(screen.getAllByText("Rehearse to camera until note-free").length).toBe(2);
+    // The banded title renders three times by design: the rail segment, the
+    // room header (change 28), and the Instructions h3.
+    expect(screen.getAllByText("Rehearse to camera until note-free").length).toBe(3);
     expect(document.body.textContent).toContain(task.body);
     expect(document.body.textContent).toContain(task.doneWhen);
     expect(document.body.textContent).not.toContain(task.bandVariants.g3_5!);
