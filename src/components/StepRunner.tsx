@@ -747,8 +747,9 @@ export function StepRunner() {
           border. It sits at the horizontal CENTER of the action row, which is
           empty (More tools is pushed left, the CTA right), so it never covers
           a control, and pointer-events-none keeps it out of the way anyway. */}
-      {avatarPos ? (
+      {avatarPos && section !== "tools" ? (
         <div
+          data-runner-avatar
           className="pointer-events-none absolute z-10 -translate-x-1/2 -translate-y-full"
           style={{
             left: `${avatarPos.x}%`,

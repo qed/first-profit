@@ -231,6 +231,7 @@ describe("StepRunner", () => {
     openSection("Tools");
     expect(screen.getByText("60-Second Pitch Builder")).toBeTruthy();
     expect(screen.queryByText("Tools to help you complete the unit task will go here.")).toBeNull();
+    expect(document.querySelector("[data-runner-avatar]")).toBeNull();
 
     fireEvent.change(screen.getByLabelText("1. Hook"), {
       target: { value: "What if your neighborhood stories could fit in your pocket?" },
