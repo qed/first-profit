@@ -76,6 +76,11 @@ function DesktopFloor({ walkTo, onArrived, onWalk, floorView, onBack }: FloorPro
   const { profile } = useGame();
   const [pos, setPos] = useState({ x: 50, y: 94 });
   const timer = useRef<number | null>(null);
+  // Counts floor clicks, so a walk can tell "the learner clicked somewhere on
+  // this floor" (walk there) from "the walk came from outside" (walk to the
+  // middle). Refs, not state: this must not cause a render of its own.
+  const clickSeq = useRef(0);
+  const walkedSeq = useRef(0);
 
   // Drive the walk from the parent's intent (survives the breakpoint swap).
   // walkTo → null is CANCELLATION (unit review FIX 1b): the dep change makes
@@ -83,8 +88,15 @@ function DesktopFloor({ walkTo, onArrived, onWalk, floorView, onBack }: FloorPro
   // fires; the early return then arms nothing new.
   useEffect(() => {
     if (!walkTo) return;
-    // Cosmetic: glide toward the middle of the floor, then fire the intent.
-    setPos({ x: 50, y: 46 });
+    // WALK TO THE THING YOU CLICKED (owner spec 2026-08-04). A card tap
+    // bubbles to onFloorClick below, which has already pointed the avatar at
+    // the click, so this effect must NOT drag it back to the middle. When a
+    // walk starts WITHOUT a floor click — the docked coach and the nav sit
+    // outside this container — there is no click to walk to, so we fall back
+    // to the middle and the walk still reads as a walk. The click counter is
+    // how we tell the two apart.
+    if (clickSeq.current === walkedSeq.current) setPos({ x: 50, y: 46 });
+    walkedSeq.current = clickSeq.current;
     if (timer.current) window.clearTimeout(timer.current);
     timer.current = window.setTimeout(() => onArrived(walkTo), 550);
     return () => {
@@ -99,6 +111,7 @@ function DesktopFloor({ walkTo, onArrived, onWalk, floorView, onBack }: FloorPro
       x: ((e.clientX - rect.left) / rect.width) * 100,
       y: ((e.clientY - rect.top) / rect.height) * 100,
     });
+    clickSeq.current += 1;
   };
 
   return (
@@ -120,7 +133,11 @@ function DesktopFloor({ walkTo, onArrived, onWalk, floorView, onBack }: FloorPro
 
       <div
         className="pointer-events-none absolute z-30 -translate-x-1/2 -translate-y-full"
-        style={{ left: `${pos.x}%`, top: `${pos.y}%`, transition: "left .8s cubic-bezier(.22,1,.36,1), top .8s cubic-bezier(.22,1,.36,1)" }}
+        // .5s, deliberately SHORTER than the 550ms arrival timer above, so the
+        // avatar visibly finishes its walk before the action fires (owner spec
+        // 2026-08-04: move first, then open). It used to be .8s, which opened
+        // the dialog while the sprite was still sliding.
+        style={{ left: `${pos.x}%`, top: `${pos.y}%`, transition: "left .5s cubic-bezier(.22,1,.36,1), top .5s cubic-bezier(.22,1,.36,1)" }}
       >
         <AvatarSprite name={profile.firstName || profile.handle || "Founder"} />
       </div>

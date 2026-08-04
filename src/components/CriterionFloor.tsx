@@ -23,7 +23,7 @@
  */
 import { useGame } from "../state/GameContext";
 import { MAX_IDEAS, activeBusiness } from "../state/gameCore";
-import { BUILT_CRITERIA, STEPS, phaseById, type PhaseId } from "../data/path";
+import { BUILT_CRITERIA, PHASES, STEPS, phaseById, type PhaseId } from "../data/path";
 import { ideaIsUnnamed, ideaProgressLabel, ideaSummaryName } from "../state/floorSelectors";
 import { CriterionRoomCard, IdeaSlot, SectionTitle } from "./PodCardContent";
 import type { WalkIntent } from "./FactoryFloor";
@@ -122,8 +122,14 @@ export function CriterionFloor({
               pips={pips}
               meta={meta}
               hint={hint}
-              accent={ph.accent}
-              text={ph.text}
+              // The ROOM's own brand color, by its position in the phase
+              // (owner spec 2026-08-04): room 1 red, 2 blue, 3 purple, 4
+              // green, 5 amber — the five logo colors, so a phase's five
+              // rooms are told apart at a glance. The phase's own color still
+              // heads the floor above. Progress pips stay green inside the
+              // card, whatever color the room wears.
+              accent={PHASES[pos % PHASES.length].accent}
+              text={PHASES[pos % PHASES.length].text}
               lockedTappable={otherEligible >= 0}
               onClick={() => onWalk({ kind: "enterCriterion", stepId: step.id })}
             />
