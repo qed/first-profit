@@ -8,7 +8,7 @@
  * landing stage only (same signup-flag cutover as the landing page CTAs).
  * Logged in (`onboard`/`app`): the wordmark is inert
  * (a kid cannot accidentally leave the game) and the right side shows the
- * founder chip + Log out.
+ * founder chip, now an Account dropdown holding the Log out action.
  *
  * In the `app` stage this is the ONE bar (the old parchment Hud is gone): the
  * right side also carries the game section — the active idea/business chip
@@ -19,6 +19,8 @@
  * Full-screen mobile overlays (`fixed inset-0`, higher z) cover this bar by
  * design; desktop floating dialogs leave it visible. No em dashes in copy.
  */
+import { useEffect, useRef, useState } from "react";
+import { ChevronDown } from "lucide-react";
 import { isLoggedInStage, useGame } from "../state/GameContext";
 import { activeBusiness } from "../state/gameCore";
 import { ideaSummaryName } from "../state/floorSelectors";
@@ -82,8 +84,10 @@ function AppNavSection({ onOpenSwitcher }: { onOpenSwitcher?: () => void }) {
       <span className="max-w-[6rem] truncate sm:max-w-[13rem]">{name}</span>
     </>
   );
+  // Regular bold text, no pill: no background, border, or rounding. The >1-idea
+  // button keeps its 44px hit target via min-h + a little inline padding only.
   const chipClass =
-    "inline-flex items-center gap-1.5 rounded-full border-2 border-[hsl(14_78%_54%/0.35)] bg-[hsl(14_78%_54%/0.08)] px-3 font-mono text-[10px] font-semibold uppercase tracking-[0.06em] text-[hsl(14_78%_44%)]";
+    "inline-flex items-center gap-1.5 font-mono text-[10px] font-bold uppercase tracking-[0.06em] text-ink";
   return (
     <>
       {ideas.length > 1 ? (
@@ -91,12 +95,11 @@ function AppNavSection({ onOpenSwitcher }: { onOpenSwitcher?: () => void }) {
           type="button"
           onClick={onOpenSwitcher}
           aria-label="Switch idea"
-          className={`${chipClass} min-h-[44px] transition-colors hover:border-[hsl(14_78%_54%)]`}
+          aria-haspopup="dialog"
+          className={`${chipClass} min-h-[44px] px-1 transition-colors hover:text-[hsl(14_78%_44%)]`}
         >
           {chipInner}
-          <span aria-hidden className="text-[8px]">
-            ▾
-          </span>
+          <ChevronDown size={14} aria-hidden className="shrink-0" />
         </button>
       ) : ideas.length === 1 ? (
         <span className={`${chipClass} py-1.5`}>{chipInner}</span>
@@ -105,6 +108,74 @@ function AppNavSection({ onOpenSwitcher }: { onOpenSwitcher?: () => void }) {
       <MoneyStat label="Profit" cents={salesSumCents()} />
       <SaveIndicator status={syncStatus} />
     </>
+  );
+}
+
+/**
+ * The founder chip as an Account dropdown: clicking the chip opens a small
+ * menu (title "Account") holding the Log out action. Dependency-free —
+ * useState + refs + a document mousedown listener; Escape closes and returns
+ * focus to the chip. The menu is z-50 so it floats above the sticky z-40 bar's
+ * floor content, right-aligned under the chip so it never overflows at 390px.
+ */
+function AccountMenu({ founder, onLogout }: { founder: string; onLogout: () => void }) {
+  const [open, setOpen] = useState(false);
+  const rootRef = useRef<HTMLSpanElement>(null);
+  const chipRef = useRef<HTMLButtonElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const onMouseDown = (e: MouseEvent) => {
+      if (rootRef.current && !rootRef.current.contains(e.target as Node)) setOpen(false);
+    };
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        setOpen(false);
+        chipRef.current?.focus();
+      }
+    };
+    document.addEventListener("mousedown", onMouseDown);
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.removeEventListener("mousedown", onMouseDown);
+      document.removeEventListener("keydown", onKeyDown);
+    };
+  }, [open]);
+
+  return (
+    <span ref={rootRef} className="relative inline-block">
+      <button
+        ref={chipRef}
+        type="button"
+        aria-haspopup="menu"
+        aria-expanded={open}
+        onClick={() => setOpen((v) => !v)}
+        className="inline-flex min-h-[44px] items-center gap-1 rounded-full bg-[hsl(14_78%_54%/0.12)] px-3 font-mono text-[10.5px] font-semibold uppercase tracking-[0.06em] text-[hsl(14_78%_44%)] transition-colors hover:bg-[hsl(14_78%_54%/0.2)]"
+      >
+        <span className="max-w-[5.5rem] truncate sm:max-w-[12rem]">{founder}</span>
+        <ChevronDown size={14} aria-hidden className={`shrink-0 transition-transform ${open ? "rotate-180" : ""}`} />
+      </button>
+      {open ? (
+        <div className="absolute right-0 top-full z-50 mt-1.5 w-44 max-w-[calc(100vw-2rem)] rounded-2xl border-2 border-[hsl(25_34%_20%/0.15)] bg-white p-2 shadow-[0_6px_0_rgba(120,80,40,.12)]">
+          <p className="px-2 pb-1 pt-0.5 font-mono text-[9.5px] uppercase tracking-[0.08em] text-[hsl(25_20%_38%)]">
+            Account
+          </p>
+          <div role="menu" aria-label="Account">
+            <button
+              type="button"
+              role="menuitem"
+              onClick={() => {
+                setOpen(false);
+                onLogout();
+              }}
+              className="flex min-h-[44px] w-full items-center rounded-xl px-2 text-left font-mono text-[11px] uppercase tracking-[0.06em] text-ink hover:bg-[hsl(40_30%_95%)]"
+            >
+              Log out
+            </button>
+          </div>
+        </div>
+      ) : null}
+    </span>
   );
 }
 
@@ -142,16 +213,7 @@ export function GlobalNav({ onOpenSwitcher }: { onOpenSwitcher?: () => void } = 
         {loggedIn ? (
           <span className="flex flex-wrap items-center justify-end gap-x-2 gap-y-1 sm:gap-x-2.5">
             {stage === "app" ? <AppNavSection onOpenSwitcher={onOpenSwitcher} /> : null}
-            <span className="inline-block max-w-[5.5rem] truncate rounded-full bg-[hsl(14_78%_54%/0.12)] px-3 py-1.5 font-mono text-[10.5px] font-semibold uppercase tracking-[0.06em] text-[hsl(14_78%_44%)] sm:max-w-[12rem]">
-              {founder}
-            </span>
-            <button
-              type="button"
-              onClick={() => void logout()}
-              className="inline-flex min-h-[44px] items-center rounded-full border-2 border-[hsl(25_34%_20%/0.15)] px-4 font-mono text-[11px] uppercase tracking-[0.06em] text-ink hover:border-[hsl(25_34%_20%/0.4)]"
-            >
-              Log out
-            </button>
+            <AccountMenu founder={founder} onLogout={() => void logout()} />
           </span>
         ) : stage !== "login" ? (
           <span className="flex items-center gap-2 sm:gap-2.5">

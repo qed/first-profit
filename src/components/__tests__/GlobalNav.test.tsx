@@ -3,8 +3,9 @@
  * Global persistent nav (spec: docs/superpowers/specs/
  * 2026-08-02-global-nav-design.md). Proves the two auth faces: logged out the
  * wordmark routes home and Log in routes to the login stage (hidden ON the
- * login stage); logged in the wordmark is inert and the founder chip + Log out
- * (wired to logout()) render. Tap targets >= 44px, no em dash.
+ * login stage); logged in the wordmark is inert and the founder chip is an
+ * Account dropdown holding Log out (wired to logout()); the standalone Log out
+ * button is gone from the bar. Tap targets >= 44px, no em dash.
  *
  * App stage (UI consolidation: the ONE bar, Hud deleted): the right side adds
  * the game section — the active idea/business chip (productName preferred,
@@ -90,12 +91,14 @@ describe("GlobalNav logged out", () => {
 });
 
 describe("GlobalNav logged in", () => {
-  it("shows the founder chip and wires Log out to logout()", () => {
+  it("shows the founder chip as a menu button wired to logout() via the dropdown", () => {
     stage = "app";
     profile = { firstName: "Cedric", handle: "cedric" };
     render(<GlobalNav />);
-    expect(screen.getByText("Cedric")).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: /log out/i }));
+    const chip = screen.getByRole("button", { name: /cedric/i });
+    expect(chip.getAttribute("aria-haspopup")).toBe("menu");
+    fireEvent.click(chip);
+    fireEvent.click(screen.getByRole("menuitem", { name: /log out/i }));
     expect(logout).toHaveBeenCalled();
   });
 
@@ -106,15 +109,79 @@ describe("GlobalNav logged in", () => {
     expect(screen.queryByRole("button", { name: /log in/i })).toBeNull();
   });
 
-  it("keeps the onboard stage free of the game section (founder chip + Log out only)", () => {
+  it("keeps the onboard stage free of the game section (Account dropdown only)", () => {
     stage = "onboard";
     profile = { firstName: "Cedric", handle: "cedric" };
     render(<GlobalNav />);
-    expect(screen.getByText("Cedric")).toBeTruthy();
-    expect(screen.getByRole("button", { name: /log out/i })).toBeTruthy();
+    const chip = screen.getByRole("button", { name: /cedric/i });
+    expect(chip.getAttribute("aria-haspopup")).toBe("menu");
+    fireEvent.click(chip);
+    expect(screen.getByRole("menuitem", { name: /log out/i })).toBeTruthy();
     expect(screen.queryByText("Sales")).toBeNull();
     expect(screen.queryByText("Profit")).toBeNull();
     expect(screen.queryByText("Slime Kits")).toBeNull();
+  });
+});
+
+describe("GlobalNav Account dropdown", () => {
+  function renderAppNav() {
+    stage = "app";
+    profile = { firstName: "Cedric", handle: "cedric" };
+    render(<GlobalNav />);
+    return screen.getByRole("button", { name: /cedric/i });
+  }
+
+  it("starts closed: no Log out anywhere, chip aria-expanded false", () => {
+    const chip = renderAppNav();
+    expect(chip.getAttribute("aria-expanded")).toBe("false");
+    expect(screen.queryByText(/log out/i)).toBeNull();
+    expect(screen.queryByRole("menu")).toBeNull();
+  });
+
+  it("removes the standalone Log out button from the bar", () => {
+    renderAppNav();
+    expect(screen.queryByRole("button", { name: /log out/i })).toBeNull();
+  });
+
+  it("click opens the menu with the Account title and a Log out menuitem", () => {
+    const chip = renderAppNav();
+    fireEvent.click(chip);
+    expect(chip.getAttribute("aria-expanded")).toBe("true");
+    expect(screen.getByText("Account")).toBeTruthy();
+    expect(screen.getByRole("menu")).toBeTruthy();
+    const item = screen.getByRole("menuitem", { name: /log out/i });
+    expect(item.className).toMatch(/min-h-\[44px\]/);
+  });
+
+  it("a second chip click toggles the menu closed", () => {
+    const chip = renderAppNav();
+    fireEvent.click(chip);
+    fireEvent.click(chip);
+    expect(screen.queryByRole("menu")).toBeNull();
+    expect(chip.getAttribute("aria-expanded")).toBe("false");
+  });
+
+  it("choosing Log out calls logout and closes the menu", () => {
+    const chip = renderAppNav();
+    fireEvent.click(chip);
+    fireEvent.click(screen.getByRole("menuitem", { name: /log out/i }));
+    expect(logout).toHaveBeenCalledTimes(1);
+    expect(screen.queryByRole("menu")).toBeNull();
+  });
+
+  it("a click outside closes the menu", () => {
+    const chip = renderAppNav();
+    fireEvent.click(chip);
+    fireEvent.mouseDown(document.body);
+    expect(screen.queryByRole("menu")).toBeNull();
+  });
+
+  it("Escape closes the menu and returns focus to the chip", () => {
+    const chip = renderAppNav();
+    fireEvent.click(chip);
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect(screen.queryByRole("menu")).toBeNull();
+    expect(document.activeElement).toBe(chip);
   });
 });
 
@@ -189,6 +256,36 @@ describe("GlobalNav app stage — the one bar's game section", () => {
     expect(screen.getByText("Slime Kits")).toBeTruthy(); // inert span
   });
 
+  it("the multi-idea chip is bold plain text advertising a dialog with a chevron, no pill", () => {
+    stage = "app";
+    game = appGame({
+      ideas: [
+        { id: "idea-0", fields: { productName: "Slime Kits" }, done: {} },
+        { id: "idea-1", fields: {}, done: {} },
+      ],
+    });
+    render(<GlobalNav onOpenSwitcher={vi.fn()} />);
+    const chip = screen.getByRole("button", { name: "Switch idea" });
+    expect(chip.getAttribute("aria-haspopup")).toBe("dialog");
+    expect(chip.querySelector("svg")).toBeTruthy(); // the ChevronDown affordance
+    expect(chip.className).toMatch(/font-bold/);
+    expect(chip.className).not.toMatch(/bg-\[/); // old tinted pill background gone
+    expect(chip.className).not.toMatch(/border/);
+    expect(chip.className).not.toMatch(/rounded/);
+  });
+
+  it("the single-idea name is plain bold text with no chevron and no pill", () => {
+    stage = "app";
+    render(<GlobalNav />);
+    const chip = screen.getByText("Slime Kits").parentElement as HTMLElement;
+    expect(chip.tagName).toBe("SPAN");
+    expect(chip.className).toMatch(/font-bold/);
+    expect(chip.className).not.toMatch(/bg-\[/);
+    expect(chip.className).not.toMatch(/border/);
+    expect(chip.className).not.toMatch(/rounded/);
+    expect(chip.querySelector("svg")).toBeNull();
+  });
+
   it("hides the chip entirely with zero ideas", () => {
     stage = "app";
     game = appGame({ ideas: [] });
@@ -197,12 +294,12 @@ describe("GlobalNav app stage — the one bar's game section", () => {
     expect(screen.getByText("Sales")).toBeTruthy();
   });
 
-  it("keeps the founder chip and Log out beside the game section", () => {
+  it("keeps the Account dropdown beside the game section", () => {
     stage = "app";
     profile = { firstName: "Cedric", handle: "cedric" };
     render(<GlobalNav />);
-    expect(screen.getByText("Cedric")).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: /log out/i }));
+    fireEvent.click(screen.getByRole("button", { name: /cedric/i }));
+    fireEvent.click(screen.getByRole("menuitem", { name: /log out/i }));
     expect(logout).toHaveBeenCalled();
   });
 
