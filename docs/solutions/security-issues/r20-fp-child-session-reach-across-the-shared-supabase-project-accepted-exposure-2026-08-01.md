@@ -207,6 +207,47 @@ the project-level value only governs the blocked-in-Slice-A email-signup path.
     (`FP_SITE_TEST_ONLY`); no new table grants, policies, or client-reachable
     columns were added.
 
+- **2026-08-05 (New User Flow v3, Unit 5 — the sign-in HANDOFF; the120 branch
+  `feat/new-user-flow-v3`):** a SECOND route now mints exactly the session this
+  document threat-modeled, so a re-check was owed. Reach is **unchanged**;
+  recorded here so the absence of change is on the record rather than assumed.
+  - **The new route:** `POST /api/fp/handoff/exchange` (the120) trades a
+    one-time code for a child session. The code is minted by a parent-session
+    Server Action on the account-ready screen of the v3 signup and rides to
+    firstprofit.school in a URL fragment; Unit 6 builds the `/auth/enter`
+    landing that spends it.
+  - **Same session kind, by the same mechanism.** The session is minted for the
+    same derived `s-<childId>@students.the120.invalid` identity, through the
+    same stateless (`persistSession:false`) client, and the 200 body is the same
+    token pair `/api/fp/login` returns — the two routes now share the response
+    type and the serialized refusal string outright. The principal that comes
+    out is therefore identical in every respect this document reasons about: an
+    `authenticated` role, `auth.uid()` = the child, no `parents` row, no
+    `path_role_grants`, not in `staff`. **R20's reach analysis above applies
+    verbatim and needs no amendment** — nothing in "CAN reach" or "CANNOT reach"
+    moves, no table, policy, grant, RPC, or client-reachable column was added,
+    and the SPA still talks to the shared project with the anon key exactly as
+    before.
+  - **The new table is closed by the same posture as the other internals.**
+    `fp_handoff_codes` is RLS-on with **ZERO policies (service-role only)** —
+    the same shape as `fp_signup_attempts` and the `path_*`/`fw_*` tables listed
+    under "CANNOT reach". A row there is a bearer credential for a child's
+    session, so a child session (or any anon-key principal) can neither read nor
+    write it. Its child FK is `ON DELETE CASCADE` — deliberately, as operational
+    ephemera rather than compliance evidence — so it adds **no new RESTRICT edge
+    to the documented erase ordering** and residual #2 stays closed.
+  - **Revocation is scoped, not global.** Where the exchange mints a session it
+    then declines to hand over (identity disagreement, profile-ensure refusal),
+    it calls `admin.signOut(accessToken, "local")` — the login route's rule,
+    for the login route's reason: a `"global"` sign-out would turn this
+    anonymous, cross-origin endpoint into a remote force-logout of every device
+    for any account whose session it can cause to be minted.
+  - **Not a new finding.** This is a re-check confirming no new reach. The
+    handoff's own controls (256-bit code, sha256 at rest, single-use CAS, 120s
+    TTL, child binding, Origin allowlist, IP rate limit) are documented in
+    `../120-The120/app/api/fp/handoff/handoff-rules.ts` and are about protecting
+    the code, not about widening or narrowing what the resulting session reaches.
+
 ## Prevention / how to reuse this
 
 - **When an app adds a session to a SHARED database, the threat surface is every
