@@ -17,6 +17,7 @@ import {
   SignupIntro,
 } from "../signup/screens";
 import { emptySignupData, type SignupData } from "../signup/validation";
+import { CONSENT_POLICY_VERSION } from "../signup/consentPolicy";
 
 afterEach(cleanup);
 
@@ -170,7 +171,10 @@ describe("ConsentScreen (screen 4) gate + versioned policy", () => {
         )}
       />,
     );
-    expect(screen.getByText(/v2026-08-03\.1/)).toBeTruthy();
+    // Track the constant, not a literal: the baked-in snapshot must follow the
+    // backend's FP_CONSENT_POLICY bumps, and validation.test.ts is where the
+    // exact version + hash are pinned against the backend.
+    expect(screen.getByText(`v${CONSENT_POLICY_VERSION}`)).toBeTruthy();
     const cta = () => screen.getByRole("button", { name: /Create my child's account/ }) as HTMLButtonElement;
     expect(cta().disabled).toBe(true);
     fireEvent.click(cta());

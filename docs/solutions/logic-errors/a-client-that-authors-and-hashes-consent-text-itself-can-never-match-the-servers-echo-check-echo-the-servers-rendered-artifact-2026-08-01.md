@@ -1,7 +1,8 @@
 ---
 module: signup
-tags: [consent, coppa, api-contract, hashing, cross-service, echo-check, source-of-truth]
+tags: [consent, coppa, api-contract, hashing, cross-service, echo-check, source-of-truth, deploy-ordering]
 problem_type: logic_error
+last_updated: 2026-08-05
 ---
 
 # A client that authors + hashes the consent text itself can never satisfy the server's echo-check — echo the server's rendered artifact, don't recompute it
@@ -65,6 +66,46 @@ both the client constant and the server's published value — so any future text
 fails CI. Then the real wiring has the client **fetch** the rendered policy from the
 server at consent time and echo exactly what it received.
 
+## Second failure mode (2026-08-05): the fallback snapshot goes stale on a server version bump
+
+The fix above landed, the live fetch got wired, and the client's default constant was
+made byte-identical to the server's text. Four days later The120 bumped
+`FP_CONSENT_POLICY.version` from `2026-08-03.1` to `2026-08-05.1` (adding photo/AI
+disclosures for a new onboarding flow) and **broke consent again on the fallback path
+only** — a regression the first fix's shape invited rather than prevented.
+
+The client does fetch the live policy (`fetchConsentPolicy()` -> `GET
+/api/fp/signup/consent-policy`), so the common path picks the bump up automatically.
+But it still ships `DEFAULT_CONSENT_POLICY` in `src/screens/signup/consentPolicy.ts`,
+and that snapshot is what actually gets submitted in two real situations:
+
+1. the render window before the fetch resolves (`policy` starts `undefined`, the Signup
+   screen defaults to the constant), and
+2. **permanently, for any session where the fetch fails** — `fetchConsentPolicy`
+   swallows every error and returns `null`, so a network blip, a CORS
+   misconfiguration, or a consent-policy route outage silently pins that session to the
+   stale snapshot.
+
+`consentVerdict` refuses any non-current *published* version as `stale`, so every
+parent who attested on the fallback path was refused.
+
+What makes this the dangerous kind of regression: **both repos' test suites stayed
+fully green.** Every client consent test injects or mocks `fetchConsentPolicy`, and
+nothing on either side asserts that the shipped constant matches the version the
+server currently deploys. The `sha256(TEXT) === HASH` self-consistency test the first
+fix recommended does not help here either — it proves the snapshot is internally
+coherent, never that it is *current*. A snapshot can be perfectly self-consistent and
+four days out of date.
+
+The fix is mechanical (bump `CONSENT_POLICY_VERSION`/`TEXT`/`HASH` in the same change
+as the server bump, hash verified byte-for-byte against the server's
+`currentPolicyHash()`), but the rule is the point: **a client-side fallback copy of a
+server-owned contract artifact is a deploy-coupled constant, not a default.** Either
+bump it in the same change as the server, or delete it and block submission until a
+live fetch succeeds. A fallback that is silently wrong is worse than no fallback,
+because it converts a loud outage (fetch failed, cannot proceed) into a quiet 100%
+refusal that looks like the parent's fault.
+
 ## Why This Works
 
 "Consent binds to the rendered version" means the artifact the user saw and the
@@ -91,7 +132,20 @@ must coincidentally agree on text, version format, AND hash algorithm.
 - **Test the contract across the boundary, not just within each side.** Each repo's
   own tests passed; the failure only exists in the composition. A single test that
   asserts the client's echoed version+hash equal the server's `version`/
-  `currentPolicyHash()` would have caught all of it.
+  `currentPolicyHash()` would have caught all of it. Note the 2026-08-05 recurrence:
+  a *self-consistency* test (`sha256(TEXT) === HASH`) is NOT that test. It proves the
+  snapshot is internally coherent, never that it is current. The only test that
+  catches staleness compares the client constant against the deployed server value.
+- **A client-side fallback copy of a server-owned artifact is deploy-coupled — bump it
+  in the same change, or delete it.** Treat it like a pinned dependency version, not a
+  default. Anywhere a client keeps a local copy "just in case the fetch fails", write
+  down that a server-side bump is now a two-repo change, and prefer blocking on a
+  failed fetch over submitting a possibly-stale artifact: a loud outage beats a silent
+  100% refusal that reads as the user's fault.
+- **Grep for every consumer of the version constant before bumping.** In the 2026-08-05
+  bump, two client tests asserted the old version transitively through the default
+  policy; one was rewritten to read `CONSENT_POLICY_VERSION` so only one place pins the
+  literal against the backend. Fewer literals, fewer places to drift.
 - Validate every client-side gate against the server's schema bounds while you're
   there (this same review found the client's jurisdiction min-length (1) and missing
   max diverging from the server's `min(2).max(100)` — a client gate looser than the
