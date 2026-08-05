@@ -46,6 +46,7 @@ import { AvatarSprite } from "./Avatar";
 import { MoreToolsModal } from "./MoreToolsModal";
 import { IdeaBrainstormTool } from "./tools/IdeaBrainstormTool";
 import { PitchBuilderTool } from "./tools/PitchBuilderTool";
+import { RehearsalStudioTool } from "./tools/RehearsalStudioTool";
 import { isPublicSiteEnabled } from "../config";
 import {
   IDEA_BRAINSTORM_PERSISTED_FIELD_KEYS,
@@ -53,6 +54,10 @@ import {
 } from "../lib/ideaBrainstorm";
 import { SITE_ONE_LINER_MAX_CHARS } from "../lib/siteCopy";
 import { PITCH_PERSISTED_FIELD_KEYS, PITCH_TASK_ID } from "../lib/pitch";
+import {
+  REHEARSAL_PERSISTED_FIELD_KEYS,
+  REHEARSAL_TASK_ID,
+} from "../lib/rehearsal";
 
 /**
  * Task id synthesis: the generated stable task id is `${stepId}.${index+1}` —
@@ -301,6 +306,9 @@ export function StepRunner() {
       ? IDEA_BRAINSTORM_PERSISTED_FIELD_KEYS
       : []),
     ...(currentTaskId === PITCH_TASK_ID ? PITCH_PERSISTED_FIELD_KEYS : []),
+    ...(currentTaskId === REHEARSAL_TASK_ID
+      ? REHEARSAL_PERSISTED_FIELD_KEYS
+      : []),
   ];
 
   // Seed each reducer field, including task-tool fields, from the account-scoped
@@ -353,11 +361,11 @@ export function StepRunner() {
   const advance = () => {
     if (!isLast) dispatch({ type: "OPEN_RUNNER", stepId: runnerStep, index: idx + 1 });
   };
-  const doIt = () => {
-    // The reducer marks the task done; on the final task it fires the celebration
-    // and closes the runner. On middle tasks it does not advance, so we do.
+  const markCurrentTaskDone = () => {
+    if (alreadyDone) return;
     // `at` is caller-stamped (gameCore stays Date.now()-free) so completion
-    // timestamps make silent stalls queryable for the cohort (R13).
+    // timestamps make silent stalls queryable for the cohort (R13). Tools may
+    // mark their own evidence complete without forcing an immediate navigation.
     dispatch({
       type: "COMPLETE_TASK",
       ideaIndex: activeIdea,
@@ -365,6 +373,11 @@ export function StepRunner() {
       index: idx,
       at: Date.now(),
     });
+  };
+  const doIt = () => {
+    // The reducer marks the task done; on the final task it fires the celebration
+    // and closes the runner. On middle tasks it does not advance, so we do.
+    markCurrentTaskDone();
     advance();
   };
   const onFieldChange = (key: string, value: string) => {
@@ -690,6 +703,14 @@ export function StepRunner() {
                   <PitchBuilderTool
                     fields={idea?.fields ?? {}}
                     onFieldChange={onFieldChange}
+                  />
+                </div>
+              ) : currentTaskId === REHEARSAL_TASK_ID ? (
+                <div onClick={(event) => event.stopPropagation()}>
+                  <RehearsalStudioTool
+                    fields={idea?.fields ?? {}}
+                    onFieldChange={onFieldChange}
+                    onTaskComplete={markCurrentTaskDone}
                   />
                 </div>
               ) : (

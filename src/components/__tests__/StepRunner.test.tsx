@@ -147,6 +147,26 @@ function seedAtIdeaTask(fields: Record<string, string> = {}): GameState {
   };
 }
 
+/** State at the 1.1.3 Rehearsal Studio task. */
+function seedAtRehearsalTask(fields: Record<string, string> = {}): GameState {
+  const s = initialState();
+  return {
+    ...s,
+    stage: "app",
+    ideas: [{
+      fields,
+      done: {
+        [taskKey("1.1", 0)]: true,
+        [taskKey("1.1", 1)]: true,
+      },
+    }],
+    activeIdea: 0,
+    runnerOpen: true,
+    runnerStep: "1.1",
+    runnerIndex: 2,
+  };
+}
+
 afterEach(() => {
   cleanup();
   publicSiteFlag = false;
@@ -288,6 +308,31 @@ describe("StepRunner", () => {
       key: "brainstormBoardGame",
       value: "Chess",
     });
+  });
+
+  it("routes task 1.1.3 Tools to Rehearsal Studio and completes restored three-run evidence", () => {
+    const actions: unknown[] = [];
+    render(
+      <Harness
+        seed={seedAtRehearsalTask({ rehearsalCleanRuns: "3" })}
+        onAction={(action) => actions.push(action)}
+      />,
+    );
+
+    openSection("Tools");
+    expect(screen.getByText("Rehearsal Studio")).toBeTruthy();
+    expect(screen.queryByText("Tools to help you complete the unit task will go here.")).toBeNull();
+    expect(actions).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          type: "COMPLETE_TASK",
+          ideaIndex: 0,
+          stepId: "1.1",
+          index: 2,
+        }),
+      ]),
+    );
+    expect(screen.getByText("Next task →")).toBeTruthy();
   });
 
   it("fills the FLOOR box, not the viewport, and is not a floating modal card", () => {
