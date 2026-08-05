@@ -139,7 +139,9 @@ describe("POST /api/brainstorm", () => {
     await handler(makeReq(), res);
     expect(recorded.statusCode).toBe(502);
     expect(recorded.body).toEqual({ error: "temporarily_unavailable" });
-    expect(errorSpy).toHaveBeenCalledWith("brainstorm: provider returned invalid output");
+    expect(errorSpy).toHaveBeenCalledWith(
+      "brainstorm: provider returned invalid output (empty-content)",
+    );
   });
 
   it("allows POST only", async () => {
