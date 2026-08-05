@@ -21,7 +21,17 @@ const GENERIC_ERROR =
 // attributes signups that originated from the First Profit login.
 const CREATE_ACCOUNT_URL = "https://the120.school/start?src=fplogin";
 
-export function Login() {
+export interface LoginProps {
+  /**
+   * Optional explanatory block rendered INSIDE the card, above the heading.
+   * Used by the handoff landing (`/auth/enter`) so a burned sign-in code lands
+   * the family on a real sign-in form with the reason attached, rather than on
+   * a dead end that only says something went wrong (v3 Unit 6, FIX 1).
+   */
+  notice?: React.ReactNode;
+}
+
+export function Login({ notice }: LoginProps = {}) {
   const { login } = useGame();
   const [identifier, setIdentifier] = useState("");
   const [password, setPassword] = useState("");
@@ -48,6 +58,7 @@ export function Login() {
       <div className="w-full max-w-sm">
         <div className="rounded-3xl border border-[hsl(40_14%_89%)] bg-white p-6 shadow-card sm:p-8">
           <p className="font-mono text-[11px] uppercase tracking-[0.28em] text-sell">First Profit</p>
+          {notice ? <div className="mt-3">{notice}</div> : null}
           <h1 className="mt-2 font-display text-3xl font-black leading-tight">Welcome back, founder.</h1>
 
           <form onSubmit={onSubmit} className="mt-6 space-y-4" noValidate>

@@ -45,6 +45,7 @@ import {
 } from "./gameCore";
 import {
   loginChild,
+  redeemSignInToken,
   logout as authLogout,
   getCurrentUserId,
   submitBirthYear,
@@ -52,9 +53,11 @@ import {
   claimHandle as claimHandleApi,
   publishSite as publishSiteApi,
   type ChildProfile,
+  type ChildSession,
   type ClaimHandleResult,
   type PublishSiteResult,
 } from "../lib/auth";
+import { peekEnterLink } from "../screens/auth/enterLink";
 import { bandForFeedback, displayBand, gradeFromBirthYear, type Band } from "../lib/band";
 import { getDraft, setDraft, wipeAllForUser, wipeAllFpKeys, getLastUserId, setLastUserId } from "../lib/draftCache";
 import {
@@ -198,6 +201,13 @@ export interface GameApi extends GameState {
 
   // Auth / session actions.
   login: (identifier: string, password: string) => Promise<boolean>;
+  /**
+   * Redeem the one-time handoff code from `/auth/enter#code=…` and adopt the
+   * session (v3 Unit 6). Same session boundary + `adoptSession` as `login`.
+   * A false result is TERMINAL — the code is single-use and already burned
+   * server-side, so the caller must show recovery, never a retry.
+   */
+  redeemHandoff: (code: string) => Promise<boolean>;
   logout: () => Promise<void>;
 
   /**
@@ -544,6 +554,13 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
   // ── Boot: resolve any persisted session, then route. ────────────────────
   useEffect(() => {
     let cancelled = false;
+    // A pending handoff OWNS this boot (v3 Unit 6). Restoring a persisted
+    // session here would race the redeem: the previous child's hydrate could
+    // land AFTER the new child's, resurrecting their ideas/ledger over the
+    // adopted session. Leave the stage at `boot` — /auth/enter renders its own
+    // spinner, and every redeem outcome routes from there (success →
+    // adoptSession, failure → the recovery screen with the sign-in form).
+    if (peekEnterLink().code) return;
     (async () => {
       try {
         const userId = await getCurrentUserId();
@@ -608,29 +625,69 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
   // Tear the engine down on unmount (clears timers + online/hide listeners).
   useEffect(() => stopEngine, [stopEngine]);
 
-  // ── Login ────────────────────────────────────────────────────────────────
-  const login = useCallback(
-    async (identifier: string, password: string): Promise<boolean> => {
-      // Clear any resident per-account state up front so no path can advance the
-      // stage with a previous child's ideas/ledger resident on a shared device.
-      dispatch({ type: "RESET_SESSION" });
-      // New session boundary: invalidate any in-flight grade writer, disarm the
-      // one-shot write-back retry, and re-arm the ask-once card.
-      sessionGenRef.current += 1;
-      gradeRetryRef.current = null;
-      setGradeAskDone(false);
-      // A new session may be a different child → a different profile. Drop the
-      // cached profile id so resolveProfileId re-reads under the new session.
-      resetProfileIdCache();
+  // ── Sign-in (shared by BOTH doors: password login + handoff redeem) ───────
+  /**
+   * Open a new session boundary BEFORE the network call that may open one.
+   *
+   * Runs first on every sign-in attempt — including one that ends up failing —
+   * so no path can advance the stage with a previous child's ideas/ledger
+   * resident on a shared device (in-memory-reducer-state-survives-logout
+   * learning), and so any async writer still in flight from the OLD session is
+   * invalidated by the generation bump before the new session can exist
+   * (async-writer-generation-token learning).
+   *
+   * IT ALSO REVOKES (v3 Unit 6 review, FIX 5). Clearing reducer state is only
+   * the IN-MEMORY half; a resident refresh token in localStorage is the other.
+   * Shared family device: kid A is signed in, the family opens /auth/enter for
+   * kid B, the exchange refuses — without this, the failure path leaves kid A's
+   * valid token behind and the NEXT page load silently signs kid A back in
+   * (the shared-device-bleed class). Revoking UP FRONT, before the network call
+   * that may or may not produce a new session, means a FAILED attempt can never
+   * leave a stale valid session: exactly the guarantee `logout()` gives.
+   *
+   * `authLogout` also purges the `sb-*` keys, and is bounded (SIGN_OUT_TIMEOUT_MS)
+   * so a dead network cannot make revocation hang the sign-in. It touches NO
+   * `fp:*` drafts, so the same-user re-sign-in restore that
+   * `GameContextAdoptSession.test.tsx` pins is unaffected — the draft decision
+   * still belongs to `adoptSession`'s last-user-id comparison.
+   */
+  const beginSessionBoundary = useCallback(async () => {
+    // Clear any resident per-account state up front.
+    dispatch({ type: "RESET_SESSION" });
+    // Invalidate any in-flight grade writer, disarm the one-shot write-back
+    // retry, and re-arm the ask-once card.
+    sessionGenRef.current += 1;
+    gradeRetryRef.current = null;
+    setGradeAskDone(false);
+    // A new session may be a different child → a different profile. Drop the
+    // cached profile id so resolveProfileId re-reads under the new session.
+    resetProfileIdCache();
+    // Revoke + purge any session already resident in this browser. Never
+    // throws (authLogout swallows and warns), never blocks past its deadline.
+    await authLogout("signin");
+  }, []);
 
-      const result = await loginChild(identifier, password);
-      if (!result.ok) return false;
-
+  /**
+   * Adopt an authenticated child session: shared-device wipe → SET_PROFILE →
+   * profile draft cache → hydrateAndRoute. THE ORDER IS LOAD-BEARING and is
+   * pinned by a regression test (`GameContextAdoptSession.test.tsx`).
+   *
+   * Extracted from the inlined login sequence (v3 Unit 6) so the handoff
+   * landing at `/auth/enter` adopts its session through EXACTLY this path — a
+   * second hand-rolled copy is how a shared-device wipe silently stops running
+   * for one of the two doors.
+   *
+   * The caller must have run `beginSessionBoundary()` before its network call.
+   * Returns false on any post-auth storage/dispatch failure so the screen can
+   * show a clean generic failure rather than a half-adopted session.
+   */
+  const adoptSession = useCallback(
+    async (session: ChildSession): Promise<boolean> => {
       try {
         // Same-user vs different-user: wipe ALL fp:* drafts/outbox before
-        // hydrating when a different child logs in on this device. The user id
-        // comes from loginChild's setSession result — no second session lookup.
-        const { userId } = result;
+        // hydrating when a different child signs in on this device. The user id
+        // comes from the door's setSession result — no second session lookup.
+        const { userId } = session;
         if (userId) {
           const last = getLastUserId();
           if (last && last !== userId) {
@@ -638,7 +695,7 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
             // (unsent stuck reports / sales) BEFORE the wipe destroys it. Its
             // storage reads are synchronous (complete before wipeAllFpKeys
             // below); the network part is fire-and-forget and never blocks or
-            // fails this login. This narrows — but cannot eliminate — the
+            // fails this sign-in. This narrows — but cannot eliminate — the
             // cross-child loss window: an offline switch or an unusable token
             // still loses the queue; that residual is accepted (documented on
             // flushOutboxForPriorUser).
@@ -648,13 +705,13 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
           setLastUserId(userId);
         }
 
-        const profile: ChildProfile = result.profile;
+        const profile: ChildProfile = session.profile;
         dispatch({
           type: "SET_PROFILE",
           // Adopt the roster's read-time grade alongside the profile (Unit 3;
           // R9): a number means the band resolves immediately and the ask-once
           // card never shows; null arms the ask.
-          patch: { firstName: profile.firstName, handle: profile.handle, grade: result.grade ?? null },
+          patch: { firstName: profile.firstName, handle: profile.handle, grade: session.grade ?? null },
         });
         // Cache the roster patch (account-scoped, fp:-prefixed) so a RESTORED
         // session's hydrate can re-adopt it — without this, a page reload
@@ -663,12 +720,12 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
           setDraft(userId, PROFILE_CACHE_DRAFT, {
             firstName: profile.firstName,
             handle: profile.handle,
-            grade: result.grade ?? null,
+            grade: session.grade ?? null,
           });
         }
 
         // Resolve the profile (RLS "own row"), load the save, HYDRATE or route to
-        // onboard, and start the sync engine. Same-user re-login restores the
+        // onboard, and start the sync engine. Same-user re-sign-in restores the
         // account-scoped drafts/outbox that the engine replays on start.
         if (userId) {
           await hydrateAndRoute(userId);
@@ -678,12 +735,44 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
         }
         return true;
       } catch {
-        // A storage or dispatch failure post-auth must surface as a clean login
+        // A storage or dispatch failure post-auth must surface as a clean
         // failure so the screen can reset loading and show the generic error.
         return false;
       }
     },
     [hydrateAndRoute],
+  );
+
+  // ── Login ────────────────────────────────────────────────────────────────
+  const login = useCallback(
+    async (identifier: string, password: string): Promise<boolean> => {
+      await beginSessionBoundary();
+      const result = await loginChild(identifier, password);
+      if (!result.ok) return false;
+      return adoptSession(result);
+    },
+    [beginSessionBoundary, adoptSession],
+  );
+
+  // ── Handoff sign-in (v3 Unit 6) ───────────────────────────────────────────
+  /**
+   * Redeem the one-time code the120's account-ready screen handed this tab and
+   * adopt the resulting session — the SAME boundary + adoption as `login`, so
+   * kid B's handoff cleanly replaces kid A's resident session on a shared
+   * device (second-handoff collision, Key Technical Decisions).
+   *
+   * False means the exchange refused, and it is TERMINAL: the server owns the
+   * single-use burn, so no retry can help. `Enter.tsx` renders the recovery
+   * surface that failure requires.
+   */
+  const redeemHandoff = useCallback(
+    async (code: string): Promise<boolean> => {
+      await beginSessionBoundary();
+      const result = await redeemSignInToken(code);
+      if (!result.ok) return false;
+      return adoptSession(result);
+    },
+    [beginSessionBoundary, adoptSession],
   );
 
   // ── Logout (explicit + idle share a core, differ on draft handling). ──────
@@ -971,6 +1060,7 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
       flushNow,
       getSessionGen,
       login,
+      redeemHandoff,
       logout,
       submitFeedback,
       grade: state.profile.grade,
@@ -992,6 +1082,7 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
       flushNow,
       getSessionGen,
       login,
+      redeemHandoff,
       logout,
       submitFeedback,
       gradeAskDone,
