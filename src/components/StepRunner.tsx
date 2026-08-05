@@ -45,6 +45,7 @@ import { getDraft, setDraft, getLastUserId } from "../lib/draftCache";
 import { AvatarSprite } from "./Avatar";
 import { MoreToolsModal } from "./MoreToolsModal";
 import { IdeaBrainstormTool } from "./tools/IdeaBrainstormTool";
+import { ObjectionLogTool } from "./tools/ObjectionLogTool";
 import { PitchBuilderTool } from "./tools/PitchBuilderTool";
 import { RehearsalStudioTool } from "./tools/RehearsalStudioTool";
 import { isPublicSiteEnabled } from "../config";
@@ -58,6 +59,10 @@ import {
   REHEARSAL_PERSISTED_FIELD_KEYS,
   REHEARSAL_TASK_ID,
 } from "../lib/rehearsal";
+import {
+  OBJECTION_LOG_PERSISTED_FIELD_KEYS,
+  OBJECTION_LOG_TASK_ID,
+} from "../lib/objectionLog";
 
 /**
  * Task id synthesis: the generated stable task id is `${stepId}.${index+1}` —
@@ -308,6 +313,9 @@ export function StepRunner() {
     ...(currentTaskId === PITCH_TASK_ID ? PITCH_PERSISTED_FIELD_KEYS : []),
     ...(currentTaskId === REHEARSAL_TASK_ID
       ? REHEARSAL_PERSISTED_FIELD_KEYS
+      : []),
+    ...(currentTaskId === OBJECTION_LOG_TASK_ID
+      ? OBJECTION_LOG_PERSISTED_FIELD_KEYS
       : []),
   ];
 
@@ -708,6 +716,15 @@ export function StepRunner() {
               ) : currentTaskId === REHEARSAL_TASK_ID ? (
                 <div onClick={(event) => event.stopPropagation()}>
                   <RehearsalStudioTool
+                    fields={idea?.fields ?? {}}
+                    onFieldChange={onFieldChange}
+                    onTaskComplete={markCurrentTaskDone}
+                  />
+                </div>
+              ) : currentTaskId === OBJECTION_LOG_TASK_ID ? (
+                <div onClick={(event) => event.stopPropagation()}>
+                  <ObjectionLogTool
+                    band={band}
                     fields={idea?.fields ?? {}}
                     onFieldChange={onFieldChange}
                     onTaskComplete={markCurrentTaskDone}

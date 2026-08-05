@@ -55,6 +55,7 @@ import { Celebration } from "../Celebration";
 import { PATH_CONTENT, phaseById, STEPS, taskById, taskTitleForBand } from "../../data/path";
 import type { Band } from "../../data/path";
 import { FEEDBACK_TASK_ID_RE, FEEDBACK_TASK_ID_MAX } from "../../lib/sync";
+import { OBJECTION_LOG_FIELD_KEYS } from "../../lib/objectionLog";
 
 const Ctx = (GameContext as unknown as { __ctx: React.Context<unknown> }).__ctx;
 
@@ -164,6 +165,27 @@ function seedAtRehearsalTask(fields: Record<string, string> = {}): GameState {
     runnerOpen: true,
     runnerStep: "1.1",
     runnerIndex: 2,
+  };
+}
+
+/** State at the 1.1.4 Objection Log task. */
+function seedAtObjectionTask(fields: Record<string, string> = {}): GameState {
+  const s = initialState();
+  return {
+    ...s,
+    stage: "app",
+    ideas: [{
+      fields,
+      done: {
+        [taskKey("1.1", 0)]: true,
+        [taskKey("1.1", 1)]: true,
+        [taskKey("1.1", 2)]: true,
+      },
+    }],
+    activeIdea: 0,
+    runnerOpen: true,
+    runnerStep: "1.1",
+    runnerIndex: 3,
   };
 }
 
@@ -329,6 +351,38 @@ describe("StepRunner", () => {
           ideaIndex: 0,
           stepId: "1.1",
           index: 2,
+        }),
+      ]),
+    );
+    expect(screen.getByText("Next task →")).toBeTruthy();
+  });
+
+  it("routes task 1.1.4 Tools to Objection Log with band copy and restored evidence", () => {
+    const actions: unknown[] = [];
+    render(
+      <Harness
+        band="g9_12"
+        seed={seedAtObjectionTask({
+          [OBJECTION_LOG_FIELD_KEYS.exact]: "Why is it worth the price?",
+          [OBJECTION_LOG_FIELD_KEYS.beat]: "pitchWhy",
+          [OBJECTION_LOG_FIELD_KEYS.original]: "It is fun.",
+          [OBJECTION_LOG_FIELD_KEYS.revision]: "It turns local history into a collectible game.",
+          [OBJECTION_LOG_FIELD_KEYS.applied]: "true",
+        })}
+        onAction={(action) => actions.push(action)}
+      />,
+    );
+
+    openSection("Tools");
+    expect(screen.getByText("Objection Log")).toBeTruthy();
+    expect(screen.getByText("Answer a second objection live")).toBeTruthy();
+    expect(actions).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          type: "COMPLETE_TASK",
+          ideaIndex: 0,
+          stepId: "1.1",
+          index: 3,
         }),
       ]),
     );
