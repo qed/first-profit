@@ -85,11 +85,6 @@ function BeatEditor({
           style={{ width: `${progress}%` }}
         />
       </div>
-      {overTarget ? (
-        <p className="mt-1.5 text-[11.5px] font-semibold text-[hsl(35_72%_34%)]">
-          Try trimming {words - beat.targetWords} {words - beat.targetWords === 1 ? "word" : "words"} from this beat.
-        </p>
-      ) : null}
     </section>
   );
 }
