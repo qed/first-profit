@@ -101,12 +101,64 @@ const LEGACY_KEY_BY_TASK_ID: Readonly<Record<string, string>> = Object.fromEntri
 
 /**
  * The legacy `${stepId}#${index}` key a task id maps back to, if any — the
- * reverse of LEGACY_KEY_REMAP. STATUS: validation/tooling-only today (tests pin
- * the inversion; the build gate exercises the table) — no production caller:
- * the reducer's dual-write checks `legacyKey in LEGACY_KEY_REMAP` directly
- * because it already holds the positional key. Kept exported as the canonical
- * inverse for any future tooling that starts from a task id.
+ * reverse of LEGACY_KEY_REMAP.
+ *
+ * The reducer's dual-write does NOT use it (it checks `legacyKey in
+ * LEGACY_KEY_REMAP` directly, because it already holds the positional key), but
+ * the staff Watchtower does: `src/screens/staff/flowBoard.ts` must name the
+ * legacy spelling of every task id it requests, or the endpoint's exact-string
+ * filter drops a legacy-only child's progress before anything can remap it.
+ * This is the canonical inverse — never re-derive one at a call site.
  */
 export function legacyKeyForTaskId(taskId: string): string | undefined {
   return LEGACY_KEY_BY_TASK_ID[taskId];
+}
+
+// ── The TASK_REMAP inverse ───────────────────────────────────────────────
+
+/**
+ * Old ids that resolve TO a given live id, i.e. `resolveTaskId` run backwards
+ * over a remap table (chains included: with `{a→b, b→c}` the sources of `c` are
+ * `a` and `b`).
+ *
+ * Why it exists: the same argument as `legacyKeyForTaskId`. The Watchtower's
+ * request is an explicit id list and the endpoint filters completion maps by
+ * EXACT string membership, so a child whose progress still sits under a
+ * remapped OLD id has that key dropped server-side and `migrateIdeaProgress`
+ * never gets the chance to move it. The request must therefore name the old ids
+ * too. Latent while TASK_REMAP ships empty — and CLAUDE.md's editorial rule
+ * guarantees it will not stay empty.
+ *
+ * Kept HERE, beside the table it inverts, so there is exactly one place that
+ * knows how remapping runs backwards.
+ */
+function buildRemapInverse(
+  remap: Readonly<Record<string, RemapTarget>>,
+): ReadonlyMap<string, readonly string[]> {
+  const out = new Map<string, string[]>();
+  for (const oldId of Object.keys(remap)) {
+    const target = resolveTaskId(oldId, remap);
+    if (target === oldId) continue; // absent, retired, or cyclic: nothing moves
+    const sources = out.get(target);
+    if (sources) sources.push(oldId);
+    else out.set(target, [oldId]);
+  }
+  return out;
+}
+
+const DEFAULT_REMAP_INVERSE = buildRemapInverse(TASK_REMAP);
+
+/**
+ * The old ids whose progress now lands on `taskId`, in table order. Empty for
+ * the overwhelmingly common case of an id nothing was remapped onto.
+ *
+ * `remap` is injectable for the same reason `resolveTaskId`'s is — tests of
+ * future remap entries. The production table's inverse is built once.
+ */
+export function remapSourcesForTaskId(
+  taskId: string,
+  remap: Readonly<Record<string, RemapTarget>> = TASK_REMAP,
+): readonly string[] {
+  const inverse = remap === TASK_REMAP ? DEFAULT_REMAP_INVERSE : buildRemapInverse(remap);
+  return inverse.get(taskId) ?? [];
 }

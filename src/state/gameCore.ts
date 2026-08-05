@@ -489,8 +489,12 @@ function coerceIdea(value: unknown): Idea {
  *   dropped.
  * - A remap entry old→new moves a stable-id completion exactly once; a retired
  *   entry (null) leaves it preserved in place.
+ *
+ * EXPORTED (behaviour unchanged; the only edit is the keyword) for
+ * `src/screens/staff/flowBoard.ts`, which documents why it imports this rather
+ * than replicating it.
  */
-function migrateIdeaProgress(
+export function migrateIdeaProgress(
   idea: Idea,
   remap: Readonly<Record<string, RemapTarget>>,
 ): Idea {
