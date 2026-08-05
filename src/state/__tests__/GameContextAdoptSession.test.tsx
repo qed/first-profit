@@ -197,6 +197,10 @@ describe("adoptSession extraction — password login is unchanged", () => {
       firstName: "Remi",
       handle: "remi.newal",
       grade: 4,
+      // v3 Unit 7 — the cover fields must be WRITTEN here or a reload loses
+      // them (see profileCache.cover.test.tsx for the full round trip).
+      coverUrl: null,
+      coverStatus: null,
     });
     await waitFor(() => expect(api?.stage).toBe("onboard"));
   });

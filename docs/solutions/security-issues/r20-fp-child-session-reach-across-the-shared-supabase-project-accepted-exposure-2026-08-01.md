@@ -248,6 +248,51 @@ the project-level value only governs the blocked-in-Slice-A email-signup path.
     `../120-The120/app/api/fp/handoff/handoff-rules.ts` and are about protecting
     the code, not about widening or narrowing what the resulting session reaches.
 
+- **2026-08-05 (New User Flow v3, Unit 7 — the COMIC COVER on the session body;
+  both repos, branch `feat/new-user-flow-v3`):** the shared session body grew
+  two OPTIONAL fields, so the same re-check was owed. Reach is **unchanged**;
+  recorded here for the same reason the Unit 5 entry is.
+  - **What was added:** `coverUrl` and `coverStatus` on the 200 body of BOTH
+    sign-in doors (`POST /api/fp/login` and `POST /api/fp/handoff/exchange`),
+    emitted by one shared pure function (`deriveCoverSessionFields`) so the two
+    doors cannot diverge. Both are OMITTED — not nulled — when the child has no
+    cover, which is every child provisioned before v3.
+  - **No new reach, and no new data leaving the project.** `coverStatus` is a
+    status word from the child's own row. `coverUrl` is a
+    `data:image/svg+xml;base64,…` cover stored on that same row
+    (`children.fp_cover_data_url`), rendered ONCE during the child's own parent
+    signup and served verbatim. Its only personal content is the child's FIRST
+    NAME, their AGE, and their own story answers — all of which the parent
+    supplied about their own child, and the first of which the SAME BODY
+    already carries in `profile.firstName`. The recipient is unchanged (the
+    child who just authenticated), the transport is unchanged (the same 200),
+    and no new table, policy, grant, RPC, or client-reachable column is
+    involved: the columns are read by service-role code and are not reachable
+    by the child session itself.
+  - **No new table posture to state.** The artifact lives in TEXT columns on
+    `fp_onboarding_drafts` (RLS-on, zero policies, service-role only) and
+    `public.children` (existing policies, unchanged — migration
+    20260917120000 adds no policy and grants nothing). No object store, so no
+    new bucket, no new key namespace, and nothing added to the documented
+    erase ordering.
+  - **Erasure (R28) is unaffected, deliberately.** The cover is a COLUMN on
+    rows that erasure already destroys — the draft row and the child row — so
+    deleting the child deletes the cover, with no sweep to remember and no
+    orphan class to create. This is precisely why a TEXT column was chosen over
+    a blob for ~2 KB of SVG. The inert blob-erasure task stays inert: there are
+    still no blobs.
+  - **Not logged, and never inlined.** Neither field is written to any log line
+    on either door (both are spread into the response object and nowhere else).
+    On the First Profit side the value is gated by `asCoverUrl`
+    (`src/lib/cover.ts`) — base64 SVG data URLs only, size-bounded — and is
+    rendered ONLY as an `<img src>`, never via `dangerouslySetInnerHTML` or an
+    inline `<svg>`. That distinction is load-bearing: SVG is live markup, and
+    the compositor's XML escaping is written for the sandboxed `<img>` parsing
+    context. The same gate runs again on the way OUT of the localStorage
+    profile cache, because localStorage is writable by anything on the origin
+    and is not a trusted source for having been ours once.
+  - **Not a new finding.** A re-check confirming no new reach.
+
 ## Prevention / how to reuse this
 
 - **When an app adds a session to a SHARED database, the threat surface is every

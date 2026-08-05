@@ -31,6 +31,8 @@ import { isLoggedInStage, useGame } from "../state/GameContext";
 import { activeBusiness } from "../state/gameCore";
 import { ideaProgressLabel, ideaSummaryName } from "../state/floorSelectors";
 import { isSignupEnabled } from "../config";
+import { useCoverImage } from "../lib/cover";
+import { CoverPortrait } from "./Avatar";
 import { LogoMark } from "./LogoMark";
 import type { SyncStatus } from "../lib/sync";
 
@@ -240,10 +242,23 @@ function AppNavStats() {
  * focus to the chip. The menu is z-50 so it floats above the sticky bar's
  * floor content, right-aligned under the chip so it never overflows at 390px.
  */
-function AccountMenu({ founder, onLogout }: { founder: string; onLogout: () => void }) {
+function AccountMenu({
+  founder,
+  coverUrl,
+  onLogout,
+}: {
+  founder: string;
+  coverUrl: string | null;
+  onLogout: () => void;
+}) {
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLSpanElement>(null);
   const chipRef = useRef<HTMLButtonElement>(null);
+  // The identity thumbnail (v3 Unit 7). 22px wide → 28 tall: it fits INSIDE the
+  // existing 44px tap target, so the bar's height and its 390px two-row wrap are
+  // unchanged whether or not a child has a cover. A load failure drops back to
+  // the plain text chip this bar has always shown.
+  const cover = useCoverImage(coverUrl);
 
   useEffect(() => {
     if (!open) return;
@@ -278,6 +293,9 @@ function AccountMenu({ founder, onLogout }: { founder: string; onLogout: () => v
         // without reading as a button.
         className="inline-flex min-h-[44px] items-center gap-1 px-1 font-mono text-[10.5px] font-semibold uppercase tracking-[0.06em] text-grow transition-colors hover:text-[hsl(150_52%_30%)]"
       >
+        {cover.show && coverUrl ? (
+          <CoverPortrait src={coverUrl} name={founder} width={22} onError={cover.onError} />
+        ) : null}
         <span className="max-w-[5.5rem] truncate sm:max-w-[12rem]">{founder}</span>
         <ChevronDown size={14} aria-hidden className={`shrink-0 transition-transform ${open ? "rotate-180" : ""}`} />
       </button>
@@ -366,7 +384,11 @@ export function GlobalNav({ onSwitched }: { onSwitched?: () => void } = {}) {
         {loggedIn ? (
           <span className="flex flex-wrap items-center justify-end gap-x-2 gap-y-1 sm:gap-x-2.5">
             {stage === "app" ? <AppNavIdentity onSwitched={onSwitched} /> : null}
-            <AccountMenu founder={founder} onLogout={() => void logout()} />
+            <AccountMenu
+              founder={founder}
+              coverUrl={profile.coverUrl}
+              onLogout={() => void logout()}
+            />
             {stage === "app" ? <AppNavStats /> : null}
           </span>
         ) : stage !== "login" ? (

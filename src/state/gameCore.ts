@@ -259,6 +259,26 @@ export interface Profile {
    * current truth. Per-account child data, so RESET_SESSION nulls it.
    */
   grade: number | null;
+  /**
+   * The child's comic cover (new-user-flow-v3, Unit 7; R12), or null when they
+   * have none. `coverUrl` is a self-contained `data:image/svg+xml;base64,…`
+   * URL from the sign-in response — the ONLY form this app renders, and only
+   * ever as an `<img src>` (see components/Avatar.tsx `CoverPortrait`).
+   *
+   * Same class as `grade`, and handled the same way for the same reasons:
+   * ROSTER-DERIVED and adopted at sign-in (or restored from the account-scoped
+   * profile cache), deliberately NOT part of the save doc, and nulled by
+   * RESET_SESSION because it is per-account child data.
+   */
+  coverUrl: string | null;
+  /**
+   * The raw cover status word from the roster, or null. Carried for honesty,
+   * NOT for copy: what renders is decided by whether a PICTURE exists, never
+   * by this word. This build's server writes no status that names queued work
+   * (no `fallback_pending_regen`, no regeneration queue), so there is no
+   * "being drawn" state for the UI to be about.
+   */
+  coverStatus: string | null;
 }
 
 export interface GameState {
@@ -313,7 +333,14 @@ export function initialState(): GameState {
   return {
     stage: "boot",
     ob: 2,
-    profile: { firstName: "", handle: "", siteHeadline: "", grade: null },
+    profile: {
+      firstName: "",
+      handle: "",
+      siteHeadline: "",
+      grade: null,
+      coverUrl: null,
+      coverStatus: null,
+    },
     ideas: [],
     activeIdea: 0,
     ledger: [],
@@ -1744,14 +1771,15 @@ export function reducer(state: GameState, action: Action): GameState {
       // (in-memory-reducer-state-survives-logout learning); the next session's
       // hydrate re-reads it from the registry.
       // `stage` and `profile` are deliberately left for the caller to set —
-      // EXCEPT `grade`, which is per-account child data adopted from the
-      // roster at login and must never survive a session boundary (the next
-      // child's login re-adopts, or the ask-once flow runs).
+      // EXCEPT `grade` and the COVER, which are per-account child data adopted
+      // from the roster at login and must never survive a session boundary
+      // (the next child's login re-adopts, or the ask-once flow runs). A cover
+      // left behind here is one kid's face on another kid's journey.
       const fresh = initialState();
       return {
         ...fresh,
         stage: state.stage,
-        profile: { ...state.profile, grade: null },
+        profile: { ...state.profile, grade: null, coverUrl: null, coverStatus: null },
       };
     }
 

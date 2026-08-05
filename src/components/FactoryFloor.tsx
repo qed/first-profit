@@ -164,7 +164,13 @@ function DesktopFloor({ walkTo, onArrived, onWalk, floorView, onBack }: FloorPro
         // the dialog while the sprite was still sliding.
         style={{ left: `${pos.x}%`, top: `${pos.y}%`, transition: "left .5s cubic-bezier(.22,1,.36,1), top .5s cubic-bezier(.22,1,.36,1)" }}
       >
-        <AvatarSprite name={profile.firstName || profile.handle || "Founder"} />
+        {/* The walking avatar carries the child's comic cover too (v3 Unit 7) —
+            this is the lg+ twin of MobilePath's top-of-journey sprite, and the
+            two must not disagree about who the kid is across the breakpoint. */}
+        <AvatarSprite
+          name={profile.firstName || profile.handle || "Founder"}
+          coverUrl={profile.coverUrl}
+        />
       </div>
 
       <p className="pointer-events-none absolute bottom-2.5 left-1/2 -translate-x-1/2 rounded-full bg-[hsl(25_34%_20%/0.55)] px-3 py-1 font-mono text-[9.5px] uppercase tracking-[0.08em] text-[hsl(40_55%_97%)]">

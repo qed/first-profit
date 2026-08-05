@@ -18,6 +18,7 @@
  * `logout` just reports which scope ran so the provider can route it.
  */
 import { getConfig, isPublicSiteEnabled } from "../config";
+import { asCoverStatus, asCoverUrl } from "./cover";
 import { getSupabase } from "./supabase";
 
 export interface ChildProfile {
@@ -42,6 +43,38 @@ export interface ChildSession {
    * malformed value, is null (the ask-once flow handles null).
    */
   grade: number | null;
+  /**
+   * The child's comic cover (new-user-flow-v3, Unit 7; R12), or null.
+   *
+   * ── HOW THIS APP RECEIVES A COVER, AND WHY THAT FORM ──
+   * The120 sends the PICTURE, not an address for one: a self-contained
+   * `data:image/svg+xml;base64,…` URL read straight off the child's row. There
+   * is exactly ONE cover per child — rendered once during their parent's signup
+   * and stored — so both of The120's sign-in doors hand over the same bytes and
+   * this app never has to ask for them. No second network hop, no cover
+   * endpoint to CORS-allow, and no public per-child URL that would leak a kid's
+   * first name to anyone who guessed an id.
+   *
+   * ⚠ IT IS ONLY EVER AN `<img src>`. The bytes are an SVG DOCUMENT, and SVG is
+   * live markup: inlined into the DOM it would be a script-execution sink. In
+   * an `<img>` the browser parses it sandboxed — no script, no external fetch —
+   * which is exactly the context The120's compositor escapes its untrusted
+   * interpolations for. `asCoverUrl` (./cover) refuses anything that is not
+   * that form, so a compromised or confused response cannot change the
+   * rendering context out from under that reasoning.
+   *
+   * OPTIONAL ON THE WIRE: absent for every account predating v3, and absent
+   * from ANY response The120 served before its own Unit 7 deploy. Absent → null
+   * → the procedural sprite. Never an error, never a placeholder.
+   */
+  coverUrl: string | null;
+  /**
+   * The roster's raw cover status word, or null. Carried so the app can tell
+   * "no cover" from "a cover exists that this door cannot hand over" — NOT so
+   * it can render progress copy. Nothing in this build queues a redraw, so
+   * there is no pending state to narrate.
+   */
+  coverStatus: string | null;
 }
 
 export type LoginResult = ({ ok: true } & ChildSession) | { ok: false };
@@ -113,6 +146,8 @@ interface LoginResponseBody {
   refresh_token?: unknown;
   profile?: { handle?: unknown; firstName?: unknown };
   grade?: unknown;
+  coverUrl?: unknown;
+  coverStatus?: unknown;
 }
 
 function asString(value: unknown): string {
@@ -124,6 +159,7 @@ function asString(value: unknown): string {
 function asGrade(value: unknown): number | null {
   return typeof value === "number" && Number.isInteger(value) ? value : null;
 }
+
 
 /**
  * Parse a sign-in door's response and ADOPT the session it carries. Shared by
@@ -158,6 +194,12 @@ async function adoptSessionResponse(res: {
       firstName: asString(body.profile?.firstName),
     },
     grade: asGrade(body.grade),
+    // OPTIONAL ON THE WIRE (v3 Unit 7). A response from a The120 build that
+    // predates the cover — which is EVERY response until its deploy lands, and
+    // this repo's deploy may land first — simply has neither key, and both
+    // coercions answer null. No branch, no version check, no error.
+    coverUrl: asCoverUrl(body.coverUrl),
+    coverStatus: asCoverStatus(body.coverStatus),
   };
 }
 

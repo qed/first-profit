@@ -760,7 +760,14 @@ export function StepRunner() {
           }}
           aria-hidden
         >
-          <AvatarSprite name={game.profile.firstName || game.profile.handle || "Founder"} />
+          {/* The in-room avatar carries the child's comic cover too (v3 Unit 7).
+              It is the SAME founder as the one on the floor and in the nav
+              chip: a kid who sees their own face walk into a room must not
+              meet a generic sprite the moment the room opens. */}
+          <AvatarSprite
+            name={game.profile.firstName || game.profile.handle || "Founder"}
+            coverUrl={game.profile.coverUrl}
+          />
         </div>
       ) : null}
     </div>

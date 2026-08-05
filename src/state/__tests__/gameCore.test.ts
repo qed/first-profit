@@ -847,7 +847,7 @@ describe("field + misc reducer actions", () => {
     let s = initialState();
     s = reducer(s, { type: "SET_PROFILE", patch: { firstName: "Cedric" } });
     s = reducer(s, { type: "SET_PROFILE", patch: { handle: "cedric" } });
-    expect(s.profile).toEqual({ firstName: "Cedric", handle: "cedric", siteHeadline: "", grade: null });
+    expect(s.profile).toEqual({ firstName: "Cedric", handle: "cedric", siteHeadline: "", grade: null, coverUrl: null, coverStatus: null });
     s = reducer(s, { type: "SET_STAGE", stage: "app" });
     expect(s.stage).toBe("app");
     s = reducer(s, { type: "SET_OB", ob: 4 });
@@ -1107,9 +1107,18 @@ describe("RESET_SESSION (shared-device state clear)", () => {
     expect(reset.room).toBeNull();
 
     // Caller-controlled fields are preserved for the provider to overwrite —
-    // EXCEPT grade, which is per-account child data (asserted separately below).
+    // EXCEPT grade AND the cover, which are per-account child data (each
+    // asserted with its own set-then-clear test below; this one is only a
+    // shape check, and it deliberately does not stand in for those).
     expect(reset.stage).toBe("app");
-    expect(reset.profile).toEqual({ firstName: "Ada", handle: "ada", siteHeadline: "", grade: null });
+    expect(reset.profile).toEqual({
+      firstName: "Ada",
+      handle: "ada",
+      siteHeadline: "",
+      grade: null,
+      coverUrl: null,
+      coverStatus: null,
+    });
 
     // The reducer remains usable afterwards.
     const revived = reducer(reset, { type: "CREATE_IDEA" });
@@ -1134,6 +1143,51 @@ describe("profile.grade (Unit 3: roster-derived, session-scoped)", () => {
     expect(reset.profile.firstName).toBe("Ada");
     expect(reset.profile.handle).toBe("ada");
     expect(reset.profile.grade).toBeNull();
+  });
+
+  it("RESET_SESSION nulls the COVER even though the rest of the profile survives", () => {
+    // Mirrors the grade test directly above, and for the same reason it exists:
+    // an assertion that a field is null after a reset proves NOTHING unless the
+    // field was non-null before it. The earlier version of this check ran on a
+    // profile that never had a cover, so it passed whether or not the reducer
+    // cleared one — it would have kept passing through the exact regression it
+    // was written to catch.
+    //
+    // What the regression looks like in the product: a shared family
+    // Chromebook, kid A logs out, kid B logs in — and kid B's journey, nav chip
+    // and room avatar all show kid A's face until B's own roster patch lands.
+    const cover = "data:image/svg+xml;base64,PHN2Zz48L3N2Zz4=";
+    let s = initialState();
+    s = reducer(s, {
+      type: "SET_PROFILE",
+      patch: { firstName: "Ada", handle: "ada", coverUrl: cover, coverStatus: "final" },
+    });
+    // The set actually took — otherwise the clear below is unfalsifiable again.
+    expect(s.profile.coverUrl).toBe(cover);
+    expect(s.profile.coverStatus).toBe("final");
+
+    const reset = reducer(s, { type: "RESET_SESSION" });
+
+    expect(reset.profile.firstName).toBe("Ada");
+    expect(reset.profile.handle).toBe("ada");
+    expect(reset.profile.coverUrl).toBeNull();
+    expect(reset.profile.coverStatus).toBeNull();
+  });
+
+  it("the cover is NOT persisted: toSaveDoc has no cover field and HYDRATE leaves it alone", () => {
+    // Same class as grade — roster-derived session state, never save-doc state.
+    // A cover in the save doc would sync one child's picture to every device
+    // that ever loads that doc, and would survive a logout the reset just made
+    // sure to clear.
+    let s = initialState();
+    s = reducer(s, {
+      type: "SET_PROFILE",
+      patch: { coverUrl: "data:image/svg+xml;base64,PHN2Zz48L3N2Zz4=", coverStatus: "final" },
+    });
+    const doc = toSaveDoc(s);
+    expect(JSON.stringify(doc)).not.toContain("cover");
+    const hydrated = reducer(s, { type: "HYDRATE", doc });
+    expect(hydrated.profile.coverUrl).toBe("data:image/svg+xml;base64,PHN2Zz48L3N2Zz4=");
   });
 
   it("grade is NOT persisted: toSaveDoc has no grade field and HYDRATE leaves it alone", () => {

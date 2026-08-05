@@ -57,6 +57,7 @@ import {
   type ClaimHandleResult,
   type PublishSiteResult,
 } from "../lib/auth";
+import { asCoverStatus, asCoverUrl } from "../lib/cover";
 import { peekEnterLink } from "../screens/auth/enterLink";
 import { bandForFeedback, displayBand, gradeFromBirthYear, type Band } from "../lib/band";
 import { getDraft, setDraft, wipeAllForUser, wipeAllFpKeys, getLastUserId, setLastUserId } from "../lib/draftCache";
@@ -498,16 +499,32 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
       // avatar label to "Founder"): re-adopt the account-scoped cache written
       // at login. fp:-prefixed, so a different child's login wipes it; a
       // roster rename stays stale only until that child's next real login.
-      const cachedProfile = getDraft<{ firstName?: unknown; handle?: unknown; grade?: unknown }>(
-        userId,
-        PROFILE_CACHE_DRAFT,
-      );
+      //
+      // ⚠ THIS READ IS HAND-ROLLED, FIELD BY FIELD, AND THAT IS A HAZARD:
+      // a field added to the WRITE below (adoptSession) but not named here is
+      // silently dropped on every reload — the value survives the login and
+      // then vanishes the first time the child refreshes the page. Every field
+      // written must be read. `src/state/__tests__/profileCache.cover.test.ts`
+      // exists to make that a failing test rather than a missing pixel.
+      const cachedProfile = getDraft<{
+        firstName?: unknown;
+        handle?: unknown;
+        grade?: unknown;
+        coverUrl?: unknown;
+        coverStatus?: unknown;
+      }>(userId, PROFILE_CACHE_DRAFT);
       if (cachedProfile && typeof cachedProfile === "object") {
         const firstName = typeof cachedProfile.firstName === "string" ? cachedProfile.firstName : "";
         const handle = typeof cachedProfile.handle === "string" ? cachedProfile.handle : "";
         const grade = typeof cachedProfile.grade === "number" ? cachedProfile.grade : null;
+        // Re-validated on the way OUT of storage, not just on the way in: the
+        // cache is localStorage, which any script on the origin can write, and
+        // a value that becomes an `<img src>` must clear the same one gate
+        // whichever direction it arrived from.
+        const coverUrl = asCoverUrl(cachedProfile.coverUrl);
+        const coverStatus = asCoverStatus(cachedProfile.coverStatus);
         if (firstName || handle) {
-          dispatch({ type: "SET_PROFILE", patch: { firstName, handle, grade } });
+          dispatch({ type: "SET_PROFILE", patch: { firstName, handle, grade, coverUrl, coverStatus } });
         }
       }
       try {
@@ -711,16 +728,28 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
           // Adopt the roster's read-time grade alongside the profile (Unit 3;
           // R9): a number means the band resolves immediately and the ask-once
           // card never shows; null arms the ask.
-          patch: { firstName: profile.firstName, handle: profile.handle, grade: session.grade ?? null },
+          patch: {
+            firstName: profile.firstName,
+            handle: profile.handle,
+            grade: session.grade ?? null,
+            // The comic cover (v3 Unit 7; R12) — already coerced to a safe data
+            // URL or null by `asCoverUrl` at the door.
+            coverUrl: session.coverUrl ?? null,
+            coverStatus: session.coverStatus ?? null,
+          },
         });
         // Cache the roster patch (account-scoped, fp:-prefixed) so a RESTORED
         // session's hydrate can re-adopt it — without this, a page reload
         // degrades the founder chip/avatar label to "Founder".
         if (userId) {
+          // ⚠ EVERY FIELD WRITTEN HERE MUST ALSO BE READ BACK by the
+          // hand-rolled restore in `hydrateAndRoute` — see the warning there.
           setDraft(userId, PROFILE_CACHE_DRAFT, {
             firstName: profile.firstName,
             handle: profile.handle,
             grade: session.grade ?? null,
+            coverUrl: session.coverUrl ?? null,
+            coverStatus: session.coverStatus ?? null,
           });
         }
 
@@ -800,7 +829,14 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
       dispatch({ type: "RESET_SESSION" });
       dispatch({
         type: "SET_PROFILE",
-        patch: { firstName: "", handle: "", siteHeadline: "", grade: null },
+        patch: {
+          firstName: "",
+          handle: "",
+          siteHeadline: "",
+          grade: null,
+          coverUrl: null,
+          coverStatus: null,
+        },
       });
       dispatch({ type: "SET_STAGE", stage: scope === "explicit" ? "landing" : "login" });
     },

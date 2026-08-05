@@ -81,6 +81,11 @@ describe("redeemSignInToken", () => {
       userId: "user-9",
       profile: { handle: "remi.newal", firstName: "Remi" },
       grade: 5,
+      // v3 Unit 7: the cover fields ride the SAME shared parser, so the two
+      // doors still parse to one value. This fixture body carries neither —
+      // the older-The120 / pre-v3-account case — and both coerce to null.
+      coverUrl: null,
+      coverStatus: null,
     });
   });
 
