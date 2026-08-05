@@ -44,8 +44,13 @@ import { criterionIdsForPhase, phaseOfCriterion } from "../state/gameCore";
 import { getDraft, setDraft, getLastUserId } from "../lib/draftCache";
 import { AvatarSprite } from "./Avatar";
 import { MoreToolsModal } from "./MoreToolsModal";
+import { IdeaBrainstormTool } from "./tools/IdeaBrainstormTool";
 import { PitchBuilderTool } from "./tools/PitchBuilderTool";
 import { isPublicSiteEnabled } from "../config";
+import {
+  IDEA_BRAINSTORM_PERSISTED_FIELD_KEYS,
+  IDEA_BRAINSTORM_TASK_ID,
+} from "../lib/ideaBrainstorm";
 import { SITE_ONE_LINER_MAX_CHARS } from "../lib/siteCopy";
 import { PITCH_PERSISTED_FIELD_KEYS, PITCH_TASK_ID } from "../lib/pitch";
 
@@ -292,6 +297,9 @@ export function StepRunner() {
   const currentTaskId = runnerStep ? taskIdFor(runnerStep, idx) : "";
   const restorableFieldKeys = [
     ...taskFields.map((field) => field.key),
+    ...(currentTaskId === IDEA_BRAINSTORM_TASK_ID
+      ? IDEA_BRAINSTORM_PERSISTED_FIELD_KEYS
+      : []),
     ...(currentTaskId === PITCH_TASK_ID ? PITCH_PERSISTED_FIELD_KEYS : []),
   ];
 
@@ -667,7 +675,14 @@ export function StepRunner() {
 
           {section === "tools" ? (
             <div>
-              {currentTaskId === PITCH_TASK_ID ? (
+              {currentTaskId === IDEA_BRAINSTORM_TASK_ID ? (
+                <div onClick={(event) => event.stopPropagation()}>
+                  <IdeaBrainstormTool
+                    fields={idea?.fields ?? {}}
+                    onFieldChange={onFieldChange}
+                  />
+                </div>
+              ) : currentTaskId === PITCH_TASK_ID ? (
                 // Mini-tool interaction stays inside the work surface. Letting
                 // clicks bubble to the room makes the avatar walk over the
                 // timer/text controls and visually cover the thing in use.

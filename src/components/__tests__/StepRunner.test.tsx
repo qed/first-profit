@@ -133,6 +133,20 @@ function seedAtPitchTask(fields: Record<string, string> = {}): GameState {
   };
 }
 
+/** State at the 1.1.1 brainstorming tool. */
+function seedAtIdeaTask(fields: Record<string, string> = {}): GameState {
+  const s = initialState();
+  return {
+    ...s,
+    stage: "app",
+    ideas: [{ fields, done: {} }],
+    activeIdea: 0,
+    runnerOpen: true,
+    runnerStep: "1.1",
+    runnerIndex: 0,
+  };
+}
+
 afterEach(() => {
   cleanup();
   publicSiteFlag = false;
@@ -254,6 +268,26 @@ describe("StepRunner", () => {
     // room's move-first delay, which would park the avatar over the timer.
     fireEvent.click(screen.getByRole("button", { name: "Start run" }), { detail: 1 });
     expect(screen.getByRole("button", { name: "Pause run" })).toBeTruthy();
+  });
+
+  it("routes task 1.1.1 Tools to the idea lab and writes its brainstorm inputs through SET_FIELD", () => {
+    const actions: unknown[] = [];
+    render(<Harness seed={seedAtIdeaTask()} onAction={(action) => actions.push(action)} />);
+
+    openSection("Tools");
+    expect(screen.getByText("Business Idea Spark Lab")).toBeTruthy();
+    expect(screen.queryByText("Tools to help you complete the unit task will go here.")).toBeNull();
+    expect(document.querySelector("[data-runner-avatar]")).toBeNull();
+
+    fireEvent.change(screen.getByLabelText("Favorite board game"), {
+      target: { value: "Chess" },
+    });
+    expect(actions).toContainEqual({
+      type: "SET_FIELD",
+      ideaIndex: 0,
+      key: "brainstormBoardGame",
+      value: "Chess",
+    });
   });
 
   it("fills the FLOOR box, not the viewport, and is not a floating modal card", () => {
