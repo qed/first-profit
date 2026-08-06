@@ -418,7 +418,20 @@ export function StepRunner() {
     if (userId) setDraft(userId, fieldDraftName(activeIdea, key), value);
   };
 
-  const close = () => dispatch({ type: "CLOSE_RUNNER" });
+  const close = () => {
+    // BUG-008: dismissing the runner on an idea the child never touched — no
+    // field text anywhere, no task completed — REMOVES the idea instead of
+    // leaving an empty "Not named yet" husk occupying a floor slot. It rides
+    // the same tombstoned DELETE_IDEA as the explicit delete flow (the
+    // reducer closes the runner as part of the delete), so a stale-doc union
+    // can never resurrect the husk. Any refusal — an id-less legacy idea, a
+    // business reference, the tombstone cap — falls through to a plain close.
+    const pristine =
+      Object.keys(idea?.done ?? {}).length === 0 &&
+      Object.values(idea?.fields ?? {}).every((v) => !String(v ?? "").trim());
+    if (pristine && idea?.id && game.deleteIdea?.(idea.id)) return;
+    dispatch({ type: "CLOSE_RUNNER" });
+  };
 
   /**
    * MOVE FIRST, THEN ACT (owner spec 2026-08-04): a mouse click anywhere in

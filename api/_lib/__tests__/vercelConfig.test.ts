@@ -27,6 +27,8 @@ interface Redirect {
   source: string;
   destination: string;
   permanent: boolean;
+  /** Host condition (the www→apex redirect). */
+  has?: { type: string; value: string }[];
 }
 
 interface VercelConfig {
@@ -57,8 +59,18 @@ describe("vercel.json", () => {
     expect(config.rewrites[1]).toEqual({ source: "/(.*)", destination: "/index.html" });
   });
 
-  it("permanently redirects the OLD staff route /admin to /staff (Vercel runs redirects BEFORE rewrites)", () => {
+  it("permanently redirects www to the apex and the OLD staff route /admin to /staff (Vercel runs redirects BEFORE rewrites)", () => {
     expect(config.redirects).toEqual([
+      // BUG-001: www serves the same project but The120's origin allowlist is
+      // apex-first; one canonical host also keeps localStorage saves in ONE
+      // origin. The regex form (not `/:path*`) is load-bearing: the bare root
+      // `/` did not match `/:path*` in production.
+      {
+        source: "/(.*)",
+        has: [{ type: "host", value: "www.firstprofit.school" }],
+        destination: "https://firstprofit.school/$1",
+        permanent: true,
+      },
       { source: "/admin", destination: "/staff", permanent: true },
     ]);
     // Both words stay in the rewrite exclusion list regardless: neither may

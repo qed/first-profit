@@ -26,13 +26,13 @@
 | Bug | Decision | Notes |
 |-----|----------|-------|
 | BUG-001 | fixed (pending deploy) | Root cause: www.firstprofit.school serves the SPA but The120's origin allowlist refused it → preflight 403. Fixed: www→apex redirect (`vercel.json`), www added to `buildAllowedOrigins`, refused origins now logged (the120 `app/api/fp/login`). |
-| BUG-002 | pending | |
+| BUG-002 | fixed (pending deploy) | Password now trimmed on login submit like the username (paste brings trailing whitespace). `src/screens/Login.tsx`. |
 | BUG-003 | fixed (pending deploy) | Root cause: `signOut()` defaulted to GLOBAL revoke — one device's idle/explicit/pre-signin logout expired every device on the shared account, surfacing as "kicked mid-session". Refresh flow already existed. Fixed: `signOut({ scope: "local" })` in `src/lib/auth.ts`. |
-| BUG-004 | pending | |
-| BUG-005 | pending | |
-| BUG-006 | pending | |
+| BUG-004 | fixed (pending deploy) | Inert "See your live checkout ↗" button demoted to a plain caption ("Your live checkout unlocks on your factory floor."). `src/screens/onboarding/screens.tsx`. |
+| BUG-005 | closed, no action (2026-08-06) | Every unit task is being massively reworked within 7 days; the runner's honor-system CTA goes with it. |
+| BUG-006 | closed, no action (2026-08-06) | Same rework covers criterion gating. |
 | BUG-007 | pending | |
-| BUG-008 | pending | |
+| BUG-008 | fixed (pending deploy) | Delete UI + grey unnamed cards were already live; added: dismissing the runner on a pristine idea (no fields, no completed tasks) now removes it via the tombstoned DELETE_IDEA path. `src/components/StepRunner.tsx`. |
 | BUG-009 | pending | |
 | BUG-010 | pending | |
 | BUG-011 | pending | |
