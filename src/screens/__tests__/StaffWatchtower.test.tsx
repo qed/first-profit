@@ -300,6 +300,46 @@ describe("StaffWatchtower — the flow table", () => {
     expect(screen.getByText(STAFF_COPY.watchtowerMedianDroppedNote)).toBeTruthy();
   });
 
+  it("shows DROPPED samples beside a real median, not only beside a “—”", async () => {
+    // The branch where it matters most and used not to render at all. Two honest
+    // children measure 2 days; a third pair is rejected. Without the count the
+    // row reads "2d · n=2 · 2 children" and looks CLEAN, and the rejection —
+    // which is itself the finding — is invisible.
+    serve({
+      children: [
+        child("ada.b", [idea(0, "a1", [["1.1.1", NOW - 10 * DAY], ["1.1.2", NOW - 8 * DAY]])]),
+        child("bo.c", [idea(0, "b1", [["1.1.1", NOW - 10 * DAY], ["1.1.2", NOW - 8 * DAY]])]),
+        // Same instant on both: a sample existed and was unusable.
+        child("cy.d", [idea(0, "c1", [["1.1.1", NOW - 5 * DAY], ["1.1.2", NOW - 5 * DAY]])]),
+      ],
+    });
+    await openWatchtower();
+    const cell = screen.getByTestId("fp-watchtower-median-1.1.2");
+    expect(cell.textContent).toContain("2d"); // the median is REAL
+    expect(cell.textContent).toContain("n=2");
+    expect(screen.getByTestId("fp-watchtower-dropped-1.1.2").textContent).toBe(
+      `1 ${STAFF_COPY.watchtowerMedianDroppedLabel}`,
+    );
+  });
+
+  it("shows DROPPED samples beside a WITHHELD median too", async () => {
+    // The third branch: one child's median exists but is below
+    // MIN_CHILDREN_PER_MEDIAN, and a second child's pair was rejected. Both
+    // facts, not one.
+    serve({
+      children: [
+        child("ada.b", [idea(0, "a1", [["1.1.1", NOW - 10 * DAY], ["1.1.2", NOW - 8 * DAY]])]),
+        child("cy.d", [idea(0, "c1", [["1.1.1", NOW - 5 * DAY], ["1.1.2", NOW - 5 * DAY]])]),
+      ],
+    });
+    await openWatchtower();
+    const cell = screen.getByTestId("fp-watchtower-median-1.1.2");
+    expect(cell.textContent).toContain(STAFF_COPY.watchtowerMedianWithheld);
+    expect(screen.getByTestId("fp-watchtower-dropped-1.1.2").textContent).toBe(
+      `1 ${STAFF_COPY.watchtowerMedianDroppedLabel}`,
+    );
+  });
+
   it("shows the sample's CONCENTRATION, not just its breadth", async () => {
     // 4 samples from 3 children, two of them from one child.
     serve({
@@ -479,6 +519,74 @@ describe("StaffWatchtower — absence is a number", () => {
     expect(screen.queryByTestId("fp-watchtower-table")).toBeNull();
   });
 
+  it("ALERTS when every child's save is unreadable — the DOC_VERSION skew state", async () => {
+    // These children narrow perfectly well, so `narrowProgress` returns a
+    // payload and `childCount` is 2 — the zero-children alert cannot fire. The
+    // likeliest cause is a DOC_VERSION bump shipped here before the120
+    // redeployed, and the old board answered it with the mild "nothing here
+    // yet" line plus one bullet at the bottom of the caveat block.
+    serve({
+      children: [
+        child("ada.b", [], { docUnreadable: true }),
+        child("bo.c", [], { docUnreadable: true }),
+      ],
+    });
+    await openWatchtower();
+    const alert = screen.getByTestId("fp-watchtower-all-unreadable");
+    expect(alert.getAttribute("role")).toBe("alert");
+    expect(alert.textContent).toBe(STAFF_COPY.watchtowerAllUnreadable);
+    expect(screen.queryByText(STAFF_COPY.watchtowerEmpty)).toBeNull();
+    expect(screen.queryByTestId("fp-watchtower-no-cohort")).toBeNull();
+    // and the caveat still carries the count, so the two agree
+    expect(caveatLines().join("\n")).toContain(
+      `${STAFF_COPY.watchtowerCaveatUnreadable}: 2`,
+    );
+  });
+
+  it("does NOT fire that alert when even one child is readable", async () => {
+    serve({
+      children: [
+        child("ada.b", [idea(0, "a1", [["1.1.1", NOW - DAY]])]),
+        child("bo.c", [], { docUnreadable: true }),
+      ],
+    });
+    await openWatchtower();
+    expect(screen.queryByTestId("fp-watchtower-all-unreadable")).toBeNull();
+    expect(screen.getByTestId("fp-watchtower-table")).toBeTruthy();
+  });
+
+  it("does not accuse a child of WIP concentration for a dangling business", async () => {
+    // The app's cap is five IDEAS. A business whose linked idea was deleted is a
+    // legitimate sixth flow unit, and testing the unit TOTAL made a lawful save
+    // trip the one caveat whose job is telling staff which numbers to distrust.
+    serve({
+      children: [
+        child(
+          "lawful.l",
+          [0, 1, 2, 3, 4].map((n) => idea(n, `l${n}`, [["1.1.1", NOW - DAY]])),
+          {
+            businesses: [
+              {
+                id: "biz-1",
+                ideaId: "no-such-idea",
+                archived: false,
+                doneByTask: {},
+                doneAtByTask: {},
+                lastCompletionAt: NOW - DAY,
+                recencyClamped: false,
+                hasCompletionsOutsideRequest: false,
+              },
+            ],
+          },
+        ),
+      ],
+    });
+    await openWatchtower();
+    expect(caveatLines().join("\n")).not.toContain(
+      STAFF_COPY.watchtowerCaveatWipConcentration,
+    );
+  });
+
   it("REJECTS an idea with no usable index rather than renumbering it", async () => {
     serve({
       children: [
@@ -584,6 +692,29 @@ describe("StaffWatchtower — privacy and the drill-down", () => {
     expect(screen.getAllByTestId("fp-watchtower-username")).toHaveLength(1);
     expect(roster.textContent).toContain("dee.e");
     expect(roster.textContent).toContain(`(2 ${STAFF_COPY.watchtowerDrillIdeasSuffix})`);
+  });
+
+  it("marks a name whose save is ABNORMAL, so the caveat count can be joined to a person", async () => {
+    // The caveat block says "abnormal docs: 1"; without a marker here nobody can
+    // tell WHICH of the two names it is about, and the number buys no action.
+    serve({
+      children: [
+        child("normal.n", [idea(0, "n1", [["1.1.1", NOW - DAY]])]),
+        child("abnormal.a", [idea(0, "a1", [["1.1.1", NOW - DAY]])], { truncated: true }),
+      ],
+    });
+    await openWatchtower();
+    await click(screen.getByTestId("fp-watchtower-drill-1.1.2:active"));
+    const names = screen.getAllByTestId("fp-watchtower-username").map((n) => n.textContent);
+    expect(names).toEqual(["abnormal.a", "normal.n"]);
+    const marks = screen.getAllByTestId("fp-watchtower-roster-truncated");
+    expect(marks).toHaveLength(1); // exactly one, so it is not an unconditional badge
+    expect(marks[0].textContent).toContain(STAFF_COPY.watchtowerDrillTruncated);
+    // and it sits on the abnormal name, not the other one
+    expect(marks[0].closest("li")?.textContent).toContain("abnormal.a");
+    expect(caveatLines().join("\n")).toContain(
+      `${STAFF_COPY.watchtowerCaveatTruncated}: 1`,
+    );
   });
 
   it("opening a second bucket collapses the first", async () => {
@@ -785,6 +916,39 @@ describe("StaffWatchtower — the request", () => {
     await click(screen.getByRole("button", { name: /Step 1\.1/ }));
     expect(progressUrls()).toHaveLength(2); // cached
     expect(screen.getByTestId("fp-watchtower-table")).toBeTruthy();
+  });
+
+  it("can return to a criterion whose first request was ABANDONED mid-flight", async () => {
+    // THE WEDGE. Cached 1.1 → click 1.2 (fetch starts) → click 1.1 mid-flight
+    // (the 1.2 request is aborted, and 1.1 is served from cache) → click 1.2
+    // again. The mount had recorded "we asked for 1.2", the cache-hit return
+    // never corrected it, and the StrictMode guard then read a genuine user
+    // request as a duplicate invocation: no fetch, no cached entry, no error —
+    // "Loading…" forever, with no Retry, until a Refresh or a remount.
+    const pending: Array<(res: Response) => void> = [];
+    mockRoutes({
+      progressFor: (url) => {
+        // 1.2's request is the one carrying 1.2's own task ids.
+        if (!url.includes("1.2.1")) return jsonResponse(200, COHORT);
+        return new Promise<Response>((resolve) => pending.push(resolve));
+      },
+    });
+    render(<StaffShell />);
+    await click(screen.getByRole("button", { name: STAFF_COPY.watchtowerTitle }));
+    expect(screen.getByTestId("fp-watchtower-table")).toBeTruthy();
+
+    await click(screen.getByRole("button", { name: /Step 1\.2/ }));
+    expect(pending).toHaveLength(1); // in flight, never settled
+    await click(screen.getByRole("button", { name: /Step 1\.1/ }));
+    expect(screen.getByTestId("fp-watchtower-table")).toBeTruthy(); // 1.1 from cache
+
+    await click(screen.getByRole("button", { name: /Step 1\.2/ }));
+    expect(pending).toHaveLength(2); // a SECOND request, not a silent no-op
+    await act(async () => {
+      pending[1](jsonResponse(200, COHORT));
+    });
+    expect(screen.getByTestId("fp-watchtower-table")).toBeTruthy();
+    expect(screen.queryByText(STAFF_COPY.watchtowerLoading)).toBeNull();
   });
 
   it("never pairs one step's heading with another step's numbers", async () => {

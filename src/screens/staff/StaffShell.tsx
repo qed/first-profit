@@ -127,6 +127,11 @@ export function StaffShell() {
    *    later unrenewable 401 is an expiry, not a refusal. Without this, the
    *    `fresh` verdict would stand for the entire life of the page and a
    *    staff member who worked for an hour would be told they are not staff.
+   *
+   * It governs BOTH unrenewable-401 branches. The second — renewal SUCCEEDS and
+   * the retry is refused anyway — used to run `dropSession` + `setRefused`
+   * unconditionally, so this grace covered only half the ground it argues for.
+   * See the branch itself for why a rate limit lands there.
    */
   const origin = useRef<"restored" | "fresh" | "proven">(session ? "restored" : "fresh");
   /** Bumped whenever the live session changes identity. See THE EPOCH RULE. */
@@ -318,7 +323,35 @@ export function StaffShell() {
         return second;
       }
       if (second.kind !== "unauthorized") return second;
-      // A freshly renewed token still refused: this account is not staff.
+      if (origin.current === "proven") {
+        /**
+         * A session this API has ALREADY SERVED, whose grant just renewed
+         * cleanly, and which is now refused. That is not evidence about the
+         * account — it is evidence that something ELSE changed, and the
+         * likeliest something is a rate limit: the120's `rate_limited` answers
+         * the same byte-identical 401 as "not staff", deliberately (the limiter
+         * runs before the staff gate, so a 400 there would be an oracle), and
+         * the flow board spends a request per criterion selection.
+         *
+         * Signing a proven staff member out here was the worst available
+         * response: it told them they are not staff, dropped their cohort data,
+         * and REVOKED their whole token family server-side — over a throttle
+         * that clears itself in fifteen minutes. Signing back in cannot help
+         * either, because the new token hits the same bucket.
+         *
+         * So: a retryable error. The session stands, the tab shows its Retry,
+         * and nothing is destroyed. A refusal must require evidence the account
+         * is not staff; a rate-limited response is not that evidence, and the
+         * server-side gate is what actually keeps a non-staff account out.
+         *
+         * Only `proven` gets this. A `fresh` session has never been accepted by
+         * this API at all, so a 401 on it IS the refusal, and a `restored` one
+         * keeps its existing sign-in-form path.
+         */
+        return { kind: "error" };
+      }
+      // A freshly renewed token still refused, on a session this API has never
+      // accepted: this account is not staff.
       dropSession(renewal.session.accessToken);
       setRefused(true);
       return { kind: "unauthorized" };

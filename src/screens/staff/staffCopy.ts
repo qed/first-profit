@@ -60,6 +60,14 @@ export const STAFF_COPY = {
   // data we do not have — and it is exactly what a mis-scoped endpoint returns.
   watchtowerNoCohort:
     "The endpoint returned no children at all. That is not the same as a quiet cohort — read it as a fault in the request or the roster, not as “nobody has started”.",
+  // The same argument one step along: children ARE present and not one of their
+  // saves could be read. `noCohort` is false, so without its own state this
+  // showed the mild "nothing here yet" line with the real cause as one bullet at
+  // the bottom of the caveat block. The likeliest cause is a DOC_VERSION bump
+  // shipped in first-profit before the120 redeployed — two constants, two repos,
+  // two deploys, no parity gate — and the board must say so loudly.
+  watchtowerAllUnreadable:
+    "Every child's save was unreadable. That is not a quiet cohort — it usually means the two repos disagree about the save format (a DOC_VERSION bump deployed on one side only). The numbers below are empty because nothing could be read, not because nobody has started.",
   watchtowerRefresh: "Refresh",
   watchtowerRefreshing: "Refreshing…",
   watchtowerLastUpdated: "Last updated",
@@ -108,10 +116,12 @@ export const STAFF_COPY = {
     "“withheld” means a median exists but fewer than 2 children are behind it. A median over one child is that child's own timing, so it is not published here. It is not a zero and not an “—”.",
   // A "—" produced by DROPPED samples is a THIRD thing: there WAS something to
   // measure and every measurement was unusable. The none-note describes the
-  // wrong cause for it, so the cell says which.
+  // wrong cause for it, so the cell says which. The count appears beside a REAL
+  // median too: a row where 3 of 8 pairs survived looks clean without it, and
+  // the 5 rejections are the finding.
   watchtowerMedianDroppedLabel: "timings unusable",
   watchtowerMedianDroppedNote:
-    "A “—” with a “timings unusable” count below it means samples existed but every one was rejected — a clock set backwards, or a task and the one before it stamped at the same instant. It does not mean there was nothing to measure.",
+    "“timings unusable” counts measurements that existed and were rejected — a clock the server had to correct, a clock set backwards, or a task and the one before it stamped at the same instant. Beside a “—” it means every measurement was rejected. Beside a median it means that median rests on fewer measurements than the task saw, and a large count is itself the finding.",
   watchtowerSampleLead: "n=",
   watchtowerSampleChildren: "children",
   // Breadth alone does not catch concentration: five honest children plus one
@@ -184,6 +194,10 @@ export const STAFF_COPY = {
   watchtowerDrillActiveTitle: "Sitting here now",
   watchtowerDrillStalledTitle: "Stalled here",
   watchtowerDrillIdeasSuffix: "ideas",
+  // The caveat block says "abnormal docs: 3" and the roster says three names;
+  // without this marker nobody can join the two. Rendered per name, because the
+  // server's flag is per child.
+  watchtowerDrillTruncated: "abnormal save",
   // The roster collapses per child, so a count of 5 can name 3 people. Stating
   // both numbers turns unexplained arithmetic into a fact.
   watchtowerDrillChildrenSuffix: "children",

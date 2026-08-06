@@ -1,0 +1,222 @@
+{
+  "ok": true,
+  "children": [
+    {
+      "username": "ada.fp",
+      "truncated": false,
+      "docUnreadable": false,
+      "ideas": [
+        {
+          "index": 0,
+          "id": "idea-a1",
+          "done": {},
+          "doneAt": {},
+          "doneByTask": {
+            "1.1.5": true,
+            "1.2.1": true
+          },
+          "doneAtByTask": {
+            "1.1.5": 1785499200000,
+            "1.2.1": 1785672000000
+          },
+          "lastCompletionAt": 1785672000000,
+          "lastCorroboratedCompletionAt": 1785672000000,
+          "recencyClamped": false,
+          "hasCompletionsOutsideRequest": false
+        },
+        {
+          "index": 1,
+          "id": "idea-a2",
+          "done": {},
+          "doneAt": {},
+          "doneByTask": {
+            "1.1.5": true,
+            "1.2.1": true,
+            "1.2.2": true
+          },
+          "doneAtByTask": {
+            "1.1.5": 1782475200000,
+            "1.2.1": 1782561600000,
+            "1.2.2": 1782648000000
+          },
+          "lastCompletionAt": 1785758400000,
+          "lastCorroboratedCompletionAt": 1785758400000,
+          "recencyClamped": false,
+          "hasCompletionsOutsideRequest": true
+        }
+      ],
+      "businesses": []
+    },
+    {
+      "username": "bo.fp",
+      "truncated": false,
+      "docUnreadable": false,
+      "ideas": [
+        {
+          "index": 0,
+          "id": "idea-b1",
+          "done": {
+            "1.1#4": true,
+            "1.2#0": true
+          },
+          "doneAt": {
+            "1.1#4": 1785153600000,
+            "1.2#0": 1785412800000
+          },
+          "doneByTask": {},
+          "doneAtByTask": {},
+          "lastCompletionAt": 1785412800000,
+          "lastCorroboratedCompletionAt": 1785412800000,
+          "recencyClamped": false,
+          "hasCompletionsOutsideRequest": false
+        },
+        {
+          "index": 1,
+          "id": null,
+          "done": {},
+          "doneAt": {},
+          "doneByTask": {},
+          "doneAtByTask": {},
+          "lastCompletionAt": null,
+          "lastCorroboratedCompletionAt": null,
+          "recencyClamped": false,
+          "hasCompletionsOutsideRequest": false
+        },
+        {
+          "index": 2,
+          "id": null,
+          "done": {},
+          "doneAt": {},
+          "doneByTask": {
+            "1.1.5": true
+          },
+          "doneAtByTask": {
+            "1.1.5": 1768651200000
+          },
+          "lastCompletionAt": 1768651200000,
+          "lastCorroboratedCompletionAt": 1768651200000,
+          "recencyClamped": false,
+          "hasCompletionsOutsideRequest": false
+        }
+      ],
+      "businesses": []
+    },
+    {
+      "username": "cy.fp",
+      "truncated": false,
+      "docUnreadable": false,
+      "ideas": [
+        {
+          "index": 0,
+          "id": "idea-c1",
+          "done": {},
+          "doneAt": {},
+          "doneByTask": {
+            "1.1.5": true,
+            "1.2.1": true,
+            "1.2.2": true,
+            "1.2.3": true
+          },
+          "doneAtByTask": {
+            "1.1.5": 1778155200000,
+            "1.2.1": 1778328000000,
+            "1.2.2": 1778414400000,
+            "1.2.3": 1779019200000
+          },
+          "lastCompletionAt": 1779019200000,
+          "lastCorroboratedCompletionAt": 1779019200000,
+          "recencyClamped": false,
+          "hasCompletionsOutsideRequest": false
+        }
+      ],
+      "businesses": [
+        {
+          "id": "biz-c1",
+          "ideaId": "idea-c1",
+          "archived": false,
+          "doneByTask": {
+            "4.1.1": true
+          },
+          "doneAtByTask": {
+            "4.1.1": 1785844800000
+          },
+          "lastCompletionAt": 1785844800000,
+          "lastCorroboratedCompletionAt": 1785844800000,
+          "recencyClamped": false,
+          "hasCompletionsOutsideRequest": false
+        },
+        {
+          "id": "biz-c2",
+          "ideaId": "idea-c1",
+          "archived": true,
+          "doneByTask": {
+            "4.1.2": true
+          },
+          "doneAtByTask": {
+            "4.1.2": 1785758400000
+          },
+          "lastCompletionAt": 1785758400000,
+          "lastCorroboratedCompletionAt": 1785758400000,
+          "recencyClamped": false,
+          "hasCompletionsOutsideRequest": false
+        },
+        {
+          "id": "biz-c3",
+          "ideaId": "no-such-idea",
+          "archived": false,
+          "doneByTask": {
+            "4.1.1": true
+          },
+          "doneAtByTask": {
+            "4.1.1": 1775563200000
+          },
+          "lastCompletionAt": 1775563200000,
+          "lastCorroboratedCompletionAt": 1775563200000,
+          "recencyClamped": false,
+          "hasCompletionsOutsideRequest": false
+        }
+      ]
+    },
+    {
+      "username": "di.fp",
+      "truncated": true,
+      "docUnreadable": false,
+      "ideas": [
+        {
+          "index": 0,
+          "id": "idea-d1",
+          "done": {},
+          "doneAt": {},
+          "doneByTask": {
+            "1.1.5": true,
+            "1.2.1": true
+          },
+          "doneAtByTask": {
+            "1.1.5": 1760011200000,
+            "1.2.1": 1760184000000,
+            "1.2.2": 1785931200000
+          },
+          "lastCompletionAt": 1785931200000,
+          "lastCorroboratedCompletionAt": 1760184000000,
+          "recencyClamped": true,
+          "hasCompletionsOutsideRequest": false
+        }
+      ],
+      "businesses": []
+    },
+    {
+      "username": "eve.fp",
+      "truncated": false,
+      "docUnreadable": false,
+      "ideas": [],
+      "businesses": []
+    },
+    {
+      "username": "fi.fp",
+      "truncated": false,
+      "docUnreadable": true,
+      "ideas": [],
+      "businesses": []
+    }
+  ]
+}

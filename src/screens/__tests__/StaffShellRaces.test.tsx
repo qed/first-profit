@@ -355,23 +355,16 @@ describe("StaffShell — a tab switch during an in-flight load", () => {
   });
 });
 
-describe("StaffShell — a refusal from any tab drops cached data", () => {
+describe("StaffShell — dropping a session drops cached data", () => {
   it("drops ALREADY-CACHED suggestions rows, and the next sign-in refetches", async () => {
     seedRestoredSession();
-    probe.paths = ["/api/fp/probe-a"];
     let listCalls = 0;
-    let probeCalls = 0;
     mockRoutes({
       password: () => jsonResponse(200, { access_token: "tok-3", refresh_token: "ref-3" }),
-      // A renewal that WORKS, so the second 401 is a genuine "not staff".
       refresh: () => jsonResponse(200, { access_token: "tok-2", refresh_token: "ref-2" }),
       suggestions: () => {
         listCalls += 1;
         return jsonResponse(200, { ok: true, suggestions: ROWS });
-      },
-      probe: () => {
-        probeCalls += 1;
-        return jsonResponse(401, { ok: false });
       },
     });
 
@@ -379,14 +372,15 @@ describe("StaffShell — a refusal from any tab drops cached data", () => {
     await screen.findByText("I need a price calculator"); // rows are cached now
     expect(listCalls).toBe(1);
 
-    await click(tab(STAFF_COPY.watchtowerTitle));
-    expect(await screen.findByText(STAFF_COPY.refusal)).toBeTruthy();
-    expect(probeCalls).toBe(2); // 401, renew, 401 again
+    // Sign-out is the drop under test. It used to be a double-401 refusal, but
+    // that path is now unreachable BY CONSTRUCTION: anything that could have
+    // filled the cache is a 2xx, which marks the session `proven`, and a proven
+    // session is never spelled as a refusal (see the test below).
+    await click(screen.getByText(STAFF_COPY.signOut));
     expect(window.sessionStorage.getItem(STAFF_SESSION_KEY)).toBeNull();
 
     // Back in as someone else: the previous credential's rows are gone, so the
     // list is fetched again rather than served from a dead session's cache.
-    await click(screen.getByText(STAFF_COPY.signIn));
     fireEvent.change(screen.getByLabelText(STAFF_COPY.email), {
       target: { value: "staff@firstprofit.school" },
     });
@@ -422,5 +416,50 @@ describe("StaffShell — a refusal from any tab drops cached data", () => {
     expect(screen.queryByText(STAFF_COPY.refusal)).toBeNull();
     // An expiry is not a refusal: nothing was revoked.
     expect(callsTo("/auth/v1/logout")).toBe(0);
+  });
+
+  it("a PROVEN session whose renewal SUCCEEDS and is then 401'd again is a retryable ERROR", async () => {
+    // THE SEAM. the120 answers a RATE LIMIT with the byte-identical 401 —
+    // deliberately, because the limiter runs before the staff gate and a
+    // distinguishable status there would be an oracle — and the flow board
+    // spends one request per criterion selection, so a staff member reading the
+    // curriculum reaches the budget. This shell used to renew (which SUCCEEDS,
+    // the grant is healthy), retry, see the 401 again, and then drop the
+    // session, revoke the whole token family and tell a proven staff member
+    // they are not staff, over a throttle that clears itself.
+    probe.paths = ["/api/fp/probe-a"];
+    let probeCalls = 0;
+    mockRoutes({
+      password: () => jsonResponse(200, { access_token: "tok-1", refresh_token: "ref-1" }),
+      suggestions: () => jsonResponse(200, { ok: true, suggestions: ROWS }),
+      // The renewal WORKS — this is what makes the case distinct from an expiry.
+      refresh: () => jsonResponse(200, { access_token: "tok-2", refresh_token: "ref-2" }),
+      probe: () => {
+        probeCalls += 1;
+        return jsonResponse(401, { ok: false });
+      },
+    });
+
+    render(<StaffShell />);
+    await signInAs();
+    await screen.findByText("I need a price calculator"); // the session is now PROVEN
+    await click(tab(STAFF_COPY.watchtowerTitle));
+
+    expect(probeCalls).toBe(2); // 401, renew, 401 again
+    // The tab is told "retryable error" and decides what to show; the SHELL
+    // must not have judged the account.
+    expect(probe.results).toEqual(["/api/fp/probe-a:error"]);
+    expect(screen.queryByText(STAFF_COPY.refusal)).toBeNull();
+    expect(screen.queryByText(STAFF_COPY.signInTitle)).toBeNull();
+    // Nothing destroyed: the renewed session stands, in state and in storage,
+    // and the token family was never revoked.
+    expect(JSON.parse(window.sessionStorage.getItem(STAFF_SESSION_KEY)!).accessToken).toBe(
+      "tok-2",
+    );
+    expect(callsTo("/auth/v1/logout")).toBe(0);
+    // and the OTHER tab's cached rows survived
+    await click(tab(STAFF_COPY.suggestionsTitle));
+    expect(await screen.findByText("I need a price calculator")).toBeTruthy();
+    expect(callsTo("/api/fp/suggestions")).toBe(1);
   });
 });

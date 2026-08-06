@@ -122,8 +122,15 @@ const focusRingFlat = "focus:outline-none focus-visible:ring-2 focus-visible:rin
  * shape is proven here first.
  *
  * Rejections are COUNTED, never silently filtered — see the header. `null` means
- * the payload as a whole is unusable (a malformed root, or children present but
- * every one of them unreadable) and the tab shows its retryable load error.
+ * the payload as a whole is unusable — a malformed root, or children present and
+ * every one of them rejected BY THIS SHAPE NARROWING — and the tab shows its
+ * retryable load error.
+ *
+ * Note what that is NOT: a child whose SAVE the server could not read
+ * (`docUnreadable`) narrows perfectly well and is counted, so a cohort of those
+ * returns a payload, not null. That state gets its own alert at the render (see
+ * `allUnreadable`) — an earlier version of this comment claimed null covered it,
+ * which is how "every child unreadable" ended up with no loud state at all.
  */
 interface NarrowedPayload {
   response: WireProgressResponse;
@@ -192,6 +199,9 @@ function narrowIdea(value: unknown): WireIdea | null {
     doneByTask: boolMap(value.doneByTask),
     doneAtByTask: numberMap(value.doneAtByTask),
     lastCompletionAt: optionalStamp(value.lastCompletionAt),
+    // Absent on a server that predates the field: `optionalStamp` yields null,
+    // and `isRecencyCorroborated` falls back to its stricter in-window test.
+    lastCorroboratedCompletionAt: optionalStamp(value.lastCorroboratedCompletionAt),
     recencyClamped: value.recencyClamped === true,
     hasCompletionsOutsideRequest: value.hasCompletionsOutsideRequest === true,
   };
@@ -206,6 +216,7 @@ function narrowBusiness(value: unknown): WireBusiness | null {
     doneByTask: boolMap(value.doneByTask),
     doneAtByTask: numberMap(value.doneAtByTask),
     lastCompletionAt: optionalStamp(value.lastCompletionAt),
+    lastCorroboratedCompletionAt: optionalStamp(value.lastCorroboratedCompletionAt),
     recencyClamped: value.recencyClamped === true,
     hasCompletionsOutsideRequest: value.hasCompletionsOutsideRequest === true,
   };
@@ -238,7 +249,12 @@ function narrowChild(value: unknown): NarrowedChild | null {
   };
 }
 
-function narrowProgress(data: unknown): NarrowedPayload | null {
+/**
+ * @internal Exported as a TEST SEAM for the cross-repo fixture
+ * (`__tests__/wireFixture.test.ts`), which feeds it a body produced by the120's
+ * real `shapeProgress`. Nothing else outside this file may call it.
+ */
+export function narrowProgress(data: unknown): NarrowedPayload | null {
   if (!isObject(data) || !Array.isArray(data.children)) return null;
   const children: WireChild[] = [];
   let rejectedChildren = 0;
@@ -421,9 +437,20 @@ export function StaffWatchtower({ request, cache, criterionId, onCriterionChange
       setPending(null);
       setFailure(null);
     }
+    // RECORD THE ASK BEFORE THE CACHE-HIT RETURN. `askedFor` answers "has this
+    // mount already dealt with this criterion?", and a cache hit deals with it
+    // just as completely as a fetch does. Returning early without stamping it
+    // left the ref naming a criterion whose request had been ABORTED, and the
+    // `previous === criterion` guard below then read that as StrictMode's second
+    // invocation: cached 1.1 → 1.2 (fetch starts) → 1.1 mid-flight (aborts it,
+    // cache hit, ref still "1.2") → 1.2 again (guard returns, no fetch). The
+    // entry is 1.1's, the cache has no 1.2, so nothing renders — a permanent
+    // "Loading…" with no error and no Retry, recoverable only by Refresh or a
+    // remount. The guard must mean "we asked and that ask is still live", and
+    // stamping every criterion this effect handles is what makes it mean that.
+    askedFor.current = criterion;
     if (cache.read<CohortEntry>(watchtowerCacheKey(criterion)) !== undefined) return;
     if (previous === criterion) return; // StrictMode's second invocation
-    askedFor.current = criterion;
     void runFetch(phaseId, criterion, "first");
   }, [cache, criterion, phaseId, runFetch]);
 
@@ -646,9 +673,14 @@ export function StaffWatchtower({ request, cache, criterionId, onCriterionChange
       [STAFF_COPY.watchtowerCaveatOutsideRequest, cohort.unitsWithCompletionsOutsideRequest],
       // Concentration: the median is defended structurally (per-child first), the
       // WIP columns are not. This line is their only defence.
+      // The TRIGGER is the idea-unit count, the NUMBER shown is every unit: a
+      // dangling business is a legitimate flow unit, so testing the total
+      // accused a child with the app's full five ideas plus one dangling
+      // business of distorting the cohort. A false alarm on the one line whose
+      // job is saying which numbers to distrust is worse than no line.
       [
         STAFF_COPY.watchtowerCaveatWipConcentration,
-        cohort.maxUnitsPerChild > MAX_IDEAS ? cohort.maxUnitsPerChild : 0,
+        cohort.maxIdeaUnitsPerChild > MAX_IDEAS ? cohort.maxUnitsPerChild : 0,
       ],
       [STAFF_COPY.watchtowerCaveatRejectedChildren, shown.rejectedChildren],
       [STAFF_COPY.watchtowerCaveatRejectedIdeas, shown.rejectedIdeas],
@@ -657,8 +689,23 @@ export function StaffWatchtower({ request, cache, criterionId, onCriterionChange
   ).filter(([, count]) => count > 0);
 
   const noCohort = cohort.childCount === 0;
+  /**
+   * Children came back and NONE of their saves could be read.
+   *
+   * Its own alert for the same reason `childCount === 0` has one. The two
+   * `DOC_VERSION` constants — first-profit's and the120's
+   * `PROGRESS_DOC_VERSION` — are two constants in two repos behind two deploys
+   * with no parity gate, so shipping a bump here before the120 redeploys makes
+   * every child read `docUnreadable`. `noCohort` is FALSE in that state
+   * (childCount > 0), so the loud line never fired and the board showed the mild
+   * "nothing here yet" with the real cause as one bullet at the bottom of the
+   * caveat block, below the fold on a phone.
+   */
+  const allUnreadable = !noCohort && cohort.unreadableChildren === cohort.childCount;
   const nothingHere =
-    !noCohort && rows.every((row) => row.throughput === 0 && row.active === 0 && row.stalled === 0);
+    !noCohort &&
+    !allUnreadable &&
+    rows.every((row) => row.throughput === 0 && row.active === 0 && row.stalled === 0);
 
   const caveatBlock = (
     // Rendered even when EMPTY: "nothing is hidden" and "we did not check" must
@@ -746,10 +793,31 @@ export function StaffWatchtower({ request, cache, criterionId, onCriterionChange
   };
 
   const medianCell = (row: FlowRow) => {
+    /**
+     * Rejected measurements, rendered in EVERY branch.
+     *
+     * It used to render only beside the "—", which is the branch where it
+     * matters least: there, the reader can already see nothing was measurable.
+     * A row where 3 of 8 pairs were usable renders "n=3 · 3 children · 2 days"
+     * and looks CLEAN — the five rejected measurements are invisible, and they
+     * are themselves the signal worth acting on (a cohort of broken clocks
+     * reads as a fast, confident median over the survivors).
+     */
+    const dropped =
+      row.droppedSamples > 0 ? (
+        <span
+          className="block text-xs text-ink/60"
+          data-testid={`fp-watchtower-dropped-${row.taskId}`}
+        >
+          {row.droppedSamples} {STAFF_COPY.watchtowerMedianDroppedLabel}
+        </span>
+      ) : null;
+
     if (row.medianSuppressed) {
       return (
         <span data-testid={`fp-watchtower-median-${row.taskId}`}>
           {STAFF_COPY.watchtowerMedianWithheld}
+          {dropped}
         </span>
       );
     }
@@ -759,14 +827,7 @@ export function StaffWatchtower({ request, cache, criterionId, onCriterionChange
           <NotMeasurable />
           {/* Samples EXISTED and every one was unusable — a different fact from
               "nothing to measure", and the none-note describes the wrong cause. */}
-          {row.droppedSamples > 0 ? (
-            <span
-              className="block text-xs text-ink/60"
-              data-testid={`fp-watchtower-dropped-${row.taskId}`}
-            >
-              {row.droppedSamples} {STAFF_COPY.watchtowerMedianDroppedLabel}
-            </span>
-          ) : null}
+          {dropped}
         </span>
       );
     }
@@ -780,6 +841,7 @@ export function StaffWatchtower({ request, cache, criterionId, onCriterionChange
             ? ` · ${STAFF_COPY.watchtowerSampleMaxOneChildLead} ${row.maxSamplesFromOneChild} ${STAFF_COPY.watchtowerSampleMaxOneChildTail}`
             : null}
         </span>
+        {dropped}
       </span>
     );
   };
@@ -914,10 +976,28 @@ export function StaffWatchtower({ request, cache, criterionId, onCriterionChange
                               {/* Child-authored text: rendered as TEXT, never as
                                   markup and never into an href. */}
                               <span data-testid="fp-watchtower-username">{person.username}</span>
+                              {/* `break-normal` on the ANNOTATIONS only: the
+                                  li carries `break-all` so a long child-authored
+                                  username cannot overflow, but that inherits and
+                                  breaks these English labels mid-word ("(abn /
+                                  ormal save)"). The username keeps break-all. */}
                               {person.units > 1 ? (
-                                <span className="text-ink/60">
+                                <span className="break-normal text-ink/60">
                                   {" "}
                                   ({person.units} {STAFF_COPY.watchtowerDrillIdeasSuffix})
+                                </span>
+                              ) : null}
+                              {/* The join between "abnormal docs: N" in the
+                                  caveat block and the names in this roster.
+                                  Without it the count is unactionable: staff
+                                  see how many and never which. */}
+                              {person.fromTruncatedDoc ? (
+                                <span
+                                  className="break-normal text-wax"
+                                  data-testid="fp-watchtower-roster-truncated"
+                                >
+                                  {" "}
+                                  ({STAFF_COPY.watchtowerDrillTruncated})
                                 </span>
                               ) : null}
                             </li>
@@ -958,6 +1038,14 @@ export function StaffWatchtower({ request, cache, criterionId, onCriterionChange
       {noCohort ? (
         <p role="alert" data-testid="fp-watchtower-no-cohort" className="mt-4 text-sm text-wax">
           {STAFF_COPY.watchtowerNoCohort}
+        </p>
+      ) : allUnreadable ? (
+        <p
+          role="alert"
+          data-testid="fp-watchtower-all-unreadable"
+          className="mt-4 text-sm text-wax"
+        >
+          {STAFF_COPY.watchtowerAllUnreadable}
         </p>
       ) : nothingHere ? (
         <p className="mt-4 text-sm text-ink/70">{STAFF_COPY.watchtowerEmpty}</p>

@@ -153,8 +153,24 @@ export interface WireIdea {
   /** Max stamp across ALL maps, computed BEFORE the task-id filter and NOT gated
    *  on a matching `done: true` — see `FlowUnit.recencyCorroborated`. */
   lastCompletionAt: number | null;
+  /**
+   * The same max, restricted to stamps that ARE completions (a `true` in the
+   * matching boolean map). Pre-filter like `lastCompletionAt`, and the TIMING
+   * EVIDENCE behind it: when this lags, the newest thing in the record is a
+   * stamp with no completion behind it. Null when the server predates the field
+   * — a deploy skew that degrades to the older, stricter in-window test rather
+   * than to blanket credit.
+   */
+  lastCorroboratedCompletionAt: number | null;
   /** The server clamped a future-dated stamp: `lastCompletionAt` is synthetic. */
   recencyClamped: boolean;
+  /**
+   * The record has COMPLETIONS the request did not name. A membership fact with
+   * NO TIMING in it: it says something happened outside the window, never when.
+   * It is a caveat count and nothing else — in particular it is NOT corroboration
+   * of recency (see `FlowUnit.recencyCorroborated` for the year-old-completion
+   * case that made it useless as one).
+   */
   hasCompletionsOutsideRequest: boolean;
 }
 
@@ -169,6 +185,8 @@ export interface WireBusiness {
   /** The business's OWN recency. Phase 4-5 completions write only here, so an
    *  idea working in Grow has a FROZEN idea-side `lastCompletionAt`. */
   lastCompletionAt: number | null;
+  /** As `WireIdea.lastCorroboratedCompletionAt`, over this business's own maps. */
+  lastCorroboratedCompletionAt: number | null;
   recencyClamped: boolean;
   hasCompletionsOutsideRequest: boolean;
 }
@@ -221,6 +239,9 @@ export interface FlowUnit {
   /** Max stamp anywhere in the child's doc for this unit, pre-filter, clamped to
    *  `fetchedAt`. Null when there is no stamp at all. */
   lastCompletionAt: number | null;
+  /** The same, restricted to stamps backed by a completion — see
+   *  `recencyCorroborated`. Clamped and folded exactly like `lastCompletionAt`. */
+  lastCorroboratedCompletionAt: number | null;
   /** Any stamp feeding `lastCompletionAt` was clamped by the server. */
   recencyClamped: boolean;
   /**
@@ -229,18 +250,33 @@ export interface FlowUnit {
    * The server computes that number over every TYPE-VALID stamp, deliberately
    * NOT gated on a matching `done: true` — so a bare `doneAtByTask` entry, which
    * mints no completion at all, still yields fresh recency. Two attacks land
-   * here and both were reproduced: a `doneAtByTask` key with no `doneByTask`
-   * makes a unit with ZERO in-window completions read "actively working", and a
-   * business carrying a fresh stamp and no completions revives a 400-day-dead
-   * idea. Because `stalled` is the only drillable, actionable number, hiding
-   * from it removes a child from every intervention path.
+   * here: a `doneAtByTask` key with no `doneByTask` makes a unit with ZERO
+   * in-window completions read "actively working", and a business carrying a
+   * fresh stamp and no completions revives a 400-day-dead idea. Because
+   * `stalled` is the only drillable, actionable number, hiding from it removes a
+   * child from every intervention path.
    *
-   * Corroborated means one of: a completion of this unit is at least as new as
-   * `lastCompletionAt` (the recency IS that completion), or the server reported
-   * completions outside the request — a real completion we cannot see plausibly
-   * explains it, which is the "working in a later criterion" case. An
-   * uncorroborated unit is not credited as active, and the row counts it under
-   * `uncorroborated` so the UI can tell it from an ordinary quiet child.
+   * Corroborated means one of:
+   *  - `lastCorroboratedCompletionAt` is at least as new as `lastCompletionAt`,
+   *    i.e. the newest stamp in this record IS a completion, wherever in the
+   *    curriculum it sits. This is what keeps a unit working in a LATER
+   *    criterion out of the stalled column, and
+   *  - failing that, a completion INSIDE the window is at least as new. Kept as
+   *    the fallback for a server deploy that predates
+   *    `lastCorroboratedCompletionAt` (the field arrives as null), so a skew
+   *    costs credit rather than granting it.
+   *
+   * ⚠ `hasCompletionsOutsideRequest` is deliberately NOT one of them, and an
+   * earlier version of this docstring claimed the attacks above were closed
+   * while that flag was. It carries NO TIMING: it is true for any out-of-window
+   * completion ever, so a child who finished 1.1 a year ago and quit corroborated
+   * every stamp they would ever write, for every criterion, permanently — which
+   * drove `unitsWithUncorroboratedRecency` to near-zero for the whole cohort and
+   * let the bare-stamp attack through for exactly the population this board
+   * exists to notice. Both attacks are closed by the timing number instead.
+   *
+   * An uncorroborated unit is not credited as active, and the row counts it
+   * under `uncorroborated` so the UI can tell it from an ordinary quiet child.
    */
   recencyCorroborated: boolean;
   /** The unit has completions the request did not ask about. Aggregated as
@@ -283,7 +319,9 @@ export interface NormalizedCohort {
   unreadableChildren: number;
   /**
    * Children whose doc tripped a server walk bound. Their units ARE counted,
-   * flagged per-unit as `fromTruncatedDoc`. Excluding them would silently delete
+   * flagged per-unit as `fromTruncatedDoc` and surfaced by name in the
+   * drill-down (`DrillDownEntry.fromTruncatedDoc`), which is what lets a staff
+   * member join this count to a roster. Excluding them would silently delete
    * real ideas from throughput and the WIP columns — and abnormal docs are
    * exactly what staff most need to see. The losses happen BEFORE the task-id
    * filter, so a flagged child usually delivered every requested id intact. A
@@ -313,8 +351,24 @@ export interface NormalizedCohort {
    * inflate a task's WIP by 50 while reporting no anomaly of any kind. The
    * MEDIAN is defended structurally instead (see `computeFlowRows`); this number
    * is what lets the UI caveat the WIP columns, which have no such defence.
+   *
+   * It is the SIZE of the concentration, not the TEST for one — read it with
+   * `maxIdeaUnitsPerChild`.
    */
   maxUnitsPerChild: number;
+  /**
+   * The same, counting IDEA-origin units only — the number the concentration
+   * caveat must actually fire on.
+   *
+   * `MAX_IDEAS` is the client's cap on IDEAS, so exceeding it is evidence of a
+   * hand-written doc. `maxUnitsPerChild` also counts idea-less BUSINESS units,
+   * which a legitimate doc produces whenever a business's `ideaId` dangles (a
+   * deleted idea, say) — so a child with the full five ideas plus one dangling
+   * business tripped a caveat accusing them of distorting the cohort's numbers.
+   * A false alarm on the one line whose whole job is telling staff which numbers
+   * to distrust is worse than no line.
+   */
+  maxIdeaUnitsPerChild: number;
 }
 
 /* -------------------------------------------------------------- the window */
@@ -537,11 +591,13 @@ function newestCompletionStamp(completions: ReadonlyMap<string, number | null>):
 /** See `FlowUnit.recencyCorroborated` for the argument. */
 function isRecencyCorroborated(
   lastCompletionAt: number | null,
+  lastCorroboratedCompletionAt: number | null,
   completions: ReadonlyMap<string, number | null>,
-  hasCompletionsOutsideRequest: boolean,
 ): boolean {
   if (lastCompletionAt === null) return true; // nothing to corroborate
-  if (hasCompletionsOutsideRequest) return true;
+  if (lastCorroboratedCompletionAt !== null && lastCorroboratedCompletionAt >= lastCompletionAt) {
+    return true;
+  }
   const newest = newestCompletionStamp(completions);
   return newest !== null && newest >= lastCompletionAt;
 }
@@ -555,6 +611,7 @@ type DraftUnit = {
   origin: FlowUnitOrigin;
   completions: Map<string, number | null>;
   lastCompletionAt: number | null;
+  lastCorroboratedCompletionAt: number | null;
   recencyClamped: boolean;
   hasCompletionsOutsideRequest: boolean;
   fromTruncatedDoc: boolean;
@@ -592,6 +649,7 @@ export function normalizeCohort(
   let unitsWithCompletionsOutsideRequest = 0;
   let unitsWithUncorroboratedRecency = 0;
   let maxUnitsPerChild = 0;
+  let maxIdeaUnitsPerChild = 0;
 
   const children = response.children ?? [];
   for (let childIndex = 0; childIndex < children.length; childIndex++) {
@@ -624,6 +682,7 @@ export function normalizeCohort(
         origin: "idea",
         completions: completionsFromMaps(idea, fetchedAt, remap),
         lastCompletionAt: clampStamp(idea.lastCompletionAt, fetchedAt),
+        lastCorroboratedCompletionAt: clampStamp(idea.lastCorroboratedCompletionAt, fetchedAt),
         recencyClamped: idea.recencyClamped === true,
         hasCompletionsOutsideRequest: idea.hasCompletionsOutsideRequest === true,
         fromTruncatedDoc: child.truncated === true,
@@ -650,6 +709,14 @@ export function normalizeCohort(
           target.lastCompletionAt,
           clampStamp(business.lastCompletionAt, fetchedAt),
         );
+        // The EVIDENCE folds with the recency it corroborates, or the fold
+        // itself becomes the attack: a business's fresh bare stamp would raise
+        // the idea's `lastCompletionAt` while leaving the idea's own (older)
+        // evidence behind, which is the 400-day-dead-idea revival exactly.
+        target.lastCorroboratedCompletionAt = laterOf(
+          target.lastCorroboratedCompletionAt,
+          clampStamp(business.lastCorroboratedCompletionAt, fetchedAt),
+        );
         target.recencyClamped = target.recencyClamped || business.recencyClamped === true;
         continue;
       }
@@ -662,6 +729,9 @@ export function normalizeCohort(
         // An idea-less business is its own unit; an ARCHIVED one still gets no
         // recency credit, for the same reason as above.
         lastCompletionAt: archived ? null : clampStamp(business.lastCompletionAt, fetchedAt),
+        lastCorroboratedCompletionAt: archived
+          ? null
+          : clampStamp(business.lastCorroboratedCompletionAt, fetchedAt),
         recencyClamped: archived ? false : business.recencyClamped === true,
         hasCompletionsOutsideRequest: business.hasCompletionsOutsideRequest === true,
         fromTruncatedDoc: child.truncated === true,
@@ -670,11 +740,13 @@ export function normalizeCohort(
 
     if (drafts.length === 0) childrenWithNoUnits++;
     if (drafts.length > maxUnitsPerChild) maxUnitsPerChild = drafts.length;
+    const ideaUnits = drafts.reduce((n, draft) => (draft.origin === "idea" ? n + 1 : n), 0);
+    if (ideaUnits > maxIdeaUnitsPerChild) maxIdeaUnitsPerChild = ideaUnits;
     for (const draft of drafts) {
       const recencyCorroborated = isRecencyCorroborated(
         draft.lastCompletionAt,
+        draft.lastCorroboratedCompletionAt,
         draft.completions,
-        draft.hasCompletionsOutsideRequest,
       );
       if (draft.hasCompletionsOutsideRequest) unitsWithCompletionsOutsideRequest++;
       if (!recencyCorroborated) unitsWithUncorroboratedRecency++;
@@ -692,6 +764,7 @@ export function normalizeCohort(
     unitsWithUncorroboratedRecency,
     childCount: children.length,
     maxUnitsPerChild,
+    maxIdeaUnitsPerChild,
   };
 }
 
@@ -709,6 +782,7 @@ export function anonymousUnits(cohort: NormalizedCohort): FlowUnit[] {
     origin: unit.origin,
     completions: unit.completions,
     lastCompletionAt: unit.lastCompletionAt,
+    lastCorroboratedCompletionAt: unit.lastCorroboratedCompletionAt,
     recencyClamped: unit.recencyClamped,
     recencyCorroborated: unit.recencyCorroborated,
     hasCompletionsOutsideRequest: unit.hasCompletionsOutsideRequest,
@@ -842,7 +916,8 @@ export interface FlowRow {
    *  reads as 6 of 6 contributors, the maximum breadth, while moving a raw
    *  median from 2 days to 45. */
   maxSamplesFromOneChild: number;
-  /** Pairs discarded as unusable: negative, zero, or past MAX_CYCLE_TIME_MS. */
+  /** Pairs discarded as unusable: from a unit whose clock the server clamped,
+   *  or negative, zero, or past MAX_CYCLE_TIME_MS. */
   droppedSamples: number;
   /** Units sitting on this task whose recency is corroborated and inside
    *  STALLED_AFTER_MS. */
@@ -926,6 +1001,20 @@ export function computeFlowRows(
       if (typeof own !== "number") continue; // untimestamped completion, or none
       const predecessorAt = unit.completions.get(predecessorId);
       if (typeof predecessorAt !== "number") continue;
+      // A CLAMPED unit is one whose device clock the server could not trust —
+      // and a clock we distrust for recency is the same clock that wrote these
+      // two stamps. The PARTIAL case is the dangerous one: a real predecessor
+      // beside a clamped successor yields a plausible multi-day elapsed that
+      // passes every guard below, and with MIN_CHILDREN_PER_MEDIAN of 2 against
+      // a cohort of seventeen, one forward-clocked tablet moves a row's median.
+      // `recencyClamped` was consulted by `bucketFor` and by nothing here, so
+      // one record was simultaneously "we cannot trust this child's clock" and
+      // "here is their cycle time". Dropped and COUNTED, like every other
+      // unusable pair.
+      if (unit.recencyClamped) {
+        row.droppedSamples++;
+        continue;
+      }
       const elapsed = own - predecessorAt;
       // NEGATIVE is clock skew or an out-of-order save. ZERO is a task and its
       // predecessor stamped at the same instant — an unusable pair, not a
@@ -1073,6 +1162,17 @@ export function computeFlowTotals(
 export interface DrillDownEntry {
   username: string;
   units: number;
+  /**
+   * At least one of this child's units in this bucket came from a doc that
+   * tripped a server walk bound.
+   *
+   * This is where `FlowUnit.fromTruncatedDoc` is READ. It was computed,
+   * projected through `anonymousUnits` and consumed by nobody, which cost
+   * exactly this: the caveat block says "abnormal docs: 3" and the roster says
+   * three names, and staff could not join the two. The flag is per-CHILD on the
+   * server (`WireChild.truncated`), so this is per-child too.
+   */
+  fromTruncatedDoc: boolean;
 }
 
 /**
@@ -1095,14 +1195,24 @@ export function drillDown(
   bucket: FlowBucket,
   nowMs: number,
 ): DrillDownEntry[] {
-  const byUsername = new Map<string, number>();
+  const byUsername = new Map<string, DrillDownEntry>();
   for (const unit of units) {
     const placement = placeUnit(unit, window, nowMs);
     if (placement.where !== "row") continue;
     if (placement.taskId !== taskId || placement.bucket !== bucket) continue;
-    byUsername.set(unit.username, (byUsername.get(unit.username) ?? 0) + 1);
+    const existing = byUsername.get(unit.username);
+    if (existing) {
+      existing.units++;
+      existing.fromTruncatedDoc = existing.fromTruncatedDoc || unit.fromTruncatedDoc;
+      continue;
+    }
+    byUsername.set(unit.username, {
+      username: unit.username,
+      units: 1,
+      fromTruncatedDoc: unit.fromTruncatedDoc,
+    });
   }
-  return [...byUsername]
-    .map(([username, count]) => ({ username, units: count }))
-    .sort((a, b) => (a.username < b.username ? -1 : a.username > b.username ? 1 : 0));
+  return [...byUsername.values()].sort((a, b) =>
+    a.username < b.username ? -1 : a.username > b.username ? 1 : 0,
+  );
 }

@@ -28,6 +28,7 @@ import {
 } from "../flowBoard";
 import {
   CRITERION_SEQUENCE,
+  MAX_IDEAS,
   criterionIdsForPhase,
   phaseOfCriterion,
 } from "../../../state/gameCore";
@@ -68,6 +69,11 @@ function wireIdea(
     doneAt: {},
     ...maps,
     lastCompletionAt: stamps.length > 0 ? Math.max(...stamps) : null,
+    // Every entry `stableMaps` writes IS a completion, so by default the two
+    // recency numbers agree. A fixture that models a BARE stamp overrides
+    // `lastCompletionAt` upward and leaves this one where it is — which is
+    // exactly the shape the server emits for that doc.
+    lastCorroboratedCompletionAt: stamps.length > 0 ? Math.max(...stamps) : null,
     recencyClamped: false,
     hasCompletionsOutsideRequest: false,
     ...overrides,
@@ -88,6 +94,11 @@ function wireBusiness(
     archived: false,
     ...maps,
     lastCompletionAt: stamps.length > 0 ? Math.max(...stamps) : null,
+    // Every entry `stableMaps` writes IS a completion, so by default the two
+    // recency numbers agree. A fixture that models a BARE stamp overrides
+    // `lastCompletionAt` upward and leaves this one where it is — which is
+    // exactly the shape the server emits for that doc.
+    lastCorroboratedCompletionAt: stamps.length > 0 ? Math.max(...stamps) : null,
     recencyClamped: false,
     hasCompletionsOutsideRequest: false,
     ...overrides,
@@ -608,6 +619,73 @@ describe("median cycle time", () => {
     expect(board(atCap, SELL_1_2).rowBy("1.2.1").cycleTimeMedianMs).toBe(MAX_CYCLE_TIME_MS);
   });
 
+  it("a CLAMPED unit contributes no cycle time — the clock we distrust wrote both stamps", () => {
+    // The PARTIAL case, which is the dangerous one: a real predecessor stamp
+    // beside a clamped successor yields a plausible multi-day elapsed that
+    // passes every other guard. Two honest children say 2 days; one
+    // forward-clocked tablet used to say 40 and, at MIN_CHILDREN_PER_MEDIAN of
+    // 2, move the row.
+    const honest = [
+      wireChild("a", [
+        wireIdea(0, "i-a", [
+          ["1.1.5", NOW - 4 * DAY],
+          ["1.2.1", NOW - 2 * DAY],
+        ]),
+      ]),
+      wireChild("b", [
+        wireIdea(0, "i-b", [
+          ["1.1.5", NOW - 4 * DAY],
+          ["1.2.1", NOW - 2 * DAY],
+        ]),
+      ]),
+    ];
+    const clocked = wireChild("forward", [
+      wireIdea(
+        0,
+        "i-c",
+        [
+          ["1.1.5", NOW - 40 * DAY],
+          ["1.2.1", NOW], // the server clamped this one to its own `now`
+        ],
+        { lastCompletionAt: NOW, recencyClamped: true },
+      ),
+    ]);
+    const { rowBy } = board(response(...honest, clocked), SELL_1_2);
+    const row = rowBy("1.2.1");
+    expect(row.cycleTimeMedianMs).toBe(2 * DAY);
+    expect(row.sampleSize).toBe(2); // the clamped pair is not one of them
+    expect(row.sampleChildCount).toBe(2);
+    // dropped, and COUNTED — the rejection is a number the board can show
+    expect(row.droppedSamples).toBe(1);
+    // and the unit is still IN the cohort: excluded from the median, never
+    // deleted from the WIP columns — it sits on the first task it has not
+    // completed, in the stalled bucket, for the clamped reason.
+    expect(rowBy("1.2.2").stalled).toBe(1);
+    expect(rowBy("1.2.2").clamped).toBe(1);
+  });
+
+  it("a clamped unit is dropped even when its elapsed looks perfectly ordinary", () => {
+    // The isolating case: without the exclusion this pair is admitted, because
+    // nothing else about it is wrong.
+    const payload = response(
+      wireChild("forward", [
+        wireIdea(
+          0,
+          "i-1",
+          [
+            ["1.1.5", NOW - 5 * DAY],
+            ["1.2.1", NOW - 3 * DAY],
+          ],
+          { lastCompletionAt: NOW, recencyClamped: true },
+        ),
+      ]),
+    );
+    const row = board(payload, SELL_1_2).rowBy("1.2.1");
+    expect(row.sampleSize).toBe(0);
+    expect(row.droppedSamples).toBe(1);
+    expect(row.cycleTimeMedianMs).toBeNull();
+  });
+
   it("a future stamp is clamped to fetchedAt before the subtraction", () => {
     const payload = response(
       wireChild("ahead-a", [
@@ -668,6 +746,7 @@ describe("the active/stalled split", () => {
       origin: "idea",
       completions: new Map([["1.1.5", NOW - STALLED_AFTER_MS]]),
       lastCompletionAt: NOW - STALLED_AFTER_MS,
+      lastCorroboratedCompletionAt: NOW - STALLED_AFTER_MS,
       recencyClamped: false,
       recencyCorroborated: true,
       hasCompletionsOutsideRequest: false,
@@ -745,7 +824,14 @@ describe("the active/stalled split", () => {
             ["1.1.5", NOW - 90 * DAY],
             ["1.2.1", NOW - 88 * DAY],
           ],
-          { lastCompletionAt: NOW - 1 * DAY, hasCompletionsOutsideRequest: true },
+          {
+            lastCompletionAt: NOW - 1 * DAY,
+            // The out-of-window activity is a REAL completion, so the server
+            // reports it as the timing evidence too. That is what buys the
+            // credit — not the membership flag beside it.
+            lastCorroboratedCompletionAt: NOW - 1 * DAY,
+            hasCompletionsOutsideRequest: true,
+          },
         ),
       ]),
     );
@@ -754,6 +840,30 @@ describe("the active/stalled split", () => {
     expect(rowBy("1.2.2").stalled).toBe(0);
     // aggregated, so the UI never iterates the NAMED array to caveat this
     expect(cohort.unitsWithCompletionsOutsideRequest).toBe(1);
+  });
+
+  it("hasCompletionsOutsideRequest ALONE is not corroboration — it carries no timing", () => {
+    // THE SEAM. The flag is set by ANY out-of-window completion ever, so a child
+    // who finished 1.1 a year ago and quit carries it forever, for every
+    // criterion. Reading it as corroboration made `uncorroborated` and
+    // `unitsWithUncorroboratedRecency` near-permanently zero for the whole
+    // cohort — and let the bare-stamp attack through for exactly the population
+    // this board exists to notice. Same fixture as above, one field apart: the
+    // evidence is a YEAR old while the recency reads "yesterday".
+    const payload = response(
+      wireChild("quit-last-year", [
+        wireIdea(0, "i-1", [["1.1.5", NOW - 365 * DAY]], {
+          lastCompletionAt: NOW - 1 * DAY,
+          lastCorroboratedCompletionAt: NOW - 365 * DAY,
+          hasCompletionsOutsideRequest: true,
+        }),
+      ]),
+    );
+    const { rowBy, cohort } = board(payload, SELL_1_2);
+    expect(rowBy("1.2.1").active).toBe(0);
+    expect(rowBy("1.2.1").stalled).toBe(1);
+    expect(rowBy("1.2.1").uncorroborated).toBe(1);
+    expect(cohort.unitsWithUncorroboratedRecency).toBe(1);
   });
 
   it("UNCORROBORATED recency is not activity — a bare stamp mints no completion", () => {
@@ -769,6 +879,9 @@ describe("the active/stalled split", () => {
           doneByTask: { "1.1.5": true, "1.2.1": true },
           doneAtByTask: { "1.1.5": NOW - 400 * DAY, "1.2.1": NOW - 399 * DAY, "1.2.2": NOW },
           lastCompletionAt: NOW,
+          // The bare `1.2.2` stamp is NOT a completion, so the evidence lags by
+          // 399 days — which is what the server actually emits for this doc.
+          lastCorroboratedCompletionAt: NOW - 399 * DAY,
           recencyClamped: false,
           hasCompletionsOutsideRequest: false,
         },
@@ -1073,6 +1186,27 @@ describe("children that contribute no units are COUNTED, never merely absent", (
     expect(cohort.units).toHaveLength(4);
     expect(cohort.childCount).toBe(2);
     expect(cohort.maxUnitsPerChild).toBe(3);
+    expect(cohort.maxIdeaUnitsPerChild).toBe(3);
+  });
+
+  it("maxIdeaUnitsPerChild EXCLUDES idea-less business units", () => {
+    // The concentration caveat fires on this number, not on maxUnitsPerChild:
+    // a dangling business is a legitimate flow unit (its idea was deleted), so
+    // counting it made a child with the client's full five ideas trip a caveat
+    // accusing them of distorting the cohort's numbers.
+    const payload = response(
+      wireChild(
+        "five-plus-dangling",
+        [0, 1, 2, 3, 4].map((index) =>
+          wireIdea(index, `i-${index}`, [["1.1.5", NOW - 1 * DAY]]),
+        ),
+        { businesses: [wireBusiness("biz-1", "no-such-idea", [[GROW_T0, NOW - 1 * DAY]])] },
+      ),
+    );
+    const { cohort } = board(payload, SELL_1_2, { expectMonotonic: false });
+    expect(cohort.maxUnitsPerChild).toBe(6); // the SIZE of the concentration
+    expect(cohort.maxIdeaUnitsPerChild).toBe(5); // the TEST for one: at the cap
+    expect(cohort.maxIdeaUnitsPerChild).toBeLessThanOrEqual(MAX_IDEAS);
   });
 
   it("a readable child with an EMPTY ideas array is counted, not silently erased", () => {
@@ -1144,6 +1278,7 @@ describe("promoted businesses", () => {
         businesses: [
           wireBusiness("biz-1", null, [], {
             lastCompletionAt: NOW - 1 * DAY,
+            lastCorroboratedCompletionAt: NOW - 1 * DAY,
             hasCompletionsOutsideRequest: true,
           }),
         ],
@@ -1301,15 +1436,18 @@ describe("promoted businesses", () => {
     expect(cohort.units[1].lastCompletionAt).toBe(NOW - 4 * DAY);
   });
 
-  it("a business's hasCompletionsOutsideRequest propagates onto the idea it folds into", () => {
+  it("a business's flag AND its timing evidence both propagate onto the idea it folds into", () => {
     // The business has been working in a LATER grow criterion: no in-window
-    // completions, just the flag and a fresh stamp. Losing the flag in the fold
-    // makes the recency uncorroborated and files an active child under stalled.
+    // completions, a fresh stamp, and — because that later work is REAL — a
+    // timing number as fresh as the stamp. Losing the EVIDENCE in the fold makes
+    // the recency uncorroborated and files an active child under stalled; losing
+    // the flag drops the caveat count.
     const payload = response(
       wireChild("ahead", [wireIdea(0, "idea-1", [[GROW_ENTRY, NOW - 90 * DAY]])], {
         businesses: [
           wireBusiness("biz-1", "idea-1", [], {
             lastCompletionAt: NOW - 1 * DAY,
+            lastCorroboratedCompletionAt: NOW - 1 * DAY,
             hasCompletionsOutsideRequest: true,
           }),
         ],
@@ -1321,6 +1459,28 @@ describe("promoted businesses", () => {
     expect(cohort.unitsWithUncorroboratedRecency).toBe(0);
     expect(rowBy(GROW_T0).active).toBe(1);
     expect(rowBy(GROW_T0).stalled).toBe(0);
+  });
+
+  it("a business carrying a fresh BARE stamp cannot revive a dead idea", () => {
+    // The second attack the corroboration rule exists to stop, and the sharper
+    // one: the fold puts the business's recency on the idea, so one stamp with
+    // no completion behind it used to move a 400-day-dead idea into `active`.
+    const payload = response(
+      wireChild("revived", [wireIdea(0, "idea-1", [[GROW_ENTRY, NOW - 400 * DAY]])], {
+        businesses: [
+          wireBusiness("biz-1", "idea-1", [], {
+            lastCompletionAt: NOW - 1 * DAY,
+            lastCorroboratedCompletionAt: null,
+            hasCompletionsOutsideRequest: true,
+          }),
+        ],
+      }),
+    );
+    const { rowBy, cohort } = board(payload, GROW);
+    expect(cohort.unitsWithUncorroboratedRecency).toBe(1);
+    expect(rowBy(GROW_T0).active).toBe(0);
+    expect(rowBy(GROW_T0).stalled).toBe(1);
+    expect(rowBy(GROW_T0).uncorroborated).toBe(1);
   });
 
   it("the flag is per-unit and defaults FALSE — it is read off the wire, not assumed", () => {
@@ -1357,6 +1517,7 @@ describe("normalization through the shared gameCore union helper", () => {
         doneByTask: {},
         doneAtByTask: {},
         lastCompletionAt: NOW - (4 + offsetDays) * DAY,
+        lastCorroboratedCompletionAt: NOW - (4 + offsetDays) * DAY,
         recencyClamped: false,
         hasCompletionsOutsideRequest: false,
       },
@@ -1382,6 +1543,8 @@ describe("normalization through the shared gameCore union helper", () => {
           doneByTask: {},
           doneAtByTask: { "1.1.3": NOW - 3 * DAY },
           lastCompletionAt: NOW - 3 * DAY,
+          // Only `1.1#0` is a completion with a stamp.
+          lastCorroboratedCompletionAt: NOW - 5 * DAY,
           recencyClamped: false,
           hasCompletionsOutsideRequest: false,
         },
@@ -1411,6 +1574,7 @@ describe("normalization through the shared gameCore union helper", () => {
           doneByTask: { "1.1.5": true, "1.2.1": false },
           doneAtByTask: { "1.1.5": NOW - 10 * DAY, "1.2.1": NOW - 9 * DAY },
           lastCompletionAt: NOW - 9 * DAY,
+          lastCorroboratedCompletionAt: NOW - 10 * DAY,
           recencyClamped: false,
           hasCompletionsOutsideRequest: false,
         },
@@ -1436,6 +1600,7 @@ describe("normalization through the shared gameCore union helper", () => {
           doneByTask: { "1.1.1": true, "1.1.2": true },
           doneAtByTask: { "1.1.1": NOW - 10 * DAY, "1.1.2": NOW - 9 * DAY },
           lastCompletionAt: NOW - 9 * DAY,
+          lastCorroboratedCompletionAt: NOW - 9 * DAY,
           recencyClamped: false,
           hasCompletionsOutsideRequest: false,
         },
@@ -1582,10 +1747,38 @@ describe("drillDown", () => {
     expect(active.reduce((sum, entry) => sum + entry.units, 0)).toBe(rowBy("1.2.2").active);
 
     const stalled = drillDown(named, SELL_1_2, "1.2.2", "stalled", NOW);
-    expect(stalled).toEqual([{ username: "bob", units: 1 }]);
+    expect(stalled).toEqual([{ username: "bob", units: 1, fromTruncatedDoc: false }]);
     expect(stalled.reduce((sum, entry) => sum + entry.units, 0)).toBe(
       rowBy("1.2.2").stalled,
     );
+  });
+
+  it("flags a child whose doc tripped a server walk bound, and only that child", () => {
+    // The join the caveat block cannot make: "abnormal docs: 1" beside a roster
+    // of names is unusable unless the roster says WHICH name.
+    const mixed = response(
+      wireChild("normal", [
+        wireIdea(0, "n-1", [
+          ["1.1.5", NOW - 3 * DAY],
+          ["1.2.1", NOW - 2 * DAY],
+        ]),
+      ]),
+      wireChild(
+        "abnormal",
+        [
+          wireIdea(0, "a-1", [
+            ["1.1.5", NOW - 3 * DAY],
+            ["1.2.1", NOW - 2 * DAY],
+          ]),
+        ],
+        { truncated: true },
+      ),
+    );
+    const { named } = board(mixed, SELL_1_2);
+    expect(drillDown(named, SELL_1_2, "1.2.2", "active", NOW)).toEqual([
+      { username: "abnormal", units: 1, fromTruncatedDoc: true },
+      { username: "normal", units: 1, fromTruncatedDoc: false },
+    ]);
   });
 
   it("is stable regardless of payload order", () => {
