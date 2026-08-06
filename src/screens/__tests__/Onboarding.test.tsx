@@ -68,12 +68,10 @@ describe("Onboarding screens", () => {
       ),
     ).toBeTruthy();
     expect(screen.getByText("$10 → $20")).toBeTruthy();
-    // "See your live checkout" is a visual affordance only (no broken link).
-    // It stays focusable (not native-disabled) so its aria-disabled state and
-    // explanation reach keyboard/screen-reader users; the click is a no-op.
-    const checkout = screen.getByText("See your live checkout ↗") as HTMLButtonElement;
-    expect(checkout.getAttribute("aria-disabled")).toBe("true");
-    expect(checkout.disabled).toBe(false);
+    // The checkout pointer is a plain caption, never a button-shaped
+    // affordance (BUG-004: an inert "button" reads as broken).
+    const checkout = screen.getByText("Your live checkout unlocks on your factory floor.");
+    expect(checkout.tagName).toBe("P");
   });
 
   it("screen 5 completion seeds Idea #1, marks onboarding complete, enters app", () => {

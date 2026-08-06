@@ -106,9 +106,10 @@ describe("MoneyBooth (props-driven)", () => {
       ),
     ).toBeTruthy();
     expect(screen.getByText("$10 → $20")).toBeTruthy();
-    const checkout = screen.getByText("See your live checkout ↗") as HTMLButtonElement;
-    expect(checkout.getAttribute("aria-disabled")).toBe("true");
-    expect(checkout.disabled).toBe(false);
+    // The checkout pointer is a plain caption, never a button-shaped
+    // affordance (BUG-004: an inert "button" reads as broken).
+    const checkout = screen.getByText("Your live checkout unlocks on your factory floor.");
+    expect(checkout.tagName).toBe("P");
   });
 
   it("navigates forward and back via props", () => {
