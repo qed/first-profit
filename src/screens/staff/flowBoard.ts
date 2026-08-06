@@ -1152,6 +1152,161 @@ export function computeFlowTotals(
   };
 }
 
+/* ---------------------------------------------------- the cohort funnel */
+
+/**
+ * The cohort funnel (Change #3) — ONE bar across all five phases plus a
+ * "not started" bucket, so the shape of the cohort is readable without clicking
+ * through 25 criteria.
+ *
+ * It is a DIFFERENT question from the table above it, and deliberately a much
+ * cruder one. The table asks "where inside this criterion is each idea"; the
+ * funnel asks only "which phase has each idea reached". That is answered by ONE
+ * task id per phase — the first task of the phase's first criterion, its PROBE —
+ * so the whole funnel costs five ids rather than the ~125 a full sweep would.
+ *
+ * ── What "reached" means, exactly ──
+ * A unit's phase is the LAST phase whose probe it has completed; a unit that has
+ * completed no probe at all is in the first phase (it exists, so its child has
+ * started). This is a floor, not a position: an idea deep inside Build with the
+ * Build probe missing from a truncated doc reads as Sell. It cannot read HIGH,
+ * which is the direction that would matter — nothing here should make a quiet
+ * cohort look further along than it is.
+ */
+export interface PhaseProbe {
+  phaseId: PhaseId;
+  /** The first task of the phase's first criterion. */
+  taskId: string;
+}
+
+/**
+ * One probe per phase, in `PHASE_ORDER`. Derived from the content like
+ * everything else here — a criterion inserted at the head of a phase moves the
+ * probe with it.
+ */
+export function phaseProbes(): PhaseProbe[] {
+  const out: PhaseProbe[] = [];
+  const seen = new Set<PhaseId>();
+  for (const criterionId of CRITERION_SEQUENCE) {
+    const phaseId = phaseOfCriterion(criterionId);
+    if (phaseId === undefined || seen.has(phaseId)) continue;
+    const taskId = taskIdAt(criterionId, 0);
+    if (!taskId) continue;
+    seen.add(phaseId);
+    out.push({ phaseId, taskId });
+  }
+  return out;
+}
+
+/**
+ * The `?tasks=` list for the funnel's OWN request — the five probes and every
+ * other spelling of them, by the same rule as `requestedTaskIds`.
+ *
+ * It is a second request rather than five more ids on the criterion request for
+ * one reason: the criterion request's budget (`REQUESTED_TASK_IDS_BUDGET`) is
+ * half the server's cap and is sized for a criterion's worst case. Folding the
+ * probes in would make the cohort funnel able to push the TABLE's request over
+ * that cap — a new failure mode for the number staff actually act on, bought to
+ * save one round trip on a screen that already caches per criterion.
+ */
+export function requestedPhaseProbeIds(
+  remap: Readonly<Record<string, RemapTarget>> = TASK_REMAP,
+): string[] {
+  const out: string[] = [];
+  const seen = new Set<string>();
+  const push = (id: string | null | undefined): void => {
+    if (!id || seen.has(id)) return;
+    seen.add(id);
+    out.push(id);
+  };
+  for (const probe of phaseProbes()) {
+    push(probe.taskId);
+    push(legacyKeyForTaskId(probe.taskId));
+    for (const oldId of remapSourcesForTaskId(probe.taskId, remap)) {
+      push(oldId);
+      push(legacyKeyForTaskId(oldId));
+    }
+  }
+  return out;
+}
+
+export interface PhaseTotal {
+  phaseId: PhaseId;
+  /** Flow units (IDEAS) whose furthest completed probe is this phase. */
+  units: number;
+  /** Of those, the ones `bucketFor` calls stalled — the same rule, the same
+   *  threshold and the same four reasons as the table's stalled column. */
+  stalled: number;
+}
+
+export interface CohortPhaseTotals {
+  phases: PhaseTotal[];
+  liveUnits: number;
+  /**
+   * Children who are in NO phase bucket above.
+   *
+   * ⚠ This bucket counts CHILDREN; every phase bucket counts IDEAS. They are
+   * different units and the UI must label it that way — a child with no idea
+   * has no idea to count, so there is no honest way to express them in one
+   * unit. It is the sum of the two counts below.
+   */
+  notStartedChildren: number;
+  /** Readable children who have not created an idea yet. A FACT. */
+  noIdeaChildren: number;
+  /**
+   * Children whose save could not be read. Placed in "not started" at the
+   * owner's explicit request (Change #3), and reported separately here because
+   * it is NOT the same fact: an unreadable save is a FAULT on our side (usually
+   * a DOC_VERSION skew between the two repos), and such a child may be the
+   * furthest along in the cohort. The UI must keep the two visible separately
+   * inside the one bubble; folding them into a single number would turn an
+   * outage into a progress report.
+   */
+  unreadableChildren: number;
+}
+
+/**
+ * The funnel, over the PROBE payload — never over the criterion payload, whose
+ * completions are filtered to one criterion's ids and would put every unit in
+ * the first phase.
+ *
+ * `nowMs` must be the SAME value passed to `computeFlowRows`/`computeFlowTotals`
+ * this render (see the note on `computeFlowTotals`).
+ */
+export function computePhaseTotals(
+  cohort: NormalizedCohort,
+  nowMs: number,
+  units: readonly FlowUnit[] = cohort.units,
+): CohortPhaseTotals {
+  const probes = phaseProbes();
+  const totals: PhaseTotal[] = probes.map((probe) => ({
+    phaseId: probe.phaseId,
+    units: 0,
+    stalled: 0,
+  }));
+  for (const unit of units) {
+    // The LAST probe completed wins; index 0 is the floor for any unit that
+    // exists at all. A business-origin unit carries only Phase 4-5 completions,
+    // so it reads as its furthest probe or, absent one, the first phase — the
+    // same floor, for the same reason.
+    let index = 0;
+    for (let probeIndex = 0; probeIndex < probes.length; probeIndex++) {
+      if (unit.completions.has(probes[probeIndex].taskId)) index = probeIndex;
+    }
+    const bucket = totals[index];
+    if (!bucket) continue;
+    bucket.units++;
+    if (bucketFor(unit, nowMs).bucket === "stalled") bucket.stalled++;
+  }
+  return {
+    phases: totals,
+    liveUnits: units.length,
+    notStartedChildren: cohort.childrenWithNoUnits + cohort.unreadableChildren,
+    noIdeaChildren: cohort.childrenWithNoUnits,
+    unreadableChildren: cohort.unreadableChildren,
+  };
+}
+
 /* ------------------------------------------------------------- drill-down */
 
 /**

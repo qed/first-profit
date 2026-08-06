@@ -9,10 +9,13 @@ import {
   anonymousUnits,
   computeFlowRows,
   computeFlowTotals,
+  computePhaseTotals,
   criterionWindow,
   drillDown,
   normalizeCohort,
+  phaseProbes,
   placeUnit,
+  requestedPhaseProbeIds,
   requestedTaskIds,
   taskIdsForCriterion,
   type FlowRow,
@@ -32,6 +35,7 @@ import {
   criterionIdsForPhase,
   phaseOfCriterion,
 } from "../../../state/gameCore";
+import { PHASES } from "../../../data/path";
 
 /* ------------------------------------------------------------- fixtures */
 
@@ -1820,5 +1824,96 @@ describe("deleted ideas", () => {
     );
     expect(board(twoIdeas, SELL_1_2).rowBy("1.2.1").throughput).toBe(2);
     expect(board(oneIdea, SELL_1_2).rowBy("1.2.1").throughput).toBe(1);
+  });
+});
+
+/* ------------------------------------------------------------ the funnel */
+
+describe("the cohort funnel (Change #3)", () => {
+  it("probes the first task of each phase's first criterion, one per phase", () => {
+    const probes = phaseProbes();
+    expect(probes.map((p) => p.phaseId)).toEqual(PHASES.map((phase) => phase.id));
+    for (const probe of probes) {
+      const firstCriterion = criterionIdsForPhase(probe.phaseId)[0];
+      expect(probe.taskId.startsWith(`${firstCriterion}.`)).toBe(true);
+      // Derived from content, never hardcoded: it must BE a real task id.
+      expect(taskIdsForCriterion(firstCriterion)[0]).toBe(probe.taskId);
+    }
+  });
+
+  it("keeps its own request well under the server's cap", () => {
+    // Its own budget, not the board's — the whole reason it is a second request.
+    expect(requestedPhaseProbeIds().length).toBeLessThan(REQUESTED_TASK_IDS_CAP);
+    expect(new Set(requestedPhaseProbeIds()).size).toBe(requestedPhaseProbeIds().length);
+  });
+
+  it("places a unit in the LAST phase whose probe it completed", () => {
+    const cohort = normalizeCohort(
+      response(
+        // Nothing at all: the floor, phase one — it exists, so it has started.
+        wireChild("floor", [wireIdea(0, "i-f", [])]),
+        wireChild("sell", [wireIdea(0, "i-s", [["1.1.1", NOW - DAY]])]),
+        wireChild("grow", [
+          wireIdea(0, "i-g", [
+            ["1.1.1", NOW - 40 * DAY],
+            ["4.1.1", NOW - DAY],
+          ]),
+        ]),
+      ),
+      NOW,
+    );
+    const totals = computePhaseTotals(cohort, NOW, anonymousUnits(cohort));
+    const by = (phaseId: string): number =>
+      totals.phases.find((p) => p.phaseId === phaseId)?.units ?? -1;
+    expect(by("sell")).toBe(2);
+    expect(by("grow")).toBe(1);
+    expect(by("build")).toBe(0);
+    expect(totals.liveUnits).toBe(3);
+  });
+
+  it("splits each phase by the SAME stalled rule as the table", () => {
+    const cohort = normalizeCohort(
+      response(
+        wireChild("quiet", [wireIdea(0, "i-q", [["1.1.1", NOW - STALLED_AFTER_MS - DAY]])]),
+        wireChild("busy", [wireIdea(0, "i-b", [["1.1.1", NOW - DAY]])]),
+      ),
+      NOW,
+    );
+    const sell = computePhaseTotals(cohort, NOW, anonymousUnits(cohort)).phases[0];
+    expect(sell.units).toBe(2);
+    expect(sell.stalled).toBe(1);
+  });
+
+  it("reports the not-started bucket's two halves separately", () => {
+    // The FACT and the FAULT share one bubble at the owner's request; they must
+    // not share one number. An unreadable save may be the furthest-along kid in
+    // the cohort — it is our outage, not their progress.
+    const cohort = normalizeCohort(
+      response(
+        wireChild("noideas", []),
+        wireChild("ghost", [], { docUnreadable: true }),
+        wireChild("ghost2", [], { docUnreadable: true }),
+      ),
+      NOW,
+    );
+    const totals = computePhaseTotals(cohort, NOW, anonymousUnits(cohort));
+    expect(totals.notStartedChildren).toBe(3);
+    expect(totals.noIdeaChildren).toBe(1);
+    expect(totals.unreadableChildren).toBe(2);
+    expect(totals.liveUnits).toBe(0);
+    for (const phase of totals.phases) expect(phase.units).toBe(0);
+  });
+
+  it("never reads a name — it takes the anonymous projection", () => {
+    // A username no field name can accidentally contain — "ada" is a substring
+    // of `unreadableChildren`, which is how this assertion first lied.
+    const cohort = normalizeCohort(
+      response(wireChild("zoltan.q", [wireIdea(0, "i-a", [["1.1.1", NOW - DAY]])])),
+      NOW,
+    );
+    // The signature accepts FlowUnit[]; `anonymousUnits` is what the caller
+    // passes, and the totals carry nothing but counts.
+    const totals = computePhaseTotals(cohort, NOW, anonymousUnits(cohort));
+    expect(JSON.stringify(totals)).not.toContain("zoltan");
   });
 });

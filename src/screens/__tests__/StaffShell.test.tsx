@@ -173,7 +173,7 @@ describe("StaffShell — one session, two tabs", () => {
     expect(await screen.findByText("I need a price calculator")).toBeTruthy();
 
     await click(tab(STAFF_COPY.watchtowerTitle));
-    expect(screen.getByTestId("fp-watchtower-footer")).toBeTruthy();
+    expect(screen.getByTestId("fp-watchtower-table")).toBeTruthy();
     expect(screen.queryByText("I need a price calculator")).toBeNull();
 
     await click(tab(STAFF_COPY.suggestionsTitle));
@@ -203,7 +203,7 @@ describe("StaffShell — one session, two tabs", () => {
     expect(await screen.findByText("I need a price calculator")).toBeTruthy();
 
     await click(tab(STAFF_COPY.watchtowerTitle));
-    expect(screen.getByTestId("fp-watchtower-footer")).toBeTruthy();
+    expect(screen.getByTestId("fp-watchtower-table")).toBeTruthy();
     await click(tab(STAFF_COPY.suggestionsTitle));
     expect(screen.getByText("I need a price calculator")).toBeTruthy();
 

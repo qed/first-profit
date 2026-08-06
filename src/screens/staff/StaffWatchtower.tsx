@@ -74,15 +74,18 @@ import {
 } from "../../state/gameCore";
 import { STAFF_COPY } from "./staffCopy";
 import { STAFF_PANEL_TITLE_ID, type StaffTabProps } from "./staffTypes";
-import { watchtowerCacheKey } from "./watchtowerCache";
+import { WATCHTOWER_FUNNEL_CACHE_KEY, watchtowerCacheKey } from "./watchtowerCache";
 import {
   anonymousUnits,
   computeFlowRows,
   computeFlowTotals,
+  computePhaseTotals,
   criterionWindow,
   drillDown,
   normalizeCohort,
+  requestedPhaseProbeIds,
   requestedTaskIds,
+  type CohortPhaseTotals,
   type FlowBucket,
   type FlowRow,
   type NormalizedCohort,
@@ -94,9 +97,8 @@ import {
 
 const PROGRESS_PATH = "/api/fp/progress";
 
-/** Referenced by `aria-describedby` from the median column header and the table
- *  itself, so the caveat and the warning are attached to what they qualify. */
-const MEDIAN_NOTE_ID = "fp-watchtower-median-note";
+/** Referenced by `aria-describedby` from the table itself, so the warning is
+ *  attached to what it invalidates. */
 const MONOTONIC_ALERT_ID = "fp-watchtower-monotonic";
 /** One roster is open at a time, so one id is enough for `aria-controls`. */
 const ROSTER_ID = "fp-watchtower-roster-panel";
@@ -279,15 +281,18 @@ export function narrowProgress(data: unknown): NarrowedPayload | null {
 /* ------------------------------------------------------------- formatting */
 
 /**
- * Durations, COARSELY. The stamps behind them come from a child's own device
- * clock, so a figure to the minute would assert a precision the data does not
- * have. Every string comes from `STAFF_COPY`.
+ * Durations as `h:mm` — total HOURS (not clock hours: 51:20 is fifty-one hours
+ * and twenty minutes, not a time of day), so a fast task is legible in minutes
+ * instead of collapsing into "under 1h". Owner's call, over the earlier coarse
+ * rounding: the stamps come from a child's own device clock, so the minutes are
+ * more precise than the data underneath them is trustworthy — read them as a
+ * rough figure, not a measurement.
  */
 function formatDuration(ms: number): string {
-  const hours = ms / 3600e3;
-  if (hours < 1) return STAFF_COPY.watchtowerDurationUnderHour;
-  if (hours < 48) return `${Math.round(hours)}${STAFF_COPY.watchtowerDurationHourSuffix}`;
-  return `${Math.round(hours / 24)}${STAFF_COPY.watchtowerDurationDaySuffix}`;
+  const totalMinutes = Math.max(0, Math.round(ms / 60e3));
+  const hours = Math.floor(totalMinutes / 60);
+  const minutes = totalMinutes % 60;
+  return `${hours}:${String(minutes).padStart(2, "0")}`;
 }
 
 function formatStamp(ms: number): string {
@@ -315,6 +320,17 @@ interface CohortEntry {
   rejectedChildren: number;
   rejectedIdeas: number;
   rejectedBusinesses: number;
+}
+
+/**
+ * The cohort funnel's payload (Change #3). Cohort-wide and criterion-free, so it
+ * survives every criterion change — and it is stored as the COMPUTED totals, not
+ * as the cohort: the funnel request's payload carries usernames it has no use
+ * for, and this is the one entry the drill-down must never be able to read.
+ */
+interface FunnelEntry {
+  totals: CohortPhaseTotals;
+  fetchedAt: number;
 }
 
 /** Which kind of request is in flight / which kind last failed. One state each,
@@ -373,7 +389,17 @@ export function StaffWatchtower({ request, cache, criterionId, onCriterionChange
   const [failure, setFailure] = useState<RequestKind | null>(null);
   const [drill, setDrill] = useState<DrillTarget | null>(null);
 
+  /** The funnel's own committed entry — a re-render token, like `entry`. */
+  const [funnel, setFunnel] = useState<FunnelEntry | null>(null);
+
   const inFlight = useRef<AbortController | null>(null);
+  /** The funnel's request is INDEPENDENT of the criterion request and must never
+   *  share its controller: a criterion switch aborts that one, and the funnel is
+   *  cohort-wide — cancelling it would leave the row permanently blank. */
+  const funnelInFlight = useRef<AbortController | null>(null);
+  /** Has this mount already asked for the funnel? StrictMode's second effect
+   *  invocation must not produce a second request (same rule as `askedFor`). */
+  const funnelAsked = useRef(false);
   /** Which criterion this mount has already asked for. React 18's StrictMode
    *  double-invokes effects; this is what makes that ONE request. */
   const askedFor = useRef<string | null>(null);
@@ -424,6 +450,40 @@ export function StaffWatchtower({ request, cache, criterionId, onCriterionChange
     [cache, request],
   );
 
+  /**
+   * The cohort funnel's request (Change #3) — one per mount, cohort-wide.
+   *
+   * It is deliberately SILENT about its own failure: the funnel is context above
+   * a board that stands on its own, and a second error banner over the tab would
+   * compete with the one that actually matters. A failure leaves the row absent
+   * rather than showing zeros — a funnel of zeros is a claim about a cohort we
+   * could not read, which is the exact mistake `watchtowerNoCohort` exists to
+   * prevent one level down.
+   */
+  const runFunnelFetch = useCallback(async () => {
+    funnelInFlight.current?.abort();
+    const controller = new AbortController();
+    funnelInFlight.current = controller;
+    const ticket = cache.begin(WATCHTOWER_FUNNEL_CACHE_KEY);
+    const ids = requestedPhaseProbeIds().map(encodeURIComponent).join(",");
+    const result = await request(`${PROGRESS_PATH}?tasks=${ids}`, { signal: controller.signal });
+    if (controller.signal.aborted) return;
+    if (result.kind === "unauthorized" || result.kind === "aborted") return;
+    const narrowed = result.kind === "json" ? narrowProgress(result.data) : null;
+    if (narrowed === null) return;
+    const fetchedAt = Date.now();
+    const cohort = normalizeCohort(narrowed.response, fetchedAt);
+    // The named array dies HERE, inside the fetch: what reaches state is the
+    // aggregate. `anonymousUnits` is the same strip the table does, and the
+    // funnel has no drill-down to justify keeping the names for.
+    const next: FunnelEntry = {
+      totals: computePhaseTotals(cohort, fetchedAt, anonymousUnits(cohort)),
+      fetchedAt,
+    };
+    if (!cache.write(ticket, next)) return;
+    setFunnel(next);
+  }, [cache, request]);
+
   // One effect owns "does the selected criterion need fetching". What is SHOWN
   // is derived during render instead, so no committed frame can pair this
   // step's heading with the last step's numbers.
@@ -454,13 +514,31 @@ export function StaffWatchtower({ request, cache, criterionId, onCriterionChange
     void runFetch(phaseId, criterion, "first");
   }, [cache, criterion, phaseId, runFetch]);
 
+  // Declared AFTER the board's effect so the board's request goes out first: the
+  // funnel is context, and on a cold cache the table is what staff are waiting
+  // for.
+  useEffect(() => {
+    if (funnelAsked.current) return; // StrictMode's second invocation
+    funnelAsked.current = true;
+    const cached = cache.read<FunnelEntry>(WATCHTOWER_FUNNEL_CACHE_KEY);
+    if (cached !== undefined) {
+      setFunnel(cached);
+      return;
+    }
+    void runFunnelFetch();
+  }, [cache, runFunnelFetch]);
+
   const refresh = useCallback(() => {
     // `clear` first: a manual refresh cannot overwrite with a value it has not
     // fetched yet, so the stale entry must go before the request starts.
     cache.clear(watchtowerCacheKey(criterion));
     setDrill(null);
     void runFetch(phaseId, criterion, "refresh");
-  }, [cache, criterion, phaseId, runFetch]);
+    // Refresh means "re-read the cohort", and the funnel is part of what is on
+    // screen. Its stale entry goes with the table's.
+    cache.clear(WATCHTOWER_FUNNEL_CACHE_KEY);
+    void runFunnelFetch();
+  }, [cache, criterion, phaseId, runFetch, runFunnelFetch]);
 
   const retry = useCallback(() => {
     askedFor.current = criterion;
@@ -548,31 +626,91 @@ export function StaffWatchtower({ request, cache, criterionId, onCriterionChange
 
   const selectors = (
     <div className="mt-4 flex flex-col gap-3">
-      <div className="flex flex-wrap items-center gap-2">
-        <span className="w-16 text-xs font-bold uppercase tracking-wide text-ink/60">
-          {STAFF_COPY.watchtowerPhaseLabel}
+      {/*
+        The phase row and the cohort funnel are ONE wrapping row of COLUMNS, not
+        two independent rows — measured at 390px, where six bubbles wrap onto
+        three lines and a second flex row of bare digits lands under whatever
+        happened to wrap above it. Stacking each count with its own bubble keeps
+        them together at every width; on desktop the counts still read as the
+        second row the owner asked for, because nothing wraps.
+      */}
+      <div
+        data-testid="fp-watchtower-funnel"
+        className="flex flex-wrap items-start gap-x-2 gap-y-3"
+      >
+        <span className="flex w-16 flex-col gap-1 pt-3 text-xs font-bold uppercase tracking-wide text-ink/60">
+          <span>{STAFF_COPY.watchtowerPhaseLabel}</span>
+          {funnel ? <span>{STAFF_COPY.watchtowerFunnelLabel}</span> : null}
         </span>
         {PHASES.map((phase) => {
           const isActive = phase.id === phaseId;
+          const total = funnel?.totals.phases.find((row) => row.phaseId === phase.id);
           return (
-            <button
-              key={phase.id}
-              type="button"
-              aria-pressed={isActive}
-              onClick={() => {
-                const first = criterionIdsForPhase(phase.id)[0];
-                if (first) onCriterionChange(first);
-              }}
-              className={`inline-flex min-h-[44px] items-center justify-center rounded-xl px-3 font-display text-sm font-bold ${
-                isActive
-                  ? `bg-build text-white shadow-[0_3px_0_hsl(217_74%_36%)] ${focusRing}`
-                  : `border-2 border-[hsl(25_34%_20%/0.2)] text-[hsl(25_34%_20%)] ${focusRingFlat}`
-              }`}
-            >
-              {phase.name}
-            </button>
+            <span key={phase.id} className="flex flex-col gap-1">
+              <button
+                type="button"
+                aria-pressed={isActive}
+                onClick={() => {
+                  const first = criterionIdsForPhase(phase.id)[0];
+                  if (first) onCriterionChange(first);
+                }}
+                className={`inline-flex min-h-[44px] items-center justify-center rounded-xl px-3 font-display text-sm font-bold ${
+                  isActive
+                    ? `bg-build text-white shadow-[0_3px_0_hsl(217_74%_36%)] ${focusRing}`
+                    : `border-2 border-[hsl(25_34%_20%/0.2)] text-[hsl(25_34%_20%)] ${focusRingFlat}`
+                }`}
+              >
+                {phase.name}
+              </button>
+              {/* Absent — not zeroed — until the funnel loads or if it fails: a
+                  funnel of zeros is a claim about a cohort we could not read. */}
+              {total ? (
+                <span
+                  data-testid={`fp-watchtower-funnel-${phase.id}`}
+                  className="inline-flex items-center justify-center rounded-lg bg-[hsl(25_34%_20%/0.06)] px-2 py-1 text-sm tabular-nums text-[hsl(25_34%_20%)]"
+                >
+                  {/* "6" on its own announces as a bare number with nothing to
+                      attach it to; the bubble above is a separate control. */}
+                  <span className="sr-only">
+                    {STAFF_COPY.watchtowerFunnelPhaseSrLead} {phase.name}:{" "}
+                  </span>
+                  {total.units}
+                  {total.stalled > 0 ? (
+                    <span className="ml-1 text-ink/60">
+                      · {total.stalled} {STAFF_COPY.watchtowerFunnelStalled}
+                    </span>
+                  ) : null}
+                </span>
+              ) : null}
+            </span>
           );
         })}
+        <span className="flex flex-col gap-1">
+          {/* The sixth bubble. NOT a button: there is no criterion to select for
+              children who are in no phase, and a control that looks pressable
+              and does nothing is worse than a label. */}
+          <span
+            data-testid="fp-watchtower-phase-not-started"
+            className="inline-flex min-h-[44px] items-center justify-center rounded-xl border-2 border-dashed border-[hsl(25_34%_20%/0.25)] px-3 font-display text-sm font-bold text-ink/60"
+          >
+            {STAFF_COPY.watchtowerPhaseNotStarted}
+          </span>
+          {funnel ? (
+            <span
+              data-testid="fp-watchtower-funnel-not-started"
+              className="inline-flex items-center justify-center rounded-lg border border-dashed border-[hsl(25_34%_20%/0.25)] px-2 py-1 text-sm tabular-nums text-ink/70"
+            >
+              <span className="sr-only">{STAFF_COPY.watchtowerFunnelNotStartedSr} </span>
+              {funnel.totals.notStartedChildren}
+              {/* The FAULT half of this bucket, never folded away. */}
+              {funnel.totals.unreadableChildren > 0 ? (
+                <span className="ml-1 text-wax">
+                  · {funnel.totals.unreadableChildren} {STAFF_COPY.watchtowerFunnelUnreadable}
+                </span>
+              ) : null}
+            </span>
+          ) : null}
+        </span>
       </div>
       <div className="flex flex-wrap items-center gap-2">
         <span className="w-16 text-xs font-bold uppercase tracking-wide text-ink/60">
@@ -831,17 +969,13 @@ export function StaffWatchtower({ request, cache, criterionId, onCriterionChange
         </span>
       );
     }
+    // A REAL median renders as the figure alone (owner's call): no sample line,
+    // no dropped count. Both facts still reach the reader on the two cells that
+    // have no figure to speak for them — "withheld" and "—" keep the dropped
+    // count, and the notes below the table keep explaining all three.
     return (
       <span data-testid={`fp-watchtower-median-${row.taskId}`}>
         <span className="tabular-nums">{formatDuration(row.cycleTimeMedianMs)}</span>
-        <span className="block text-xs text-ink/60">
-          {STAFF_COPY.watchtowerSampleLead}
-          {row.sampleSize} · {row.sampleChildCount} {STAFF_COPY.watchtowerSampleChildren}
-          {row.maxSamplesFromOneChild > 1
-            ? ` · ${STAFF_COPY.watchtowerSampleMaxOneChildLead} ${row.maxSamplesFromOneChild} ${STAFF_COPY.watchtowerSampleMaxOneChildTail}`
-            : null}
-        </span>
-        {dropped}
       </span>
     );
   };
@@ -865,15 +999,6 @@ export function StaffWatchtower({ request, cache, criterionId, onCriterionChange
         aria-describedby={totals && !totals.throughputMonotonic ? MONOTONIC_ALERT_ID : undefined}
         className="w-full min-w-[40rem] border-collapse text-left text-sm"
       >
-        <caption className="px-3 pt-3 text-left text-sm text-ink/70">
-          {/* The caption box is as wide as the SCROLLER's content (40rem), so at
-              390px its text would lay out 640px wide and read only by scrolling.
-              Constrained to the viewport and pinned to the visible edge. */}
-          <span className="sticky left-0 block w-[calc(100vw-3.5rem)] sm:w-auto">
-            {STAFF_COPY.watchtowerCaptionLead} {criterion} — {stepTitle}.{" "}
-            {STAFF_COPY.watchtowerCaptionTail} {STAFF_COPY.watchtowerCaptionMedianShort}
-          </span>
-        </caption>
         <thead>
           <tr className="border-b-2 border-[hsl(25_34%_20%/0.1)]">
             <th scope="col" className="px-3 py-3 font-bold text-[hsl(25_34%_20%)]">
@@ -882,11 +1007,7 @@ export function StaffWatchtower({ request, cache, criterionId, onCriterionChange
             <th scope="col" className="px-3 py-3 text-right font-bold text-[hsl(25_34%_20%)]">
               {STAFF_COPY.watchtowerColThroughput}
             </th>
-            <th
-              scope="col"
-              aria-describedby={MEDIAN_NOTE_ID}
-              className="px-3 py-3 text-right font-bold text-[hsl(25_34%_20%)]"
-            >
+            <th scope="col" className="px-3 py-3 text-right font-bold text-[hsl(25_34%_20%)]">
               {STAFF_COPY.watchtowerColMedian}
             </th>
             <th scope="col" className="px-3 py-3 text-right font-bold text-[hsl(25_34%_20%)]">
@@ -1052,26 +1173,10 @@ export function StaffWatchtower({ request, cache, criterionId, onCriterionChange
       ) : (
         table
       )}
-      {totals ? (
-        <p className="mt-3 text-sm text-ink/70" data-testid="fp-watchtower-footer">
-          {totals.active} {STAFF_COPY.watchtowerFooterActive} · {totals.stalled}{" "}
-          {STAFF_COPY.watchtowerFooterStalled} · {totals.before}{" "}
-          {STAFF_COPY.watchtowerFooterBefore} · {totals.after} {STAFF_COPY.watchtowerFooterAfter} ·{" "}
-          {totals.liveUnits} {STAFF_COPY.watchtowerFooterLive}
-        </p>
-      ) : null}
-      {/* The notes are INLINE and always rendered, not tooltips: the median's
-          caveat is the difference between reading this board right and reading
-          it exactly backwards, and a tooltip is invisible on a phone. */}
-      <div className="mt-4 flex flex-col gap-2 text-sm text-ink/70">
-        <p id={MEDIAN_NOTE_ID}>{STAFF_COPY.watchtowerMedianCaveat}</p>
-        <p>{STAFF_COPY.watchtowerMedianNoneNote}</p>
-        <p>{STAFF_COPY.watchtowerMedianWithheldNote}</p>
-        <p>{STAFF_COPY.watchtowerMedianDroppedNote}</p>
-        <p>{STAFF_COPY.watchtowerStalledNote}</p>
-        <p>{STAFF_COPY.watchtowerStalledSplitNote}</p>
-        <p>{STAFF_COPY.watchtowerStalledLaunchNote}</p>
-      </div>
+      {/* The footer summary and the inline notes were removed at the owner's
+          request (Changes #1–#4): the board is read by the people who built it,
+          and the standing explanation was noise on every load. The monotonic
+          ALERT stays — it is a fault report, not an explanation. */}
       {caveatBlock}
     </>
   );
