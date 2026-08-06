@@ -31,8 +31,8 @@
 | BUG-004 | fixed (pending deploy) | Inert "See your live checkout ↗" button demoted to a plain caption ("Your live checkout unlocks on your factory floor."). `src/screens/onboarding/screens.tsx`. |
 | BUG-005 | closed, no action (2026-08-06) | Every unit task is being massively reworked within 7 days; the runner's honor-system CTA goes with it. |
 | BUG-006 | closed, no action (2026-08-06) | Same rework covers criterion gating. |
-| BUG-007 | pending | |
+| BUG-007 | closed, no action (2026-08-06) | The Founder File is an off-app curriculum artifact (Day-1 binder); its in-app story gets decided in the unit-task rework. |
 | BUG-008 | fixed (pending deploy) | Delete UI + grey unnamed cards were already live; added: dismissing the runner on a pristine idea (no fields, no completed tasks) now removes it via the tombstoned DELETE_IDEA path. `src/components/StepRunner.tsx`. |
-| BUG-009 | pending | |
-| BUG-010 | pending | |
-| BUG-011 | pending | |
+| BUG-009 | fixed (pending deploy) | Boundary criterion's celebration now names the phase moment ("Phase 1 · Sell complete" / "Phase 2 · Build begins") and dismissing returns to the floor instead of opening the next phase's runner. `src/state/gameCore.ts`, `src/components/Celebration.tsx`. |
+| BUG-010 | fixed (pending deploy) | "● live" chip was hardcoded on BOTH company cards with fabricated URLs. Your Site now reflects the real registry status (live / going live… / offline / none) + the claimed handle's URL; Checkout Booth drops chip + fake URL. `src/components/PodCardContent.tsx`, `src/components/PhasesFloor.tsx`. |
+| BUG-011 | closed, no action (2026-08-06) | Money story is being reworked: no "backing a business" concept; a student first collects money only once they have a product and a price. Onboarding copy will be rewritten then. |

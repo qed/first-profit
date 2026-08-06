@@ -67,6 +67,15 @@ export function Celebration() {
   const nextUnlocked =
     nextStep !== undefined && isStepUnlocked(game, game.activeIdea, nextStep.id);
   const showNextRoom = !terminal && !promoteNext && nextStep !== undefined && nextUnlocked;
+  // PHASE BOUNDARY (BUG-009): the passed criterion closed its whole phase.
+  // Name the moment — "Phase N complete", "Phase N+1 begins" — instead of the
+  // per-criterion chrome. The promotion seam (3.5 → Grow) keeps its own copy.
+  const nextPhase = nextStep ? phaseById(nextStep.phase) : undefined;
+  const phaseClosed =
+    !terminal && !promoteNext && step !== undefined && nextStep !== undefined &&
+    nextStep.phase !== step.phase
+      ? phase
+      : undefined;
   const blockedByOtherBusiness =
     !terminal &&
     !promoteNext &&
@@ -104,7 +113,11 @@ export function Celebration() {
           {terminal ? "★" : "✓"}
         </span>
         <p className="mt-4 font-mono text-[11px] uppercase tracking-[0.25em] text-[hsl(4_62%_46%)]">
-          {terminal ? "Path complete" : "Criterion passed"}
+          {terminal
+            ? "Path complete"
+            : phaseClosed
+              ? `Phase ${phaseClosed.index} · ${phaseClosed.name} complete`
+              : "Criterion passed"}
         </p>
         <h2
           id="fp-celebrate-title"
@@ -134,7 +147,9 @@ export function Celebration() {
               className="font-mono text-[10px] uppercase tracking-[0.08em]"
               style={{ color: phaseById(nextStep.phase).text }}
             >
-              New on The Path
+              {phaseClosed && nextPhase
+                ? `Phase ${nextPhase.index} · ${nextPhase.name} begins`
+                : "New on The Path"}
             </p>
             <p className="mt-1.5 font-display text-[17px] font-bold text-[hsl(25_34%_20%)]">
               {nextStep.id} · {nextStep.roomName}

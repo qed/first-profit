@@ -1632,6 +1632,15 @@ export function reducer(state: GameState, action: Action): GameState {
       if (!nextStep) {
         return { ...state, celebrate: null, runnerOpen: false };
       }
+      // PHASE BOUNDARY (BUG-009): when the celebrated criterion closed its
+      // whole phase, dismissing returns to the FLOOR instead of silently
+      // opening the next phase's runner — the kid sees the floor advance (and
+      // the coach point at the new phase's first room) rather than working
+      // Phase N+1 over a background still showing Phase N.
+      const passedPhase = state.celebrate ? phaseOfCriterion(state.celebrate) : undefined;
+      if (passedPhase && phaseOfCriterion(nextStep) !== passedPhase) {
+        return { ...state, celebrate: null, runnerOpen: false };
+      }
       const step = stepById(nextStep);
       const foundIndex = step
         ? step.tasks.findIndex((_, i) => !isTaskDone(state, state.activeIdea, nextStep, i))
