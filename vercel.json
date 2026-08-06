@@ -2,9 +2,9 @@
   "trailingSlash": false,
   "redirects": [
     {
-      "source": "/:path*",
+      "source": "/(.*)",
       "has": [{ "type": "host", "value": "www.firstprofit.school" }],
-      "destination": "https://firstprofit.school/:path*",
+      "destination": "https://firstprofit.school/$1",
       "permanent": true
     },
     {
