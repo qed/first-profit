@@ -1043,15 +1043,28 @@ progress on the main page" boundary.
   selected phase) — matching the owner's "one phase at a time and one
   step/criterion at a time" (decision, 2026-08-05; a flat criterion picker was
   considered and rejected) — and ~5 rows below. Default to the first criterion
-  of Phase 1 (deterministic; see Open Questions). Selector state lives in the
-  tab but the FETCHED DATA lives in the shell cache keyed by criterion (Unit 3),
-  so switching back to a visited criterion is instant.
+  of Phase 1 (deterministic; see Open Questions).
+  **AMENDED 2026-08-05 (Unit 3 shipped, Unit 5 build).** Selector state lives in
+  the SHELL, not the tab (`criterionId` / `onCriterionChange` on
+  `StaffTabProps`), for the same reason the cache does: state that dies on a tab
+  switch while its data survives is the confusing combination. The tab derives
+  the PHASE from the selected criterion rather than holding a second state, and
+  narrows an unknown criterion to the phase's first before it can reach
+  `criterionWindow`, which throws. The FETCHED DATA lives in the shell cache
+  keyed by criterion (Unit 3), so switching back to a visited criterion is
+  instant.
 - **Columns:** Unit task (id + short name) · Ideas through (throughput) ·
   Median time (cycle time, with sample size) · **Sitting here (active)** ·
-  **Stalled (30d+)**. A quiet footer line shows the sum-check: "N active ·
-  S stalled · M before · K after · T ideas live." This is the free correctness
-  signal from Unit 4 — if it ever fails to add up, staff see it before a test
-  does.
+  **Stalled (30d+)**. A quiet footer line shows "N active · S stalled ·
+  M before · K after · T ideas live."
+  **AMENDED 2026-08-05 (Unit 5 build).** This footer is a SUMMARY, not a check.
+  Unit 4 shipped with `placeUnit` total and single-valued, so
+  `active + stalled + before + after === liveUnits` holds by construction — it
+  was verified surviving a wholesale swap of `active` and `stalled`, and
+  `flowBoard.ts`'s header records that. The property that CAN fail, and the one
+  the UI must surface, is `throughputMonotonic` (throughput comes from the
+  completion maps, the WIP columns from the walk), so Unit 5 renders that as an
+  alert naming `firstNonMonotonicTaskId` and leaves the footer as prose.
 - **The stalled column carries a short inline explanation of what it means**
   ("no completion in 30+ days") — it is the surviving form of the old stuck
   list, and staff must read it as "these need a nudge", not as a second WIP
@@ -1095,12 +1108,20 @@ progress on the main page" boundary.
   the redesign: real `<table>` markup with `<th scope="col">`, no bar charts, no
   color-only encoding. If any emphasis (e.g. the deepest queue) is added, it
   carries a text marker too.
-- At 390px: the table must not scroll the PAGE horizontally. Preferred approach
-  is a responsive stacked-row layout below `sm` (each task becomes a labelled
-  card of three stats) reverting to a true table from `sm` up; if a real table
-  is kept at 390px it must scroll inside its own `overflow-x: auto` container.
-  Decide with the screenshot gate, not in advance. 44px tap targets on both
-  selectors and every drillable count.
+- At 390px: the table must not scroll the PAGE horizontally.
+  **DECIDED 2026-08-05 at the screenshot gate (this plan said to decide there,
+  not in advance): ONE real `<table>` at every width, inside its own
+  `overflow-x: auto` container.** The stacked-card variant was not built. Two
+  reasons: the real table keeps `<caption>` + `<th scope>` semantics, which are
+  what makes the board its own text equivalent (R11), and the measured result is
+  already clean — at 320px and 390px `documentElement.scrollWidth ===
+  innerWidth` with the 640px table scrolling inside a 354px card. Two
+  consequences of the decision needed their own fixes, both found at the gate:
+  the drill-down row and the `<caption>` are as wide as the SCROLLER, so both
+  are pinned with `sticky left-0` and a viewport-bounded width, and the roster's
+  focus call passes `preventScroll` (the default scroll-into-view dragged the
+  table off its first two columns). 44px tap targets on both selectors and every
+  drillable count.
 - All copy in the staff copy object; usernames rendered only in the drill-down,
   never logged.
 

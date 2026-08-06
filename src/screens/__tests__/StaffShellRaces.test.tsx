@@ -8,9 +8,11 @@
  * single-flight refresh and the in-flight request sharing.
  *
  * Technique: the Watchtower tab is STUBBED with a probe tab that calls the
- * shell's `request` directly. Until Unit 5 the real Watchtower fetches nothing,
- * so this is the only way to produce a second (or concurrent) reader — and the
- * shell's guarantees are about exactly that situation.
+ * shell's `request` directly. The real tab fetches on mount (Unit 5), but its
+ * request is a criterion-scoped path it owns and cancels on its own terms; the
+ * probe is what lets a test fire an EXACT request at an EXACT moment, which is
+ * what every race below is about. Keep it stubbed — a race test that has to
+ * work around the real tab's loading behaviour is testing two things.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";

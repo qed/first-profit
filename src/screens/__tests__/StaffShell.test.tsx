@@ -83,10 +83,36 @@ const LATER_ROWS = [
   },
 ];
 
+/** One child, one idea, one completion — an unremarkable Watchtower payload. */
+const PROGRESS_COHORT = {
+  children: [
+    {
+      username: "shell.fixture",
+      truncated: false,
+      docUnreadable: false,
+      businesses: [],
+      ideas: [
+        {
+          index: 0,
+          id: "i-1",
+          done: {},
+          doneAt: {},
+          doneByTask: { "1.1.1": true },
+          doneAtByTask: { "1.1.1": Date.now() - 86400e3 },
+          lastCompletionAt: Date.now() - 86400e3,
+          recencyClamped: false,
+          hasCompletionsOutsideRequest: false,
+        },
+      ],
+    },
+  ],
+};
+
 interface Routes {
   password?: () => Response | Promise<Response>;
   refresh?: () => Response | Promise<Response>;
   suggestions?: () => Response | Promise<Response>;
+  progress?: () => Response | Promise<Response>;
 }
 
 /** Route the fetch mock by URL — the shell interleaves auth and API calls, and
@@ -98,6 +124,14 @@ function mockRoutes(routes: Routes) {
     if (u.includes("grant_type=refresh_token")) return routes.refresh!();
     if (u.includes("/auth/v1/logout")) return jsonResponse(204, {});
     if (u.includes("/api/fp/suggestions")) return routes.suggestions!();
+    // The Watchtower tab loads on mount (Unit 5). These shell tests care about
+    // the SESSION, not the board — but the default must be an ORDINARY cohort,
+    // not `{children: []}`: a zero-child payload is the Watchtower's explicit
+    // fault state, and defaulting to it would quietly run every shell test
+    // through an error path while still satisfying their assertions.
+    if (u.includes("/api/fp/progress")) {
+      return (routes.progress ?? (() => jsonResponse(200, PROGRESS_COHORT)))();
+    }
     throw new Error(`unexpected fetch: ${u}`);
   });
 }
@@ -139,7 +173,7 @@ describe("StaffShell — one session, two tabs", () => {
     expect(await screen.findByText("I need a price calculator")).toBeTruthy();
 
     await click(tab(STAFF_COPY.watchtowerTitle));
-    expect(screen.getByText(STAFF_COPY.watchtowerPending)).toBeTruthy();
+    expect(screen.getByTestId("fp-watchtower-footer")).toBeTruthy();
     expect(screen.queryByText("I need a price calculator")).toBeNull();
 
     await click(tab(STAFF_COPY.suggestionsTitle));
@@ -169,7 +203,7 @@ describe("StaffShell — one session, two tabs", () => {
     expect(await screen.findByText("I need a price calculator")).toBeTruthy();
 
     await click(tab(STAFF_COPY.watchtowerTitle));
-    expect(screen.getByText(STAFF_COPY.watchtowerPending)).toBeTruthy();
+    expect(screen.getByTestId("fp-watchtower-footer")).toBeTruthy();
     await click(tab(STAFF_COPY.suggestionsTitle));
     expect(screen.getByText("I need a price calculator")).toBeTruthy();
 
