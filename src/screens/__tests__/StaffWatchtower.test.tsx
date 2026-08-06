@@ -51,8 +51,13 @@ import { StaffShell } from "../staff/StaffShell";
 import { StaffWatchtower } from "../staff/StaffWatchtower";
 import { STAFF_COPY } from "../staff/staffCopy";
 import { STAFF_SESSION_KEY } from "../staff/staffSession";
-import { computeFlowRows, normalizeCohort, requestedTaskIds } from "../staff/flowBoard";
-import { watchtowerCacheKey } from "../staff/watchtowerCache";
+import {
+  computeFlowRows,
+  normalizeCohort,
+  requestedPhaseProbeIds,
+  requestedTaskIds,
+} from "../staff/flowBoard";
+import { WATCHTOWER_FUNNEL_CACHE_KEY, watchtowerCacheKey } from "../staff/watchtowerCache";
 import type { StaffApiResult, StaffCache } from "../staff/staffTypes";
 
 const DAY = 86400e3;
@@ -177,10 +182,25 @@ function serve(body: unknown) {
   mockRoutes({ progressFor: () => jsonResponse(200, body) });
 }
 
+/**
+ * The cohort funnel (Change #3) hits the SAME endpoint with its own id list, so
+ * every request assertion below has to say which of the two it means. The query
+ * string is the discriminator — it is exactly `requestedPhaseProbeIds()`.
+ */
+const FUNNEL_QUERY = `tasks=${requestedPhaseProbeIds().map(encodeURIComponent).join(",")}`;
+const isFunnelUrl = (u: string): boolean => u.includes(FUNNEL_QUERY);
+
+function allProgressUrls(): string[] {
+  return fetchMock.mock.calls.map(([u]) => String(u)).filter((u) => u.includes("/api/fp/progress"));
+}
+
+/** The BOARD's requests — the funnel's are `funnelUrls()`. */
 function progressUrls(): string[] {
-  return fetchMock.mock.calls
-    .map(([u]) => String(u))
-    .filter((u) => u.includes("/api/fp/progress"));
+  return allProgressUrls().filter((u) => !isFunnelUrl(u));
+}
+
+function funnelUrls(): string[] {
+  return allProgressUrls().filter(isFunnelUrl);
 }
 
 async function click(el: HTMLElement) {
@@ -241,24 +261,22 @@ describe("StaffWatchtower — the flow table", () => {
     expect(cellText("1.1.2")[1]).toBe("3");
     expect(cellText("1.1.3")[1]).toBe("1");
 
-    // 1.1.2's median: ada 2d, bo 4d, cy 2d → per-child medians [2,4,2] → 2 days.
+    // 1.1.2's median: ada 2d, bo 4d, cy 2d → per-child medians [2,4,2] → 2 days,
+    // rendered as h:mm (48 hours, no minutes). The cell is the figure ALONE.
     const median = screen.getByTestId("fp-watchtower-median-1.1.2");
-    expect(median.textContent).toContain("2d");
-    expect(median.textContent).toContain("n=3");
+    expect(median.textContent).toBe("48:00");
 
     expect(screen.getByTestId("fp-watchtower-drill-1.1.3:active").textContent).toBe("2");
     expect(screen.getByTestId("fp-watchtower-drill-1.1.2:stalled").textContent).toBe("1");
     expect(screen.getByTestId("fp-watchtower-drill-1.1.2:active").textContent).toBe("2");
   });
 
-  it("footer reports sitting / stalled / before / after / live", async () => {
+  it("renders NO footer summary and no standing notes (Changes #1 and #4)", async () => {
     await openWatchtower();
-    const footer = screen.getByTestId("fp-watchtower-footer").textContent ?? "";
-    expect(footer).toContain(`4 ${STAFF_COPY.watchtowerFooterActive}`);
-    expect(footer).toContain(`1 ${STAFF_COPY.watchtowerFooterStalled}`);
-    expect(footer).toContain(`0 ${STAFF_COPY.watchtowerFooterBefore}`);
-    expect(footer).toContain(`1 ${STAFF_COPY.watchtowerFooterAfter}`);
-    expect(footer).toContain(`6 ${STAFF_COPY.watchtowerFooterLive}`);
+    expect(screen.queryByTestId("fp-watchtower-footer")).toBeNull();
+    // The caption went with them: the step is named above the table instead.
+    expect(screen.getByTestId("fp-watchtower-table").querySelector("caption")).toBeNull();
+    expect(screen.getByTestId("fp-watchtower-step-title").textContent).toContain("1.1");
   });
 
   it("the first task of the whole sequence renders “—”, with a word a screen reader can hear", async () => {
@@ -270,7 +288,6 @@ describe("StaffWatchtower — the flow table", () => {
     expect(cell.querySelector(".sr-only")?.textContent).toBe(
       STAFF_COPY.watchtowerNotMeasurableSr,
     );
-    expect(screen.getByText(STAFF_COPY.watchtowerMedianNoneNote)).toBeTruthy();
   });
 
   it("a suppressed median renders as WITHHELD — not a number and not “—”", async () => {
@@ -280,7 +297,6 @@ describe("StaffWatchtower — the flow table", () => {
     expect(cell.textContent).toBe(STAFF_COPY.watchtowerMedianWithheld);
     expect(cell.textContent).not.toBe(STAFF_COPY.watchtowerNotMeasurable);
     expect(cell.textContent).not.toMatch(/\d/);
-    expect(screen.getByText(STAFF_COPY.watchtowerMedianWithheldNote)).toBeTruthy();
   });
 
   it("a “—” caused by DROPPED samples says so, instead of claiming nothing was measurable", async () => {
@@ -297,14 +313,13 @@ describe("StaffWatchtower — the flow table", () => {
     expect(screen.getByTestId("fp-watchtower-dropped-1.1.2").textContent).toBe(
       `1 ${STAFF_COPY.watchtowerMedianDroppedLabel}`,
     );
-    expect(screen.getByText(STAFF_COPY.watchtowerMedianDroppedNote)).toBeTruthy();
   });
 
-  it("shows DROPPED samples beside a real median, not only beside a “—”", async () => {
-    // The branch where it matters most and used not to render at all. Two honest
-    // children measure 2 days; a third pair is rejected. Without the count the
-    // row reads "2d · n=2 · 2 children" and looks CLEAN, and the rejection —
-    // which is itself the finding — is invisible.
+  it("a REAL median is the figure alone — no sample line, no dropped count (Change #2)", async () => {
+    // The same fixture that used to prove the opposite. Two honest children
+    // measure 2 days; a third pair is rejected. The owner asked for the number
+    // by itself, so the rejection is no longer surfaced on THIS cell — the
+    // trade-off is recorded here rather than left to be rediscovered.
     serve({
       children: [
         child("ada.b", [idea(0, "a1", [["1.1.1", NOW - 10 * DAY], ["1.1.2", NOW - 8 * DAY]])]),
@@ -315,11 +330,22 @@ describe("StaffWatchtower — the flow table", () => {
     });
     await openWatchtower();
     const cell = screen.getByTestId("fp-watchtower-median-1.1.2");
-    expect(cell.textContent).toContain("2d"); // the median is REAL
-    expect(cell.textContent).toContain("n=2");
-    expect(screen.getByTestId("fp-watchtower-dropped-1.1.2").textContent).toBe(
-      `1 ${STAFF_COPY.watchtowerMedianDroppedLabel}`,
-    );
+    expect(cell.textContent).toBe("48:00"); // 2 days, as h:mm — and nothing else
+    expect(screen.queryByTestId("fp-watchtower-dropped-1.1.2")).toBeNull();
+  });
+
+  it("renders the median as h:mm, so sub-hour work is legible in minutes", async () => {
+    // 1h20m for both children: the old formatter called this "under 1h" at 50
+    // minutes and rounded to "1h" here, which is what Change #2 was about.
+    const span = 80 * 60e3;
+    serve({
+      children: [
+        child("ada.b", [idea(0, "a1", [["1.1.1", NOW - DAY], ["1.1.2", NOW - DAY + span]])]),
+        child("bo.c", [idea(0, "b1", [["1.1.1", NOW - DAY], ["1.1.2", NOW - DAY + span]])]),
+      ],
+    });
+    await openWatchtower();
+    expect(screen.getByTestId("fp-watchtower-median-1.1.2").textContent).toBe("1:20");
   });
 
   it("shows DROPPED samples beside a WITHHELD median too", async () => {
@@ -337,28 +363,6 @@ describe("StaffWatchtower — the flow table", () => {
     expect(cell.textContent).toContain(STAFF_COPY.watchtowerMedianWithheld);
     expect(screen.getByTestId("fp-watchtower-dropped-1.1.2").textContent).toBe(
       `1 ${STAFF_COPY.watchtowerMedianDroppedLabel}`,
-    );
-  });
-
-  it("shows the sample's CONCENTRATION, not just its breadth", async () => {
-    // 4 samples from 3 children, two of them from one child.
-    serve({
-      children: [
-        child("ada.b", [idea(0, "a1", [["1.1.1", NOW - 10 * DAY], ["1.1.2", NOW - 8 * DAY]])]),
-        child("bo.c", [
-          idea(0, "b1", [["1.1.1", NOW - 10 * DAY], ["1.1.2", NOW - 6 * DAY]]),
-          idea(1, "b2", [["1.1.1", NOW - 10 * DAY], ["1.1.2", NOW - 5 * DAY]]),
-        ]),
-        child("cy.d", [idea(0, "c1", [["1.1.1", NOW - 10 * DAY], ["1.1.2", NOW - 7 * DAY]])]),
-      ],
-    });
-    await openWatchtower();
-    const cell = screen.getByTestId("fp-watchtower-median-1.1.2").textContent ?? "";
-    // sampleSize and sampleChildCount are DIFFERENT here, so swapping them fails.
-    expect(cell).toContain("n=4");
-    expect(cell).toContain(`3 ${STAFF_COPY.watchtowerSampleChildren}`);
-    expect(cell).toContain(
-      `${STAFF_COPY.watchtowerSampleMaxOneChildLead} 2 ${STAFF_COPY.watchtowerSampleMaxOneChildTail}`,
     );
   });
 
@@ -380,7 +384,6 @@ describe("StaffWatchtower — the flow table", () => {
     const split = screen.getByTestId("fp-watchtower-stalled-split-1.1.2").textContent ?? "";
     expect(split).toContain(`1 ${STAFF_COPY.watchtowerStalledClamped}`);
     expect(split).toContain(`1 ${STAFF_COPY.watchtowerStalledUncorroborated}`);
-    expect(screen.getByText(STAFF_COPY.watchtowerStalledSplitNote)).toBeTruthy();
   });
 
   it("surfaces a non-monotonic throughput: names the task, says what to do, and describes the table", async () => {
@@ -819,73 +822,135 @@ describe("StaffWatchtower — ONE CLOCK", () => {
       await click(screen.getByRole("button", { name: /Step 1\.2/ }));
       await click(screen.getByRole("button", { name: /Step 1\.1/ }));
       expect(screen.getByTestId("fp-watchtower-drill-1.1.3:active").textContent).toBe("2");
-      expect(screen.getByTestId("fp-watchtower-footer").textContent).toContain(
-        `4 ${STAFF_COPY.watchtowerFooterActive}`,
-      );
+      expect(screen.getByTestId("fp-watchtower-median-1.1.2").textContent).toBe("48:00");
     } finally {
       clock.mockRestore();
     }
   });
 });
 
+describe("StaffWatchtower — the cohort funnel (Change #3)", () => {
+  it("asks for the phase probes in a SECOND request, not by widening the board's", async () => {
+    mockRoutes();
+    await openWatchtower();
+    expect(funnelUrls()).toHaveLength(1);
+    // The board's request is untouched — its budget is sized for a criterion.
+    expect(progressUrls()[0]).toBe(
+      `https://api.test/api/fp/progress?tasks=${requestedTaskIds("sell", "1.1")
+        .map(encodeURIComponent)
+        .join(",")}`,
+    );
+    // One probe per phase: the first task of each phase's first criterion.
+    const probes = requestedPhaseProbeIds();
+    expect(probes).toContain("1.1.1");
+    expect(probes).toContain("2.1.1");
+    expect(probes.length).toBeLessThanOrEqual(16);
+  });
+
+  it("counts IDEAS per phase and children who are in no phase at all", async () => {
+    mockRoutes();
+    await openWatchtower();
+    // Every idea in COHORT has 1.1.1 and nothing past it, so all six sit in
+    // Sell; the later phases are empty. One of the six (i-b2, 200 days quiet)
+    // is stalled.
+    const sell = screen.getByTestId("fp-watchtower-funnel-sell").textContent ?? "";
+    expect(sell).toContain("6");
+    expect(sell).toContain(`1 ${STAFF_COPY.watchtowerFunnelStalled}`);
+    expect(screen.getByTestId("fp-watchtower-funnel-build").textContent).toContain("0");
+    // ghost.g's save could not be read: it lands in "not started" at the owner's
+    // request — and says so, because an unreadable save is a FAULT on our side,
+    // not a child who never showed up.
+    const notStarted = screen.getByTestId("fp-watchtower-funnel-not-started").textContent ?? "";
+    expect(notStarted).toContain("1");
+    expect(notStarted).toContain(`1 ${STAFF_COPY.watchtowerFunnelUnreadable}`);
+  });
+
+  it("a unit that has completed a LATER phase's probe counts in that phase", async () => {
+    serve({
+      children: [
+        child("far.f", [idea(0, "f1", [["1.1.1", NOW - 40 * DAY], ["3.1.1", NOW - DAY]])]),
+      ],
+    });
+    await openWatchtower();
+    expect(screen.getByTestId("fp-watchtower-funnel-sell").textContent).toContain("0");
+    expect(screen.getByTestId("fp-watchtower-funnel-validate").textContent).toContain("1");
+  });
+
+  it("is ABSENT, never zeroed, when its request fails", async () => {
+    // A funnel of zeros is a claim about a cohort nobody could read — the same
+    // mistake `watchtowerNoCohort` exists to prevent one level down. And the
+    // board itself must still render: the funnel is context, not a dependency.
+    mockRoutes({
+      progressFor: (url) => (isFunnelUrl(url) ? jsonResponse(500, {}) : jsonResponse(200, COHORT)),
+    });
+    await openWatchtower();
+    expect(screen.queryByTestId("fp-watchtower-funnel-sell")).toBeNull();
+    expect(screen.queryByTestId("fp-watchtower-funnel-not-started")).toBeNull();
+    // The phase selector itself is untouched — only the counts are missing.
+    expect(screen.getByRole("button", { name: "Sell" })).toBeTruthy();
+    expect(screen.getByTestId("fp-watchtower-table")).toBeTruthy();
+    // And no second error banner competing with the one that matters.
+    expect(screen.queryByText(STAFF_COPY.watchtowerLoadFailed)).toBeNull();
+  });
+
+  it("survives a criterion change without refetching — it is cohort-wide", async () => {
+    mockRoutes();
+    await openWatchtower();
+    await click(screen.getByRole("button", { name: /Step 1\.2/ }));
+    await click(screen.getByRole("button", { name: "Build" }));
+    expect(funnelUrls()).toHaveLength(1);
+    expect(screen.getByTestId("fp-watchtower-funnel-sell").textContent).toContain("6");
+  });
+
+  it("the sixth bubble is a LABEL, not a button — there is no criterion to select", async () => {
+    mockRoutes();
+    await openWatchtower();
+    const bubble = screen.getByTestId("fp-watchtower-phase-not-started");
+    expect(bubble.tagName).toBe("SPAN");
+    expect(bubble.textContent).toBe(STAFF_COPY.watchtowerPhaseNotStarted);
+    expect(screen.queryByRole("button", { name: STAFF_COPY.watchtowerPhaseNotStarted })).toBeNull();
+  });
+
+  it("hands the funnel NO usernames — it has no drill-down to justify them", async () => {
+    mockRoutes();
+    await openWatchtower();
+    // The funnel payload is the full cohort, usernames and all. Nothing from it
+    // may reach the DOM: the board's own no-username rule, one request over.
+    expect(screen.getByTestId("fp-watchtower-funnel")).toBeTruthy();
+    expect(document.body.textContent).not.toContain("ghost.g");
+    expect(document.body.textContent).not.toContain("ada.b");
+  });
+});
+
 describe("StaffWatchtower — copy obligations", () => {
-  it("the median column is worded as completers-only and points at the stalled column", () => {
+  it("the median column is still worded as completers-only", () => {
+    // The standing caveat below the table is gone (Change #4), so the COLUMN
+    // HEADER is now the only place this survivorship warning lives.
     expect(STAFF_COPY.watchtowerColMedian).toMatch(/got through/i);
     expect(STAFF_COPY.watchtowerColMedian).not.toMatch(/how long this task takes/i);
-    const caveat = STAFF_COPY.watchtowerMedianCaveat;
-    expect(caveat).toMatch(/NOT how long this task takes/);
-    expect(caveat).toMatch(/abandoned/i);
-    expect(caveat).toMatch(/understates/i);
-    expect(caveat).toMatch(/stalled/i);
-    // The short form travels with the table, above the fold.
-    expect(STAFF_COPY.watchtowerCaptionMedianShort).toMatch(/only ideas that finished/i);
-    expect(STAFF_COPY.watchtowerCaptionMedianShort).toMatch(/stalled/i);
   });
 
   it("the stalled column HEADER states the whole definition, not half of it", () => {
     // At launch the second clause is most of the column; a header that says only
-    // "30+ days" sends staff to nudge a child who started yesterday.
+    // "30+ days" sends staff to nudge a child who started yesterday. With the
+    // notes removed this header carries the definition ON ITS OWN.
     expect(STAFF_COPY.watchtowerColStalled).toMatch(/30\+ days/);
     expect(STAFF_COPY.watchtowerColStalled).toMatch(/no usable timestamp/i);
-    expect(STAFF_COPY.watchtowerStalledNote).toMatch(/30 days/);
-    expect(STAFF_COPY.watchtowerStalledNote).toMatch(/nudge/i);
   });
 
-  it("the launch note explains WHY the column is mostly timestamps at first", () => {
-    expect(STAFF_COPY.watchtowerStalledLaunchNote).toMatch(/2026-08-04/);
-    expect(STAFF_COPY.watchtowerStalledLaunchNote).toMatch(/no usable timestamp/i);
-  });
-
-  it("renders every note inline, not as a tooltip, and attaches the median's to its column", async () => {
+  it("renders NO standing explanation under the table (Change #4)", async () => {
     mockRoutes();
     await openWatchtower();
-    for (const note of [
-      STAFF_COPY.watchtowerMedianCaveat,
-      STAFF_COPY.watchtowerMedianNoneNote,
-      STAFF_COPY.watchtowerMedianWithheldNote,
-      STAFF_COPY.watchtowerMedianDroppedNote,
-      STAFF_COPY.watchtowerStalledNote,
-      STAFF_COPY.watchtowerStalledSplitNote,
-      STAFF_COPY.watchtowerStalledLaunchNote,
+    for (const gone of [
+      /NOT how long this task takes/i,
+      /one row per unit task/i,
+      /these are the ideas to nudge/i,
+      /the cohort went live on/i,
     ]) {
-      expect(screen.getByText(note)).toBeTruthy();
+      expect(screen.queryByText(gone)).toBeNull();
     }
-    const header = screen.getByRole("columnheader", { name: STAFF_COPY.watchtowerColMedian });
-    expect(header.getAttribute("aria-describedby")).toBe(
-      screen.getByText(STAFF_COPY.watchtowerMedianCaveat).id,
-    );
-    // The caption carries the short form, so the caveat is not below the fold.
-    expect(screen.getByTestId("fp-watchtower-table").querySelector("caption")?.textContent).toContain(
-      STAFF_COPY.watchtowerCaptionMedianShort,
-    );
-  });
-
-  it("keeps the duration vocabulary in the copy object, not inline in a formatter", () => {
-    expect(STAFF_COPY.watchtowerDurationUnderHour).toBeTruthy();
-    expect(STAFF_COPY.watchtowerDurationHourSuffix).toBeTruthy();
-    expect(STAFF_COPY.watchtowerDurationDaySuffix).toBeTruthy();
-    // The glyph and the sentence explaining it live together.
-    expect(STAFF_COPY.watchtowerMedianNoneNote).toContain(STAFF_COPY.watchtowerNotMeasurable);
+    // The one thing under the table that is NOT an explanation stays.
+    expect(screen.getByText(STAFF_COPY.watchtowerCaveatsTitle)).toBeTruthy();
   });
 });
 
@@ -961,15 +1026,15 @@ describe("StaffWatchtower — the request", () => {
           : jsonResponse(200, COHORT),
     });
     await openWatchtower();
-    expect(screen.getByTestId("fp-watchtower-footer").textContent).toContain("6 ideas live");
+    expect(cellText("1.1.1")[1]).toBe("6");
 
     await click(screen.getByRole("button", { name: /Step 1\.2/ }));
-    // The heading, the caption and the numbers all describe 1.2.
+    // The heading and the numbers both describe 1.2 — the caption that used to
+    // carry the third half of this assertion is gone (Change #1), so the row is
+    // what proves the payload swapped with the heading.
     expect(screen.getByTestId("fp-watchtower-step-title").textContent).toContain("1.2");
-    expect(screen.getByTestId("fp-watchtower-table").querySelector("caption")?.textContent).toContain(
-      "1.2",
-    );
-    expect(screen.getByTestId("fp-watchtower-footer").textContent).toContain("1 ideas live");
+    expect(cellText("1.2.1")[1]).toBe("1");
+    expect(screen.queryByText("1.1.1")).toBeNull();
   });
 
   it("Refresh clears this criterion's cache entry and forces a fetch", async () => {
@@ -993,7 +1058,9 @@ describe("StaffWatchtower — the request", () => {
   it("a failed first load shows a retryable error; retry refetches", async () => {
     let calls = 0;
     mockRoutes({
-      progressFor: () => {
+      // The funnel shares this endpoint and must not consume the board's turn.
+      progressFor: (url) => {
+        if (isFunnelUrl(url)) return jsonResponse(200, COHORT);
         calls += 1;
         return calls === 1 ? jsonResponse(500, {}) : jsonResponse(200, COHORT);
       },
@@ -1009,7 +1076,8 @@ describe("StaffWatchtower — the request", () => {
   it("a failed REFRESH keeps the stale table on screen with an inline error", async () => {
     let calls = 0;
     mockRoutes({
-      progressFor: () => {
+      progressFor: (url) => {
+        if (isFunnelUrl(url)) return jsonResponse(200, COHORT);
         calls += 1;
         return calls === 1 ? jsonResponse(200, COHORT) : jsonResponse(500, {});
       },
@@ -1077,7 +1145,9 @@ describe("StaffWatchtower — the shell seam", () => {
         </StrictMode>,
       );
     });
-    expect(request).toHaveBeenCalledTimes(1);
+    // TWO requests, one each: the board's and the funnel's — never four.
+    expect(request).toHaveBeenCalledTimes(2);
+    expect(request.mock.calls.filter(([path]) => isFunnelUrl(path))).toHaveLength(1);
     expect(screen.getByTestId("fp-watchtower-table")).toBeTruthy();
   });
 
@@ -1187,8 +1257,9 @@ describe("StaffWatchtower — the shell seam", () => {
       );
     });
     await click(screen.getByText(STAFF_COPY.watchtowerRefresh));
-    expect(cleared).toEqual([watchtowerCacheKey("1.1")]);
-    expect(request).toHaveBeenCalledTimes(2);
+    // Refresh means "re-read the cohort": this criterion AND the funnel.
+    expect(cleared).toEqual([watchtowerCacheKey("1.1"), WATCHTOWER_FUNNEL_CACHE_KEY]);
+    expect(request).toHaveBeenCalledTimes(4); // 2 first-load + 2 refresh
   });
 
   it("falls back to the phase's first criterion rather than passing an unknown id to criterionWindow", async () => {
@@ -1217,10 +1288,12 @@ describe("StaffWatchtower — the shell seam", () => {
 describe("StaffWatchtower — semantics and chrome", () => {
   beforeEach(() => mockRoutes());
 
-  it("is a real table: caption, scoped column headers, and a row header per task", async () => {
+  it("is a real table: scoped column headers and a row header per task", async () => {
+    // No caption since Change #1 — `fp-watchtower-step-title` names the step
+    // instead, in every view-state (see the test below).
     await openWatchtower();
     const table = screen.getByTestId("fp-watchtower-table");
-    expect(table.querySelector("caption")?.textContent).toContain("1.1");
+    expect(table.querySelector("caption")).toBeNull();
     expect(table.querySelectorAll('thead th[scope="col"]')).toHaveLength(5);
     expect(table.querySelectorAll('tbody th[scope="row"]')).toHaveLength(5);
   });

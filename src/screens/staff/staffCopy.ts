@@ -77,13 +77,29 @@ export const STAFF_COPY = {
   watchtowerPhaseLabel: "Phase",
   watchtowerCriterionLabel: "Step",
 
-  // The table.
-  watchtowerCaptionLead: "Flow through step",
-  watchtowerCaptionTail:
-    "One row per unit task. The unit counted is the IDEA, not the child — a child with two ideas counts twice.",
-  /** The median's caveat in one line, IN the caption — the full note is below
-   *  the fold on a phone, and a caveat nobody reaches is not a caveat. */
-  watchtowerCaptionMedianShort: "Median counts only ideas that finished; read it beside Stalled.",
+  // The cohort funnel (Change #3) — the row of totals under the phase bubbles.
+  //
+  // ONE obligation here, and it is the same shape as the median's was: the
+  // "Not started" bubble mixes a FACT (children with no idea yet) with a FAULT
+  // (children whose save could not be read — usually a DOC_VERSION skew between
+  // the two repos, and possibly the furthest-along kids in the cohort). The
+  // owner asked for them in this bucket; the unreadable count must stay VISIBLE
+  // inside it, or an outage reads as fifteen kids who never showed up.
+  watchtowerFunnelLabel: "Ideas",
+  watchtowerPhaseNotStarted: "Not started",
+  /** Trails a phase's count: "6 · 2 stalled". Same rule and same 30-day
+   *  threshold as the table's stalled column. */
+  watchtowerFunnelStalled: "stalled",
+  /** Trails the not-started count: "15 · 15 unreadable". */
+  watchtowerFunnelUnreadable: "unreadable",
+  /** The bubbles are counts, not sentences, so each carries its own accessible
+   *  name — "6" alone is not one. */
+  watchtowerFunnelPhaseSrLead: "ideas in",
+  watchtowerFunnelNotStartedSr: "children not started, of which unreadable saves:",
+
+  // The table. It has NO caption: the step id and title sit above the table in
+  // `fp-watchtower-step-title`, and the owner removed the standing explanation
+  // (Change #1) — this board's readers already know how it is counted.
   watchtowerColTask: "Unit task",
   watchtowerColThroughput: "Ideas through",
   watchtowerColMedian: "Median time for ideas that got through",
@@ -93,53 +109,26 @@ export const STAFF_COPY = {
   // who started yesterday.
   watchtowerColStalled: "Stalled (30+ days or no usable timestamp)",
 
-  // Durations. Coarse by design — the stamps come from a child's own device
-  // clock, so a figure to the minute asserts a precision the data lacks. The
-  // strings live here rather than inline in the formatter so the board's whole
-  // vocabulary is reviewable in one place.
-  watchtowerDurationUnderHour: "under 1h",
-  watchtowerDurationHourSuffix: "h",
-  watchtowerDurationDaySuffix: "d",
+  // Durations render as `h:mm` and carry no unit words, so there is no duration
+  // vocabulary here any more (Change #2). See `formatDuration`.
 
-  // The median's caveat. This is the sentence the whole column depends on.
-  watchtowerMedianCaveat:
-    "Median time for ideas that got through — NOT how long this task takes. Ideas that stalled or were abandoned before finishing it are not counted, and the slowest ideas are the likeliest to be abandoned, so this number understates the real difficulty. Read it beside the stalled column, which counts exactly the ideas this median cannot see.",
   /** The glyph AND its explanation live together, so they cannot drift apart. */
   watchtowerNotMeasurable: "—",
   /** A screen reader announces a bare em dash as "dash", or skips it — which is
    *  indistinguishable from an empty cell. The word rides along, hidden. */
   watchtowerNotMeasurableSr: "not measurable",
-  watchtowerMedianNoneNote:
-    "“—” means not measurable here: this task has no task before it to measure from, or no idea has a timestamp on both.",
   watchtowerMedianWithheld: "withheld",
-  watchtowerMedianWithheldNote:
-    "“withheld” means a median exists but fewer than 2 children are behind it. A median over one child is that child's own timing, so it is not published here. It is not a zero and not an “—”.",
   // A "—" produced by DROPPED samples is a THIRD thing: there WAS something to
-  // measure and every measurement was unusable. The none-note describes the
-  // wrong cause for it, so the cell says which. The count appears beside a REAL
-  // median too: a row where 3 of 8 pairs survived looks clean without it, and
-  // the 5 rejections are the finding.
+  // measure and every measurement was unusable — so the cell says which. It now
+  // rides only on the two cells with no figure ("—" and "withheld"); beside a
+  // real median the owner asked for the number alone (Change #2).
   watchtowerMedianDroppedLabel: "timings unusable",
-  watchtowerMedianDroppedNote:
-    "“timings unusable” counts measurements that existed and were rejected — a clock the server had to correct, a clock set backwards, or a task and the one before it stamped at the same instant. Beside a “—” it means every measurement was rejected. Beside a median it means that median rests on fewer measurements than the task saw, and a large count is itself the finding.",
-  watchtowerSampleLead: "n=",
-  watchtowerSampleChildren: "children",
-  // Breadth alone does not catch concentration: five honest children plus one
-  // child with six ideas reads as six of six contributors.
-  watchtowerSampleMaxOneChildLead: "up to",
-  watchtowerSampleMaxOneChildTail: "from one child",
 
-  // The stalled column — the surviving form of the old stuck list.
-  watchtowerStalledNote:
-    "Stalled = no completion in the last 30 days, or no timestamp we can trust. These are the ideas to nudge. Open a count to see who.",
-  watchtowerStalledLaunchNote:
-    "The cohort went live on 2026-08-04, so early on this column is mostly ideas with no usable timestamp rather than ideas that have gone quiet.",
-  // Per-row, under the count: at launch this split IS the stalled column, and it
-  // is the difference between "three quiet children" and "three broken clocks".
+  // The stalled column — the surviving form of the old stuck list. Per-row,
+  // under the count: at launch this split IS the stalled column, and it is the
+  // difference between "three quiet children" and "three broken clocks".
   watchtowerStalledClamped: "clock ahead",
   watchtowerStalledUncorroborated: "unbacked",
-  watchtowerStalledSplitNote:
-    "Under a stalled count, “clock ahead” means the device clock was set forward so the recency is this request's clock rather than the child's work, and “unbacked” means a recent-looking timestamp that no completion supports. Neither is a child who simply went quiet.",
 
   // The one thing on this board that can actually fail.
   watchtowerMonotonicLead: "These numbers disagree with themselves: more ideas are through",
@@ -147,13 +136,9 @@ export const STAFF_COPY = {
     "than through the task before it, which cannot happen. Something is wrong with this board — treat every number here as unreliable until it clears.",
   watchtowerMonotonicAction: "Refresh; if it persists, report it before acting on this step.",
 
-  // Footer. Read as a summary, NOT as validation: the placement walk is total
-  // and single-valued, so these always add up even when the board is wrong.
-  watchtowerFooterActive: "sitting",
-  watchtowerFooterStalled: "stalled",
-  watchtowerFooterBefore: "not here yet",
-  watchtowerFooterAfter: "past this step",
-  watchtowerFooterLive: "ideas live",
+  // The footer summary was removed at the owner's request (Change #4). Its
+  // vocabulary went with it; the cohort funnel above the table now carries the
+  // "how is the cohort doing" read it was standing in for.
 
   // Cohort caveats. These exist so ABSENCE is visible — a child who contributes
   // nothing must be COUNTED, never merely missing. The section renders even when
