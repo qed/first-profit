@@ -48,6 +48,7 @@ import { IdeaBrainstormTool } from "./tools/IdeaBrainstormTool";
 import { ObjectionLogTool } from "./tools/ObjectionLogTool";
 import { PitchBuilderTool } from "./tools/PitchBuilderTool";
 import { RehearsalStudioTool } from "./tools/RehearsalStudioTool";
+import { SayBackCardTool } from "./tools/SayBackCardTool";
 import { isPublicSiteEnabled } from "../config";
 import {
   IDEA_BRAINSTORM_PERSISTED_FIELD_KEYS,
@@ -63,6 +64,10 @@ import {
   OBJECTION_LOG_PERSISTED_FIELD_KEYS,
   OBJECTION_LOG_TASK_ID,
 } from "../lib/objectionLog";
+import {
+  SAY_BACK_PERSISTED_FIELD_KEYS,
+  SAY_BACK_TASK_ID,
+} from "../lib/sayBack";
 
 /**
  * Task id synthesis: the generated stable task id is `${stepId}.${index+1}` —
@@ -316,6 +321,9 @@ export function StepRunner() {
       : []),
     ...(currentTaskId === OBJECTION_LOG_TASK_ID
       ? OBJECTION_LOG_PERSISTED_FIELD_KEYS
+      : []),
+    ...(currentTaskId === SAY_BACK_TASK_ID
+      ? SAY_BACK_PERSISTED_FIELD_KEYS
       : []),
   ];
 
@@ -724,6 +732,15 @@ export function StepRunner() {
               ) : currentTaskId === OBJECTION_LOG_TASK_ID ? (
                 <div onClick={(event) => event.stopPropagation()}>
                   <ObjectionLogTool
+                    band={band}
+                    fields={idea?.fields ?? {}}
+                    onFieldChange={onFieldChange}
+                    onTaskComplete={markCurrentTaskDone}
+                  />
+                </div>
+              ) : currentTaskId === SAY_BACK_TASK_ID ? (
+                <div onClick={(event) => event.stopPropagation()}>
+                  <SayBackCardTool
                     band={band}
                     fields={idea?.fields ?? {}}
                     onFieldChange={onFieldChange}

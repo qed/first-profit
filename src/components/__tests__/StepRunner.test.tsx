@@ -56,6 +56,7 @@ import { PATH_CONTENT, phaseById, STEPS, taskById, taskTitleForBand } from "../.
 import type { Band } from "../../data/path";
 import { FEEDBACK_TASK_ID_RE, FEEDBACK_TASK_ID_MAX } from "../../lib/sync";
 import { OBJECTION_LOG_FIELD_KEYS } from "../../lib/objectionLog";
+import { SAY_BACK_FIELD_KEYS } from "../../lib/sayBack";
 
 const Ctx = (GameContext as unknown as { __ctx: React.Context<unknown> }).__ctx;
 
@@ -239,7 +240,7 @@ describe("StepRunner", () => {
     expect(document.body.textContent).not.toMatch(/—/);
   });
 
-  it("the left nav switches sections; Tools declares itself as a placeholder", () => {
+  it("the left nav switches sections and routes task 1.1.5 to Say-Back Card", () => {
     render(<Harness seed={seedAtLastTaskOf11()} />);
     // The four sections exist as a nav, and the view is NOT a floating card.
     const nav = screen.getByRole("navigation", { name: "Task sections" });
@@ -254,9 +255,8 @@ describe("StepRunner", () => {
     expect(screen.queryByText("Done when")).toBeNull();
 
     openSection("Tools");
-    expect(
-      screen.getByText("Tools to help you complete the unit task will go here."),
-    ).toBeTruthy();
+    expect(screen.getByText("Say-Back Card")).toBeTruthy();
+    expect(screen.queryByText("Tools to help you complete the unit task will go here.")).toBeNull();
     // Switching sections shows one at a time.
     expect(screen.queryByText("Summary")).toBeNull();
 
@@ -270,14 +270,10 @@ describe("StepRunner", () => {
     expect(noInputs.tagName).toBe("P");
     expect(noInputs.className).toContain("font-normal");
     expect(noInputs.className).toContain("text-[22px]"); // same size as the heading
-    // Tools names itself the same way.
+    // The task-specific tool returns when we switch back.
     openSection("Tools");
-    const toolsHeading = screen.getByText("Available Tools");
-    expect(toolsHeading.tagName).toBe("H3");
-    expect(toolsHeading.className).toContain("font-black");
-    const tools = screen.getByText(/Tools to help you complete/);
-    expect(tools.tagName).toBe("P");
-    expect(tools.className).toContain("font-normal");
+    expect(screen.getByText("Say-Back Card")).toBeTruthy();
+    expect(screen.queryByText(/Tools to help you complete/)).toBeNull();
   });
 
   it("routes task 1.1.2 Tools to the pitch builder and persists structured + combined fields", () => {
@@ -387,6 +383,47 @@ describe("StepRunner", () => {
       ]),
     );
     expect(screen.getByText("Next task →")).toBeTruthy();
+  });
+
+  it("completes restored Say-Back Card evidence and opens the criterion celebration", () => {
+    const actions: unknown[] = [];
+    const seed = seedAtLastTaskOf11();
+    render(
+      <Harness
+        seed={{
+          ...seed,
+          ideas: [{
+            ...seed.ideas[0],
+            fields: {
+              [SAY_BACK_FIELD_KEYS.adultName]: "Coach Lee",
+              [SAY_BACK_FIELD_KEYS.date]: "2026-08-06",
+              [SAY_BACK_FIELD_KEYS.productWords]: "Custom cards about local history",
+              [SAY_BACK_FIELD_KEYS.askWords]: "Choose a first pack",
+              [SAY_BACK_FIELD_KEYS.productMatch]: "yes",
+              [SAY_BACK_FIELD_KEYS.askMatch]: "yes",
+              [SAY_BACK_FIELD_KEYS.witnessed]: "true",
+              [SAY_BACK_FIELD_KEYS.reviewed]: "true",
+              [SAY_BACK_FIELD_KEYS.outcome]: "matched",
+            },
+          }],
+        }}
+        onAction={(action) => actions.push(action)}
+      />,
+    );
+
+    openSection("Tools");
+    expect(actions).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          type: "COMPLETE_TASK",
+          ideaIndex: 0,
+          stepId: "1.1",
+          index: 4,
+        }),
+      ]),
+    );
+    expect(screen.getByText("Criterion passed")).toBeTruthy();
+    expect(screen.getByText("1.2 · The Sales Room")).toBeTruthy();
   });
 
   it("fills the FLOOR box, not the viewport, and is not a floating modal card", () => {
