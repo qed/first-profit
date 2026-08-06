@@ -156,15 +156,27 @@ export function PhaseCard({
 
 // ── Row 2 · The Company ─────────────────────────────────────────────────────
 
+/** The status word a company card may honestly wear (BUG-010: the chip was a
+ *  hardcoded "● live" regardless of reality). No chip at all is the honest
+ *  render for "nothing claimed yet" and for a card with no status feed. */
+export interface CompanyChip {
+  label: string;
+  color: string;
+}
+
 export function CompanyCard({
   emoji,
   name,
   url,
+  chip,
   onClick,
 }: {
   emoji: string;
   name: string;
-  url: string;
+  /** Real address only — omitted entirely when there is nothing claimed
+   *  (never a fabricated URL). */
+  url?: string;
+  chip?: CompanyChip;
   onClick: () => void;
 }) {
   return (
@@ -178,17 +190,24 @@ export function CompanyCard({
         <span className="text-lg" aria-hidden>
           {emoji}
         </span>
-        <span className="font-mono text-[9px] uppercase tracking-[0.08em]" style={{ color: "hsl(150 52% 40%)" }}>
-          ● live
-        </span>
+        {chip ? (
+          <span
+            className="font-mono text-[9px] uppercase tracking-[0.08em]"
+            style={{ color: chip.color }}
+          >
+            {chip.label}
+          </span>
+        ) : null}
       </span>
       <span className="block">
         <span className="block font-display text-[14.5px] font-bold" style={{ color: INK }}>
           {name}
         </span>
-        <span className="mt-1 block break-all font-mono text-[9px]" style={{ color: INK_SOFT }}>
-          {url}
-        </span>
+        {url ? (
+          <span className="mt-1 block break-all font-mono text-[9px]" style={{ color: INK_SOFT }}>
+            {url}
+          </span>
+        ) : null}
       </span>
     </button>
   );

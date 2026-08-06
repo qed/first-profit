@@ -35,8 +35,23 @@ const GRID = "mt-3 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5";
 
 export function PhasesFloor({ onWalk }: { onWalk: (intent: WalkIntent) => void }) {
   const game = useGame();
-  const { profile, ideas, activeIdea, isCriterionDone } = game;
-  const handle = profile.handle || "you";
+  const { ideas, activeIdea, isCriterionDone } = game;
+
+  // The Your Site card tells the truth (BUG-010): chip + URL come from the
+  // REAL registry read-back (game.site — none/claimed/published/offline,
+  // "unknown" before hydrate), never from the profile handle, which is a
+  // different namespace and may not match the claimed page name. No claim →
+  // no chip and no URL, rather than a fabricated address wearing "live".
+  const site = game.site ?? { handle: null, status: "unknown" as const, projected: null };
+  const siteChip =
+    site.status === "published"
+      ? { label: "● live", color: "hsl(150 52% 40%)" }
+      : site.status === "claimed"
+        ? { label: "going live…", color: "hsl(41 88% 34%)" }
+        : site.status === "offline"
+          ? { label: "offline", color: "hsl(25 20% 38%)" }
+          : undefined;
+  const siteUrl = site.handle ? `firstprofit.school/${site.handle}` : undefined;
 
   // Promotion seam (Tier C2): a Validate-complete idea with no business yet
   // makes the locked Grow card a tap target for the promotion screen.
@@ -93,13 +108,15 @@ export function PhasesFloor({ onWalk }: { onWalk: (intent: WalkIntent) => void }
           <CompanyCard
             emoji="🌐"
             name="Your Site"
-            url={`firstprofit.school/${handle}`}
+            url={siteUrl}
+            chip={siteChip}
             onClick={() => onWalk({ kind: "openRoom", room: "website" })}
           />
+          {/* No chip, no URL (BUG-010): the booth has no status feed and
+              pay.firstprofit.school was a fabricated address. */}
           <CompanyCard
             emoji="💳"
             name="The Checkout Booth"
-            url={`pay.firstprofit.school/${handle}`}
             onClick={() => onWalk({ kind: "openRoom", room: "checkout" })}
           />
           <DashedSlot label="Built on The Path" />
