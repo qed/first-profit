@@ -2,8 +2,8 @@
  * /staff boot-URL reader (Change #9), mirroring the verify-return deep-link
  * precedent (src/screens/signup/verifyLink.ts): `firstprofit.school/staff` is a
  * reserved route that falls through to the SPA; App reads the path ONCE at boot
- * and renders the StaffSuggestions screen (logged-out capable) INSTEAD of the
- * normal stage routing — outside the game shell entirely (no GlobalNav).
+ * and renders the StaffShell screen (logged-out capable) INSTEAD of the normal
+ * stage routing — outside the game shell entirely (no GlobalNav).
  *
  * `staff` is reserved on BOTH serving layers, so a child can never claim the
  * handle and shadow this page: api/_lib/reservedHandles.ts (the claim check)

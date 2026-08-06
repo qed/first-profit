@@ -112,6 +112,39 @@ async function main() {
     }
   }
 
+  // 5: REQUEST BUDGET — the staff Watchtower asks the120's /api/fp/progress for
+  // one criterion's task ids plus their other spellings, and that endpoint
+  // refuses past PROGRESS_MAX_REQUESTED_TASK_IDS. A content edit that grows a
+  // criterion (or a fat TASK_REMAP) would push a request past the cap and 400 in
+  // production, visible only to whoever next opened the tab. Checked HERE
+  // because this is where content edits are already gated — flowBoard.ts
+  // deliberately does NOT throw at module load: App.tsx imports the staff shell
+  // statically, so a top-level throw would blank the app for every learner.
+  const { REQUESTED_TASK_IDS_BUDGET, REQUESTED_TASK_IDS_CAP, requestedTaskIds } = await import(
+    "../src/screens/staff/flowBoard"
+  );
+  const { CRITERION_SEQUENCE, phaseOfCriterion } = await import("../src/state/gameCore");
+  const budgetErrors: string[] = [];
+  for (const criterionId of CRITERION_SEQUENCE) {
+    const phaseId = phaseOfCriterion(criterionId);
+    if (!phaseId) continue;
+    const count = requestedTaskIds(phaseId, criterionId).length;
+    if (count > REQUESTED_TASK_IDS_BUDGET) {
+      budgetErrors.push(
+        `criterion ${criterionId} needs ${count} task ids, over the ` +
+          `${REQUESTED_TASK_IDS_BUDGET} budget (endpoint cap ${REQUESTED_TASK_IDS_CAP}).`,
+      );
+    }
+  }
+  if (budgetErrors.length > 0) {
+    console.error(
+      `[check-path-content] WATCHTOWER: ${budgetErrors.length} criterion request(s) ` +
+        `over budget:\n` +
+        budgetErrors.map((message) => `  - ${message}`).join("\n"),
+    );
+    process.exit(1);
+  }
+
   if (remapErrors.length > 0) {
     console.error(
       `[check-path-content] REMAP: ${remapErrors.length} stale/broken remap ` +

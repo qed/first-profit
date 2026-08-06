@@ -43,7 +43,7 @@ import {
 import type { SignupSubmission } from "./screens/signup/validation";
 import { readVerifyToken, stripVerifyTokenFromUrl } from "./screens/signup/verifyLink";
 import { isLegacyAdminPath, isStaffPath } from "./screens/staff/staffLink";
-import { StaffSuggestions } from "./screens/StaffSuggestions";
+import { StaffShell } from "./screens/staff/StaffShell";
 
 function Boot() {
   return (
@@ -204,7 +204,7 @@ function StageRouter() {
 
   // /staff renders as a pre-stage route (the verify precedent): no GlobalNav,
   // no stage content — the staff screen is not part of the game shell.
-  if (staffRoute) return <StaffSuggestions />;
+  if (staffRoute) return <StaffShell />;
 
   // The global nav mounts ABOVE the stage render (never remounts across stage
   // swaps); only the boot spinner stays chrome-free. Spec:
