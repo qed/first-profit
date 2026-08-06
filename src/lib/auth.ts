@@ -12,9 +12,10 @@
  * body is a flat `{ ok: false }`.
  *
  * Logout (Key Technical Decision: "logout revokes, not just hides"): both idle
- * and explicit logout call `supabase.auth.signOut()` — revoking the refresh
- * token server-side, not merely flipping a flag — and purge `sb-*` session
- * keys. The CALLER decides draft handling (explicit wipes, idle preserves);
+ * and explicit logout call `supabase.auth.signOut({ scope: "local" })` —
+ * revoking THIS device's refresh token server-side, not merely flipping a
+ * flag (and never globally: one device's logout must not expire the account's
+ * other sessions — BUG-003) — and purge `sb-*` session keys. The CALLER decides draft handling (explicit wipes, idle preserves);
  * `logout` just reports which scope ran so the provider can route it.
  */
 import { getConfig, isPublicSiteEnabled } from "../config";
@@ -1002,7 +1003,13 @@ const SIGN_OUT_TIMEOUT_MS = 6_000;
 export async function logout(scope: LogoutScope): Promise<LogoutScope> {
   const supabase = getSupabase();
   try {
-    await withDeadline(supabase.auth.signOut(), SIGN_OUT_TIMEOUT_MS);
+    // Scope 'local': revoke THIS device's session server-side (still a real
+    // revoke, never just a flag flip) without killing the account's other
+    // sessions. The default 'global' scope let one tab's idle logout — or the
+    // pre-signin boundary on any machine — force-expire every device signed
+    // into the same kid, which surfaced as "kicked mid-session" (BUG-003,
+    // Aug 2026). Mirrors the120 login route's never-global revoke rule.
+    await withDeadline(supabase.auth.signOut({ scope: "local" }), SIGN_OUT_TIMEOUT_MS);
   } catch {
     // Server-side revocation failed (network hiccup, etc.). Surface it — a
     // refresh token that was NOT revoked is a real shared-device risk — but do
