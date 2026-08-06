@@ -34,7 +34,12 @@ export function Login() {
     if (loading) return;
     setError(false);
     setLoading(true);
-    const ok = await login(identifier.trim(), password);
+    // Trim BOTH credentials: a password pasted from the family's credentials
+    // sheet almost always carries a trailing space or newline, which fails
+    // auth while the same password typed by hand works (BUG-002). Parent-set
+    // passwords are min-length-gated only, so an intentionally space-edged
+    // password is pathological; the paste failure was constant.
+    const ok = await login(identifier.trim(), password.trim());
     // On success the provider advances the stage and this screen unmounts; we
     // only need to handle the failure branch here.
     if (!ok) {
