@@ -188,6 +188,18 @@ describe("celebration takes over from the runner (no dual modal / terminal trap)
     expect(s.runnerStep).toBe("1.3");
   });
 
+  it("DISMISS_CELEBRATION at a PHASE BOUNDARY (1.5 done) returns to the floor, not the 2.1 runner (BUG-009)", () => {
+    let s = withOneIdea();
+    s = completePhase(s, 0, "sell");
+    expect(s.celebrate).toBe("1.5");
+    expect(nextUpFor(s, 0)).toBe("2.1");
+    s = reducer(s, { type: "DISMISS_CELEBRATION" });
+    expect(s.celebrate).toBeNull();
+    // The phase change must be SEEN: land on the floor (coach targets 2.1's
+    // room) instead of opening Phase 2's runner over a Phase 1 backdrop.
+    expect(s.runnerOpen).toBe(false);
+  });
+
   it("DISMISS_CELEBRATION at the GATED frontier (3.5 done, no business) leaves the runner closed", () => {
     let s = withOneIdea();
     s = completePhase(s, 0, "sell");

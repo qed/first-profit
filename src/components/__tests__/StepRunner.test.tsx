@@ -752,18 +752,24 @@ describe("Celebration across phase boundaries (Unit 8)", () => {
     };
   }
 
-  it("at 1.5 (phase boundary) the next-step block names 2.1 · The Build Room", () => {
+  it("at 1.5 (phase boundary) it names the phase moment and 2.1 · The Build Room (BUG-009)", () => {
     render(<Harness seed={seedCelebrating("1.5")} />);
-    expect(screen.getByText("Criterion passed")).toBeTruthy();
+    // The boundary criterion celebrates the PHASE, not just the criterion.
+    expect(screen.getByText("Phase 1 · Sell complete")).toBeTruthy();
+    expect(screen.queryByText("Criterion passed")).toBeNull();
     expect(screen.getByText("25 supervised outreach attempts")).toBeTruthy();
     expect(screen.getByText("+100 XP")).toBeTruthy();
-    // Unit 8: the block generalizes across the boundary via Step.roomName.
-    expect(screen.getByText("New on The Path")).toBeTruthy();
+    // Unit 8: the block generalizes across the boundary via Step.roomName —
+    // labeled as the NEXT phase beginning.
+    expect(screen.getByText("Phase 2 · Build begins")).toBeTruthy();
+    expect(screen.queryByText("New on The Path")).toBeNull();
     expect(screen.getByText("2.1 · The Build Room")).toBeTruthy();
   });
 
   it("at 2.5 (Build -> Validate boundary) it names 3.1 · The Loop Bench", () => {
     render(<Harness seed={seedCelebrating("2.5")} />);
+    expect(screen.getByText("Phase 2 · Build complete")).toBeTruthy();
+    expect(screen.getByText("Phase 3 · Validate begins")).toBeTruthy();
     expect(screen.getByText("3.1 · The Loop Bench")).toBeTruthy();
   });
 
