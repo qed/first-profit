@@ -57,6 +57,12 @@ import type { Band } from "../../data/path";
 import { FEEDBACK_TASK_ID_RE, FEEDBACK_TASK_ID_MAX } from "../../lib/sync";
 import { OBJECTION_LOG_FIELD_KEYS } from "../../lib/objectionLog";
 import { SAY_BACK_FIELD_KEYS } from "../../lib/sayBack";
+import { PRICE_PICKER_FIELD_KEYS } from "../../lib/pricePicker";
+import {
+  TEN_LIST_FIELD_KEYS,
+  TEN_LIST_SIZE,
+  tenListRowFieldKey,
+} from "../../lib/tenList";
 
 const Ctx = (GameContext as unknown as { __ctx: React.Context<unknown> }).__ctx;
 
@@ -187,6 +193,34 @@ function seedAtObjectionTask(fields: Record<string, string> = {}): GameState {
     runnerOpen: true,
     runnerStep: "1.1",
     runnerIndex: 3,
+  };
+}
+
+/** State at the first Sales Room task, the 1.2.1 Price Picker. */
+function seedAtPriceTask(fields: Record<string, string> = {}): GameState {
+  const s = initialState();
+  return {
+    ...s,
+    stage: "app",
+    ideas: [{ fields, done: {} }],
+    activeIdea: 0,
+    runnerOpen: true,
+    runnerStep: "1.2",
+    runnerIndex: 0,
+  };
+}
+
+/** State at the 1.2.2 Ten-List Builder, with the price task complete. */
+function seedAtTenListTask(fields: Record<string, string> = {}): GameState {
+  const s = initialState();
+  return {
+    ...s,
+    stage: "app",
+    ideas: [{ fields, done: { [taskKey("1.2", 0)]: true } }],
+    activeIdea: 0,
+    runnerOpen: true,
+    runnerStep: "1.2",
+    runnerIndex: 1,
   };
 }
 
@@ -424,6 +458,74 @@ describe("StepRunner", () => {
     );
     expect(screen.getByText("Criterion passed")).toBeTruthy();
     expect(screen.getByText("1.2 · The Sales Room")).toBeTruthy();
+  });
+
+  it("routes task 1.2.1 to Price Picker, restores its evidence, and completes the task", () => {
+    const actions: unknown[] = [];
+    render(
+      <Harness
+        seed={seedAtPriceTask({
+          [PRICE_PICKER_FIELD_KEYS.offer]: "Custom chess pieces",
+          [PRICE_PICKER_FIELD_KEYS.unit]: "One set of eight custom pawns",
+          [PRICE_PICKER_FIELD_KEYS.price]: "30",
+          [PRICE_PICKER_FIELD_KEYS.estimatedCost]: "12",
+          [PRICE_PICKER_FIELD_KEYS.parentCostCheck]: "true",
+          [PRICE_PICKER_FIELD_KEYS.reason]: "It covers materials and leaves room for my work.",
+          [PRICE_PICKER_FIELD_KEYS.confirmed]: "true",
+        })}
+        onAction={(action) => actions.push(action)}
+      />,
+    );
+
+    openSection("Tools");
+    expect(screen.getByText("Price Picker")).toBeTruthy();
+    expect(screen.queryByText("Tools to help you complete the unit task will go here.")).toBeNull();
+    expect(actions).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          type: "COMPLETE_TASK",
+          ideaIndex: 0,
+          stepId: "1.2",
+          index: 0,
+        }),
+      ]),
+    );
+    expect(screen.getByText("Next task →")).toBeTruthy();
+  });
+
+  it("routes task 1.2.2 to Ten-List Builder, restores its evidence, and completes the task", () => {
+    const actions: unknown[] = [];
+    const fields: Record<string, string> = {
+      [TEN_LIST_FIELD_KEYS.parentApproved]: "true",
+      [TEN_LIST_FIELD_KEYS.confirmed]: "true",
+    };
+    for (let index = 0; index < TEN_LIST_SIZE; index += 1) {
+      fields[tenListRowFieldKey(index, "name")] = `Prospect ${index + 1}`;
+      fields[tenListRowFieldKey(index, "channel")] = "parent-message";
+      if (index < 3) fields[tenListRowFieldKey(index, "outside")] = "true";
+    }
+
+    render(
+      <Harness
+        seed={seedAtTenListTask(fields)}
+        onAction={(action) => actions.push(action)}
+      />,
+    );
+
+    openSection("Tools");
+    expect(screen.getByText("Ten-List Builder")).toBeTruthy();
+    expect(screen.queryByText("Tools to help you complete the unit task will go here.")).toBeNull();
+    expect(actions).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          type: "COMPLETE_TASK",
+          ideaIndex: 0,
+          stepId: "1.2",
+          index: 1,
+        }),
+      ]),
+    );
+    expect(screen.getByText("Next task →")).toBeTruthy();
   });
 
   it("fills the FLOOR box, not the viewport, and is not a floating modal card", () => {

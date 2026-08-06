@@ -47,8 +47,10 @@ import { MoreToolsModal } from "./MoreToolsModal";
 import { IdeaBrainstormTool } from "./tools/IdeaBrainstormTool";
 import { ObjectionLogTool } from "./tools/ObjectionLogTool";
 import { PitchBuilderTool } from "./tools/PitchBuilderTool";
+import { PricePickerTool } from "./tools/PricePickerTool";
 import { RehearsalStudioTool } from "./tools/RehearsalStudioTool";
 import { SayBackCardTool } from "./tools/SayBackCardTool";
+import { TenListBuilderTool } from "./tools/TenListBuilderTool";
 import { isPublicSiteEnabled } from "../config";
 import {
   IDEA_BRAINSTORM_PERSISTED_FIELD_KEYS,
@@ -68,6 +70,14 @@ import {
   SAY_BACK_PERSISTED_FIELD_KEYS,
   SAY_BACK_TASK_ID,
 } from "../lib/sayBack";
+import {
+  PRICE_PICKER_PERSISTED_FIELD_KEYS,
+  PRICE_PICKER_TASK_ID,
+} from "../lib/pricePicker";
+import {
+  TEN_LIST_PERSISTED_FIELD_KEYS,
+  TEN_LIST_TASK_ID,
+} from "../lib/tenList";
 
 /**
  * Task id synthesis: the generated stable task id is `${stepId}.${index+1}` —
@@ -324,6 +334,12 @@ export function StepRunner() {
       : []),
     ...(currentTaskId === SAY_BACK_TASK_ID
       ? SAY_BACK_PERSISTED_FIELD_KEYS
+      : []),
+    ...(currentTaskId === PRICE_PICKER_TASK_ID
+      ? PRICE_PICKER_PERSISTED_FIELD_KEYS
+      : []),
+    ...(currentTaskId === TEN_LIST_TASK_ID
+      ? TEN_LIST_PERSISTED_FIELD_KEYS
       : []),
   ];
 
@@ -741,6 +757,24 @@ export function StepRunner() {
               ) : currentTaskId === SAY_BACK_TASK_ID ? (
                 <div onClick={(event) => event.stopPropagation()}>
                   <SayBackCardTool
+                    band={band}
+                    fields={idea?.fields ?? {}}
+                    onFieldChange={onFieldChange}
+                    onTaskComplete={markCurrentTaskDone}
+                  />
+                </div>
+              ) : currentTaskId === PRICE_PICKER_TASK_ID ? (
+                <div onClick={(event) => event.stopPropagation()}>
+                  <PricePickerTool
+                    band={band}
+                    fields={idea?.fields ?? {}}
+                    onFieldChange={onFieldChange}
+                    onTaskComplete={markCurrentTaskDone}
+                  />
+                </div>
+              ) : currentTaskId === TEN_LIST_TASK_ID ? (
+                <div onClick={(event) => event.stopPropagation()}>
+                  <TenListBuilderTool
                     band={band}
                     fields={idea?.fields ?? {}}
                     onFieldChange={onFieldChange}
