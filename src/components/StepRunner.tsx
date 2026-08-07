@@ -44,12 +44,14 @@ import { criterionIdsForPhase, phaseOfCriterion } from "../state/gameCore";
 import { getDraft, setDraft, getLastUserId } from "../lib/draftCache";
 import { AvatarSprite } from "./Avatar";
 import { MoreToolsModal } from "./MoreToolsModal";
+import { AskTrackerTool } from "./tools/AskTrackerTool";
 import { DressRehearsalTool } from "./tools/DressRehearsalTool";
 import { IdeaBrainstormTool } from "./tools/IdeaBrainstormTool";
 import { ObjectionLogTool } from "./tools/ObjectionLogTool";
 import { PitchBuilderTool } from "./tools/PitchBuilderTool";
 import { PricePickerTool } from "./tools/PricePickerTool";
 import { RehearsalStudioTool } from "./tools/RehearsalStudioTool";
+import { SaleLoggerTool } from "./tools/SaleLoggerTool";
 import { SayBackCardTool } from "./tools/SayBackCardTool";
 import { TenListBuilderTool } from "./tools/TenListBuilderTool";
 import { isPublicSiteEnabled } from "../config";
@@ -83,6 +85,14 @@ import {
   DRESS_REHEARSAL_PERSISTED_FIELD_KEYS,
   DRESS_REHEARSAL_TASK_ID,
 } from "../lib/dressRehearsal";
+import {
+  ASK_TRACKER_PERSISTED_FIELD_KEYS,
+  ASK_TRACKER_TASK_ID,
+} from "../lib/askTracker";
+import {
+  SALE_LOGGER_PERSISTED_FIELD_KEYS,
+  SALE_LOGGER_TASK_ID,
+} from "../lib/saleLogger";
 
 /**
  * Task id synthesis: the generated stable task id is `${stepId}.${index+1}` —
@@ -348,6 +358,12 @@ export function StepRunner() {
       : []),
     ...(currentTaskId === DRESS_REHEARSAL_TASK_ID
       ? DRESS_REHEARSAL_PERSISTED_FIELD_KEYS
+      : []),
+    ...(currentTaskId === ASK_TRACKER_TASK_ID
+      ? ASK_TRACKER_PERSISTED_FIELD_KEYS
+      : []),
+    ...(currentTaskId === SALE_LOGGER_TASK_ID
+      ? SALE_LOGGER_PERSISTED_FIELD_KEYS
       : []),
   ];
 
@@ -805,6 +821,24 @@ export function StepRunner() {
               ) : currentTaskId === DRESS_REHEARSAL_TASK_ID ? (
                 <div onClick={(event) => event.stopPropagation()}>
                   <DressRehearsalTool
+                    band={band}
+                    fields={idea?.fields ?? {}}
+                    onFieldChange={onFieldChange}
+                    onTaskComplete={markCurrentTaskDone}
+                  />
+                </div>
+              ) : currentTaskId === ASK_TRACKER_TASK_ID ? (
+                <div onClick={(event) => event.stopPropagation()}>
+                  <AskTrackerTool
+                    band={band}
+                    fields={idea?.fields ?? {}}
+                    onFieldChange={onFieldChange}
+                    onTaskComplete={markCurrentTaskDone}
+                  />
+                </div>
+              ) : currentTaskId === SALE_LOGGER_TASK_ID ? (
+                <div onClick={(event) => event.stopPropagation()}>
+                  <SaleLoggerTool
                     band={band}
                     fields={idea?.fields ?? {}}
                     onFieldChange={onFieldChange}
