@@ -142,6 +142,6 @@ module and importing it first expresses precisely that.
   (the others: an authorization invariant, a feature-flag reach, and a Bearer-token path
   that was never wired). Treat "this runs before X" / "this can only ever see Y" in a
   comment the same way you would treat a security assertion: prove it or delete it.
-- Related: [a flag that gates the page does not gate its Server Actions](../../../../Aardvark/120-The120/docs/solutions/security-issues/a-flag-that-gates-the-page-does-not-gate-its-server-actions-they-are-separately-addressable-endpoints-2026-08-05.md)
+- Related: [a flag that gates the page does not gate its Server Actions](../../../../Aardvark/120-The120/docs/solutions/security-issues/a-flag-that-gates-the-page-does-not-gate-its-server-actions-v3-signup-2026-08-05.md)
   (the120 repo — same family: a guarantee assumed at one layer that the layer below
   never provided).
