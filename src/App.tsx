@@ -45,7 +45,7 @@ import { readVerifyToken, stripVerifyTokenFromUrl } from "./screens/signup/verif
 import { peekEnterLink } from "./screens/auth/enterLink";
 import { Enter } from "./screens/auth/Enter";
 import { isLegacyAdminPath, isStaffPath } from "./screens/staff/staffLink";
-import { StaffSuggestions } from "./screens/StaffSuggestions";
+import { StaffShell } from "./screens/staff/StaffShell";
 
 function Boot() {
   return (
@@ -212,7 +212,7 @@ function StageRouter() {
 
   // /staff renders as a pre-stage route (the verify precedent): no GlobalNav,
   // no stage content — the staff screen is not part of the game shell.
-  if (staffRoute) return <StaffSuggestions />;
+  if (staffRoute) return <StaffShell />;
 
   // /auth/enter is a pre-stage route too, and it OVERRIDES the boot: while a
   // handoff is pending, GameProvider deliberately skips its session restore, so

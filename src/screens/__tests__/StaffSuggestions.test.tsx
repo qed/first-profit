@@ -2,6 +2,12 @@
 /**
  * Change #9 — the staff suggestion list at /staff.
  *
+ * Unit 3 note: `/staff` now mounts StaffShell (session + tabs) and the
+ * suggestions list is one TAB inside it. These tests therefore render the
+ * SHELL — that is the seam retarget, not a behaviour change. Every assertion
+ * below is the one it always was; the shell-specific scenarios (tabs, cache,
+ * single-flight refresh) live in StaffShell.test.tsx.
+ *
  * Pins: the boot-URL router (App renders the staff screen at /staff, outside
  * the game shell — no GlobalNav); the minimal staff sign-in form; the
  * successful staff fetch rendering rows (taskId + username + body + kind badge
@@ -42,7 +48,9 @@ vi.mock("../../config", async (importOriginal) => {
 });
 
 import { App } from "../../App";
-import { StaffSuggestions, STAFF_COPY, STAFF_SESSION_KEY } from "../StaffSuggestions";
+import { StaffShell } from "../staff/StaffShell";
+import { STAFF_COPY } from "../staff/staffCopy";
+import { STAFF_SESSION_KEY } from "../staff/staffSession";
 
 const fetchMock = vi.fn();
 
@@ -121,7 +129,7 @@ describe("App — /staff is a reserved boot-URL route (the verify precedent)", (
 
 describe("StaffSuggestions — sign-in, staff fetch, refusal", () => {
   it("renders the minimal email+password form with a >=44px submit, and stamps the noindex meta while mounted", () => {
-    const { unmount } = render(<StaffSuggestions />);
+    const { unmount } = render(<StaffShell />);
     expect(screen.getByLabelText(STAFF_COPY.email)).toBeTruthy();
     expect(screen.getByLabelText(STAFF_COPY.password)).toBeTruthy();
     const submit = screen.getByText(STAFF_COPY.signIn).closest("button")!;
@@ -136,7 +144,7 @@ describe("StaffSuggestions — sign-in, staff fetch, refusal", () => {
     fetchMock
       .mockResolvedValueOnce(jsonResponse(200, { access_token: "staff-tok" }))
       .mockResolvedValueOnce(jsonResponse(200, { ok: true, suggestions: ROWS }));
-    render(<StaffSuggestions />);
+    render(<StaffShell />);
     await signIn();
 
     // The auth call went to the shared Supabase project's password grant.
@@ -164,7 +172,7 @@ describe("StaffSuggestions — sign-in, staff fetch, refusal", () => {
     fetchMock
       .mockResolvedValueOnce(jsonResponse(200, { access_token: "staff-tok" }))
       .mockResolvedValueOnce(jsonResponse(200, { ok: true, suggestions: ROWS }));
-    render(<StaffSuggestions />);
+    render(<StaffShell />);
     await signIn();
     const body = await screen.findByText("Add a robot helper to the floor");
     expect(body.className).toContain("break-words");
@@ -177,7 +185,7 @@ describe("StaffSuggestions — sign-in, staff fetch, refusal", () => {
       .mockResolvedValueOnce(jsonResponse(200, { access_token: "child-tok" }))
       .mockResolvedValueOnce(jsonResponse(401, { ok: false }))
       .mockResolvedValueOnce(jsonResponse(204, {})); // the logout revoke
-    render(<StaffSuggestions />);
+    render(<StaffShell />);
     await signIn();
 
     expect(await screen.findByText(STAFF_COPY.refusal)).toBeTruthy();
@@ -195,7 +203,7 @@ describe("StaffSuggestions — sign-in, staff fetch, refusal", () => {
     fetchMock
       .mockResolvedValueOnce(jsonResponse(200, { access_token: "staff-tok" }))
       .mockResolvedValueOnce(jsonResponse(200, { ok: true, suggestions: ROWS }));
-    render(<StaffSuggestions />);
+    render(<StaffShell />);
 
     // Signed out.
     const signedOutTitle = screen.getByRole("heading", { level: 1 });
@@ -223,7 +231,7 @@ describe("StaffSuggestions — sign-in, staff fetch, refusal", () => {
   });
 
   it("the password field has a show/hide eye toggle (same affordance as the child login)", () => {
-    render(<StaffSuggestions />);
+    render(<StaffShell />);
     const field = screen.getByLabelText(STAFF_COPY.password) as HTMLInputElement;
     expect(field.type).toBe("password");
 
@@ -242,7 +250,7 @@ describe("StaffSuggestions — sign-in, staff fetch, refusal", () => {
 
   it("a failed sign-in shows the form error and never calls the suggestions API", async () => {
     fetchMock.mockResolvedValueOnce(jsonResponse(400, { error: "invalid_grant" }));
-    render(<StaffSuggestions />);
+    render(<StaffShell />);
     await signIn();
     expect(await screen.findByText(STAFF_COPY.signInFailed)).toBeTruthy();
     expect(
@@ -258,7 +266,7 @@ describe("StaffSuggestions — the staff session survives a refresh", () => {
         jsonResponse(200, { access_token: "staff-tok", refresh_token: "staff-ref" }),
       )
       .mockResolvedValueOnce(jsonResponse(200, { ok: true, suggestions: ROWS }));
-    render(<StaffSuggestions />);
+    render(<StaffShell />);
     await signIn();
     await screen.findByText("Add a robot helper to the floor");
 
@@ -277,7 +285,7 @@ describe("StaffSuggestions — the staff session survives a refresh", () => {
     );
     fetchMock.mockResolvedValueOnce(jsonResponse(200, { ok: true, suggestions: ROWS }));
 
-    render(<StaffSuggestions />);
+    render(<StaffShell />);
     // The sign-in form is never rendered, not even on the first paint.
     expect(screen.queryByText(STAFF_COPY.signInTitle)).toBeNull();
     expect(await screen.findByText("Add a robot helper to the floor")).toBeTruthy();
@@ -306,7 +314,7 @@ describe("StaffSuggestions — the staff session survives a refresh", () => {
       )
       .mockResolvedValueOnce(jsonResponse(200, { ok: true, suggestions: ROWS }));
 
-    render(<StaffSuggestions />);
+    render(<StaffShell />);
     expect(await screen.findByText("Add a robot helper to the floor")).toBeTruthy();
 
     const [refreshUrl, refreshInit] = fetchMock.mock.calls[1] as [string, { body: string }];
@@ -330,7 +338,7 @@ describe("StaffSuggestions — the staff session survives a refresh", () => {
       .mockResolvedValueOnce(jsonResponse(401, { ok: false }))
       .mockResolvedValueOnce(jsonResponse(400, { error: "invalid_grant" }));
 
-    render(<StaffSuggestions />);
+    render(<StaffShell />);
     expect(await screen.findByText(STAFF_COPY.signInTitle)).toBeTruthy();
     expect(screen.queryByText(STAFF_COPY.refusal)).toBeNull();
     // The dead session is gone from storage.
@@ -350,7 +358,7 @@ describe("StaffSuggestions — the staff session survives a refresh", () => {
       .mockResolvedValueOnce(jsonResponse(401, { ok: false }))
       .mockResolvedValueOnce(jsonResponse(204, {})); // the logout revoke
 
-    render(<StaffSuggestions />);
+    render(<StaffShell />);
     expect(await screen.findByText(STAFF_COPY.refusal)).toBeTruthy();
 
     const logoutCall = fetchMock.mock.calls.find(([url]) =>
@@ -367,7 +375,7 @@ describe("StaffSuggestions — the staff session survives a refresh", () => {
       )
       .mockResolvedValueOnce(jsonResponse(200, { ok: true, suggestions: ROWS }))
       .mockResolvedValueOnce(jsonResponse(204, {})); // the logout revoke
-    render(<StaffSuggestions />);
+    render(<StaffShell />);
     await signIn();
     await screen.findByText("Add a robot helper to the floor");
 
@@ -380,7 +388,7 @@ describe("StaffSuggestions — the staff session survives a refresh", () => {
 
   it("a corrupt stored session is treated as signed-out, never a crash", () => {
     window.sessionStorage.setItem(STAFF_SESSION_KEY, "{not json");
-    render(<StaffSuggestions />);
+    render(<StaffShell />);
     expect(screen.getByText(STAFF_COPY.signInTitle)).toBeTruthy();
     expect(fetchMock).not.toHaveBeenCalled();
   });

@@ -44,10 +44,40 @@ import { criterionIdsForPhase, phaseOfCriterion } from "../state/gameCore";
 import { getDraft, setDraft, getLastUserId } from "../lib/draftCache";
 import { AvatarSprite } from "./Avatar";
 import { MoreToolsModal } from "./MoreToolsModal";
+import { IdeaBrainstormTool } from "./tools/IdeaBrainstormTool";
+import { ObjectionLogTool } from "./tools/ObjectionLogTool";
 import { PitchBuilderTool } from "./tools/PitchBuilderTool";
+import { PricePickerTool } from "./tools/PricePickerTool";
+import { RehearsalStudioTool } from "./tools/RehearsalStudioTool";
+import { SayBackCardTool } from "./tools/SayBackCardTool";
+import { TenListBuilderTool } from "./tools/TenListBuilderTool";
 import { isPublicSiteEnabled } from "../config";
+import {
+  IDEA_BRAINSTORM_PERSISTED_FIELD_KEYS,
+  IDEA_BRAINSTORM_TASK_ID,
+} from "../lib/ideaBrainstorm";
 import { SITE_ONE_LINER_MAX_CHARS } from "../lib/siteCopy";
 import { PITCH_PERSISTED_FIELD_KEYS, PITCH_TASK_ID } from "../lib/pitch";
+import {
+  REHEARSAL_PERSISTED_FIELD_KEYS,
+  REHEARSAL_TASK_ID,
+} from "../lib/rehearsal";
+import {
+  OBJECTION_LOG_PERSISTED_FIELD_KEYS,
+  OBJECTION_LOG_TASK_ID,
+} from "../lib/objectionLog";
+import {
+  SAY_BACK_PERSISTED_FIELD_KEYS,
+  SAY_BACK_TASK_ID,
+} from "../lib/sayBack";
+import {
+  PRICE_PICKER_PERSISTED_FIELD_KEYS,
+  PRICE_PICKER_TASK_ID,
+} from "../lib/pricePicker";
+import {
+  TEN_LIST_PERSISTED_FIELD_KEYS,
+  TEN_LIST_TASK_ID,
+} from "../lib/tenList";
 
 /**
  * Task id synthesis: the generated stable task id is `${stepId}.${index+1}` —
@@ -292,7 +322,25 @@ export function StepRunner() {
   const currentTaskId = runnerStep ? taskIdFor(runnerStep, idx) : "";
   const restorableFieldKeys = [
     ...taskFields.map((field) => field.key),
+    ...(currentTaskId === IDEA_BRAINSTORM_TASK_ID
+      ? IDEA_BRAINSTORM_PERSISTED_FIELD_KEYS
+      : []),
     ...(currentTaskId === PITCH_TASK_ID ? PITCH_PERSISTED_FIELD_KEYS : []),
+    ...(currentTaskId === REHEARSAL_TASK_ID
+      ? REHEARSAL_PERSISTED_FIELD_KEYS
+      : []),
+    ...(currentTaskId === OBJECTION_LOG_TASK_ID
+      ? OBJECTION_LOG_PERSISTED_FIELD_KEYS
+      : []),
+    ...(currentTaskId === SAY_BACK_TASK_ID
+      ? SAY_BACK_PERSISTED_FIELD_KEYS
+      : []),
+    ...(currentTaskId === PRICE_PICKER_TASK_ID
+      ? PRICE_PICKER_PERSISTED_FIELD_KEYS
+      : []),
+    ...(currentTaskId === TEN_LIST_TASK_ID
+      ? TEN_LIST_PERSISTED_FIELD_KEYS
+      : []),
   ];
 
   // Seed each reducer field, including task-tool fields, from the account-scoped
@@ -345,11 +393,11 @@ export function StepRunner() {
   const advance = () => {
     if (!isLast) dispatch({ type: "OPEN_RUNNER", stepId: runnerStep, index: idx + 1 });
   };
-  const doIt = () => {
-    // The reducer marks the task done; on the final task it fires the celebration
-    // and closes the runner. On middle tasks it does not advance, so we do.
+  const markCurrentTaskDone = () => {
+    if (alreadyDone) return;
     // `at` is caller-stamped (gameCore stays Date.now()-free) so completion
-    // timestamps make silent stalls queryable for the cohort (R13).
+    // timestamps make silent stalls queryable for the cohort (R13). Tools may
+    // mark their own evidence complete without forcing an immediate navigation.
     dispatch({
       type: "COMPLETE_TASK",
       ideaIndex: activeIdea,
@@ -357,6 +405,11 @@ export function StepRunner() {
       index: idx,
       at: Date.now(),
     });
+  };
+  const doIt = () => {
+    // The reducer marks the task done; on the final task it fires the celebration
+    // and closes the runner. On middle tasks it does not advance, so we do.
+    markCurrentTaskDone();
     advance();
   };
   const onFieldChange = (key: string, value: string) => {
@@ -680,7 +733,14 @@ export function StepRunner() {
 
           {section === "tools" ? (
             <div>
-              {currentTaskId === PITCH_TASK_ID ? (
+              {currentTaskId === IDEA_BRAINSTORM_TASK_ID ? (
+                <div onClick={(event) => event.stopPropagation()}>
+                  <IdeaBrainstormTool
+                    fields={idea?.fields ?? {}}
+                    onFieldChange={onFieldChange}
+                  />
+                </div>
+              ) : currentTaskId === PITCH_TASK_ID ? (
                 // Mini-tool interaction stays inside the work surface. Letting
                 // clicks bubble to the room makes the avatar walk over the
                 // timer/text controls and visually cover the thing in use.
@@ -688,6 +748,50 @@ export function StepRunner() {
                   <PitchBuilderTool
                     fields={idea?.fields ?? {}}
                     onFieldChange={onFieldChange}
+                  />
+                </div>
+              ) : currentTaskId === REHEARSAL_TASK_ID ? (
+                <div onClick={(event) => event.stopPropagation()}>
+                  <RehearsalStudioTool
+                    fields={idea?.fields ?? {}}
+                    onFieldChange={onFieldChange}
+                    onTaskComplete={markCurrentTaskDone}
+                  />
+                </div>
+              ) : currentTaskId === OBJECTION_LOG_TASK_ID ? (
+                <div onClick={(event) => event.stopPropagation()}>
+                  <ObjectionLogTool
+                    band={band}
+                    fields={idea?.fields ?? {}}
+                    onFieldChange={onFieldChange}
+                    onTaskComplete={markCurrentTaskDone}
+                  />
+                </div>
+              ) : currentTaskId === SAY_BACK_TASK_ID ? (
+                <div onClick={(event) => event.stopPropagation()}>
+                  <SayBackCardTool
+                    band={band}
+                    fields={idea?.fields ?? {}}
+                    onFieldChange={onFieldChange}
+                    onTaskComplete={markCurrentTaskDone}
+                  />
+                </div>
+              ) : currentTaskId === PRICE_PICKER_TASK_ID ? (
+                <div onClick={(event) => event.stopPropagation()}>
+                  <PricePickerTool
+                    band={band}
+                    fields={idea?.fields ?? {}}
+                    onFieldChange={onFieldChange}
+                    onTaskComplete={markCurrentTaskDone}
+                  />
+                </div>
+              ) : currentTaskId === TEN_LIST_TASK_ID ? (
+                <div onClick={(event) => event.stopPropagation()}>
+                  <TenListBuilderTool
+                    band={band}
+                    fields={idea?.fields ?? {}}
+                    onFieldChange={onFieldChange}
+                    onTaskComplete={markCurrentTaskDone}
                   />
                 </div>
               ) : (
