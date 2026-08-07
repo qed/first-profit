@@ -207,6 +207,92 @@ the project-level value only governs the blocked-in-Slice-A email-signup path.
     (`FP_SITE_TEST_ONLY`); no new table grants, policies, or client-reachable
     columns were added.
 
+- **2026-08-05 (New User Flow v3, Unit 5 — the sign-in HANDOFF; the120 branch
+  `feat/new-user-flow-v3`):** a SECOND route now mints exactly the session this
+  document threat-modeled, so a re-check was owed. Reach is **unchanged**;
+  recorded here so the absence of change is on the record rather than assumed.
+  - **The new route:** `POST /api/fp/handoff/exchange` (the120) trades a
+    one-time code for a child session. The code is minted by a parent-session
+    Server Action on the account-ready screen of the v3 signup and rides to
+    firstprofit.school in a URL fragment; Unit 6 builds the `/auth/enter`
+    landing that spends it.
+  - **Same session kind, by the same mechanism.** The session is minted for the
+    same derived `s-<childId>@students.the120.invalid` identity, through the
+    same stateless (`persistSession:false`) client, and the 200 body is the same
+    token pair `/api/fp/login` returns — the two routes now share the response
+    type and the serialized refusal string outright. The principal that comes
+    out is therefore identical in every respect this document reasons about: an
+    `authenticated` role, `auth.uid()` = the child, no `parents` row, no
+    `path_role_grants`, not in `staff`. **R20's reach analysis above applies
+    verbatim and needs no amendment** — nothing in "CAN reach" or "CANNOT reach"
+    moves, no table, policy, grant, RPC, or client-reachable column was added,
+    and the SPA still talks to the shared project with the anon key exactly as
+    before.
+  - **The new table is closed by the same posture as the other internals.**
+    `fp_handoff_codes` is RLS-on with **ZERO policies (service-role only)** —
+    the same shape as `fp_signup_attempts` and the `path_*`/`fw_*` tables listed
+    under "CANNOT reach". A row there is a bearer credential for a child's
+    session, so a child session (or any anon-key principal) can neither read nor
+    write it. Its child FK is `ON DELETE CASCADE` — deliberately, as operational
+    ephemera rather than compliance evidence — so it adds **no new RESTRICT edge
+    to the documented erase ordering** and residual #2 stays closed.
+  - **Revocation is scoped, not global.** Where the exchange mints a session it
+    then declines to hand over (identity disagreement, profile-ensure refusal),
+    it calls `admin.signOut(accessToken, "local")` — the login route's rule,
+    for the login route's reason: a `"global"` sign-out would turn this
+    anonymous, cross-origin endpoint into a remote force-logout of every device
+    for any account whose session it can cause to be minted.
+  - **Not a new finding.** This is a re-check confirming no new reach. The
+    handoff's own controls (256-bit code, sha256 at rest, single-use CAS, 120s
+    TTL, child binding, Origin allowlist, IP rate limit) are documented in
+    `../120-The120/app/api/fp/handoff/handoff-rules.ts` and are about protecting
+    the code, not about widening or narrowing what the resulting session reaches.
+
+- **2026-08-05 (New User Flow v3, Unit 7 — the COMIC COVER on the session body;
+  both repos, branch `feat/new-user-flow-v3`):** the shared session body grew
+  two OPTIONAL fields, so the same re-check was owed. Reach is **unchanged**;
+  recorded here for the same reason the Unit 5 entry is.
+  - **What was added:** `coverUrl` and `coverStatus` on the 200 body of BOTH
+    sign-in doors (`POST /api/fp/login` and `POST /api/fp/handoff/exchange`),
+    emitted by one shared pure function (`deriveCoverSessionFields`) so the two
+    doors cannot diverge. Both are OMITTED — not nulled — when the child has no
+    cover, which is every child provisioned before v3.
+  - **No new reach, and no new data leaving the project.** `coverStatus` is a
+    status word from the child's own row. `coverUrl` is a
+    `data:image/svg+xml;base64,…` cover stored on that same row
+    (`children.fp_cover_data_url`), rendered ONCE during the child's own parent
+    signup and served verbatim. Its only personal content is the child's FIRST
+    NAME, their AGE, and their own story answers — all of which the parent
+    supplied about their own child, and the first of which the SAME BODY
+    already carries in `profile.firstName`. The recipient is unchanged (the
+    child who just authenticated), the transport is unchanged (the same 200),
+    and no new table, policy, grant, RPC, or client-reachable column is
+    involved: the columns are read by service-role code and are not reachable
+    by the child session itself.
+  - **No new table posture to state.** The artifact lives in TEXT columns on
+    `fp_onboarding_drafts` (RLS-on, zero policies, service-role only) and
+    `public.children` (existing policies, unchanged — migration
+    20260917120000 adds no policy and grants nothing). No object store, so no
+    new bucket, no new key namespace, and nothing added to the documented
+    erase ordering.
+  - **Erasure (R28) is unaffected, deliberately.** The cover is a COLUMN on
+    rows that erasure already destroys — the draft row and the child row — so
+    deleting the child deletes the cover, with no sweep to remember and no
+    orphan class to create. This is precisely why a TEXT column was chosen over
+    a blob for ~2 KB of SVG. The inert blob-erasure task stays inert: there are
+    still no blobs.
+  - **Not logged, and never inlined.** Neither field is written to any log line
+    on either door (both are spread into the response object and nowhere else).
+    On the First Profit side the value is gated by `asCoverUrl`
+    (`src/lib/cover.ts`) — base64 SVG data URLs only, size-bounded — and is
+    rendered ONLY as an `<img src>`, never via `dangerouslySetInnerHTML` or an
+    inline `<svg>`. That distinction is load-bearing: SVG is live markup, and
+    the compositor's XML escaping is written for the sandboxed `<img>` parsing
+    context. The same gate runs again on the way OUT of the localStorage
+    profile cache, because localStorage is writable by anything on the origin
+    and is not a trusted source for having been ours once.
+  - **Not a new finding.** A re-check confirming no new reach.
+
 ## Prevention / how to reuse this
 
 - **When an app adds a session to a SHARED database, the threat surface is every

@@ -1190,3 +1190,44 @@ describe("one-liner public-string treatment (real-public-site Unit 6)", () => {
     expect(document.body.textContent).not.toContain("This goes on your public page.");
   });
 });
+
+/**
+ * THE IN-ROOM AVATAR CARRIES THE COVER TOO (v3 Unit 7 review, FIX B).
+ *
+ * The cover was threaded onto the floor, the mobile path and the nav chip, and
+ * MISSED here. The resulting experience is worse than never having shipped it:
+ * a kid sees their own comic-cover face walk across the floor, taps into a
+ * task, and is met by a generic sprite — their identity flickering off at the
+ * exact moment the product asks them to do the work.
+ */
+describe("StepRunner in-room avatar — the comic cover (v3 Unit 7)", () => {
+  const COVER = "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciLz4=";
+
+  function seedWithProfile(coverUrl: string | null): GameState {
+    const s = seedAtPitchTask();
+    return {
+      ...s,
+      profile: { ...s.profile, firstName: "Remi", handle: "remi", coverUrl, coverStatus: coverUrl ? "final" : null },
+    };
+  }
+
+  // Queried through the DOM rather than by role: the whole avatar wrapper is
+  // `aria-hidden` (it is decoration standing in for the learner, and the room
+  // already names them), so it is deliberately outside the accessibility tree.
+  it("renders the child's cover on the avatar standing in the room", () => {
+    const { container } = render(<Harness seed={seedWithProfile(COVER)} />);
+    const img = container.querySelector("[data-runner-avatar] img") as HTMLImageElement | null;
+    expect(img).not.toBeNull();
+    expect(img?.getAttribute("src")).toBe(COVER);
+    expect(img?.getAttribute("alt")).toBe("Remi's comic cover");
+    // The procedural figure is replaced, not stacked behind it.
+    expect(container.querySelector("[data-runner-avatar] svg")).toBeNull();
+  });
+
+  it("renders the procedural sprite when the child has no cover", () => {
+    const { container } = render(<Harness seed={seedWithProfile(null)} />);
+    expect(container.querySelector("[data-runner-avatar] img")).toBeNull();
+    // The avatar is still there — only the picture is absent.
+    expect(container.querySelector("[data-runner-avatar] svg")).not.toBeNull();
+  });
+});

@@ -28,6 +28,7 @@ import {
   CONSENT_POLICY_HASH,
   CONSENT_POLICY_TEXT,
   CONSENT_POLICY_VERSION,
+  DEFAULT_CONSENT_POLICY,
 } from "../consentPolicy";
 
 /** A DOB (yyyy-mm-dd) for a child who turns `age` today, so computeAge === age
@@ -106,20 +107,50 @@ describe("per-step gates", () => {
 
 describe("consent policy is backend-echoable (version + hash)", () => {
   // Mirrors the backend's currentPolicyHash() = sha256(FP_CONSENT_POLICY.text).
+  //
+  // This baked-in snapshot is a LIVE submission path, not a placeholder: it is
+  // rendered before fetchConsentPolicy() resolves and permanently whenever that
+  // fetch fails. The backend refuses any non-current published version as
+  // `stale`, so a snapshot that lags a backend policy bump refuses every parent
+  // who attests on the fallback path. These assertions are the drift alarm.
   it("carries the exact backend consent version string", () => {
-    expect(CONSENT_POLICY_VERSION).toBe("2026-08-03.1");
-    expect(CONSENT_META.policyVersion).toBe("2026-08-03.1");
+    expect(CONSENT_POLICY_VERSION).toBe("2026-08-05.1");
+    expect(CONSENT_META.policyVersion).toBe("2026-08-05.1");
   });
 
   it("hash is the sha256 hex of the rendered text (== backend currentPolicyHash())", () => {
+    // SELF-CONSISTENCY GUARD: the hash literal and the text literal can never
+    // drift apart, whatever the policy text becomes.
     const recomputed = createHash("sha256").update(CONSENT_POLICY_TEXT, "utf8").digest("hex");
     expect(recomputed).toMatch(/^[0-9a-f]{64}$/); // the backend accept-schema shape
     expect(recomputed).toBe(CONSENT_POLICY_HASH);
     expect(CONSENT_META.policyHash).toBe(CONSENT_POLICY_HASH);
-    // The exact value the backend's sha256(FP_CONSENT_POLICY.text) produces.
+    expect(DEFAULT_CONSENT_POLICY.hash).toBe(recomputed);
+    expect(DEFAULT_CONSENT_POLICY.text).toBe(CONSENT_POLICY_TEXT);
+    // The exact value the backend's sha256(FP_CONSENT_POLICY.text) produces for
+    // 2026-08-05.1 (verified byte-for-byte against The120's currentPolicyHash()).
     expect(CONSENT_POLICY_HASH).toBe(
-      "ce9366e98872183e570c02ea52d35fbbff6b3fcf1e044615cf34d58f98ac5ff1",
+      "447e9a31f1c2cc07715914879de56a90b8a778bc4093271e6b4685d477bc489a",
     );
+  });
+
+  it("renders the 2026-08-05.1 disclosures the backend text carries", () => {
+    // Byte-identity is asserted by the hash above; these read as the human
+    // check on WHAT drifted if it ever does.
+    for (const phrase of [
+      "creating an account for my child",
+      "collecting a photo of my child",
+      "third-party artificial intelligence image service",
+      "comic book cover",
+      "future photo my child chooses to upload from inside First Profit",
+      "answers to the signup questions",
+      "draft record that is created before the account exists",
+      "birth year",
+      "twelve months",
+    ]) {
+      expect(CONSENT_POLICY_TEXT).toContain(phrase);
+    }
+    expect(CONSENT_POLICY_TEXT).not.toContain("—"); // repo copy rule: no em dashes
   });
 });
 

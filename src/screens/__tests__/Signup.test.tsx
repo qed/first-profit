@@ -169,7 +169,9 @@ describe("Signup container", () => {
       jurisdiction: "California, US",
       child: { firstName: "Alex", ageBand: "13_to_15", dob: AGE_DOB },
       consent: {
-        policyVersion: "2026-08-03.1",
+        // The baked-in DEFAULT_CONSENT_POLICY snapshot (no fetch in this test),
+        // which must track the backend's current FP_CONSENT_POLICY.version.
+        policyVersion: "2026-08-05.1",
         method: "email_plus_attestation",
       },
     });

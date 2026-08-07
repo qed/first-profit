@@ -38,7 +38,7 @@ export const CONSENT_METHOD = "email_plus_attestation";
  * FP_CONSENT_POLICY.version VERBATIM (consent-rules.ts). Unit 9 injects the
  * fetched version instead of relying on this constant.
  */
-export const CONSENT_POLICY_VERSION = "2026-08-03.1";
+export const CONSENT_POLICY_VERSION = "2026-08-05.1";
 
 export const CONSENT_POLICY_TITLE = "Parental consent to create your child's account";
 
@@ -49,18 +49,42 @@ export const CONSENT_POLICY_TITLE = "Parental consent to create your child's acc
  * matching the backend text AND updating CONSENT_POLICY_HASH in the same change
  * (a validation test recomputes the hash and fails on drift). Unit 9 replaces
  * this constant with the fetched policy text.
+ *
+ * ⚠ THIS SNAPSHOT IS NOT DECORATIVE - IT IS A LIVE SUBMISSION PATH. It is what
+ * the parent reads for the whole render window before `fetchConsentPolicy()`
+ * resolves, and PERMANENTLY for any session where that fetch fails (the fetch
+ * swallows errors and returns null, so we fall back here). The backend's
+ * `consentVerdict` refuses ANY non-current published version as `stale`, so a
+ * snapshot left behind a backend policy bump silently refuses every parent who
+ * attests on the fallback path. When the backend bumps FP_CONSENT_POLICY, this
+ * file bumps in the SAME change: version, text (verbatim), and hash.
+ *
+ * Current snapshot: backend 2026-08-05.1 (New User Flow v3, Unit 1) - adds the
+ * photo -> third-party AI comic cover clause (including future uploads the child
+ * starts from inside First Profit) and the answers/cover storage clause
+ * (including the pre-account draft record), on top of 2026-08-03.1's wording.
  */
 export const CONSENT_POLICY_TEXT =
   "I confirm I am the parent or legal guardian of the child named in this " +
   "signup, and I am at least 18 years old. I consent to First Profit creating " +
   "an account for my child so they can play and learn, and to First Profit " +
   "collecting and storing the limited information needed to run that account " +
-  "(my child's first name, age band, birth year - used only to show " +
-  "age-appropriate wording - their saved game progress, and short notes my " +
-  "child may choose to send about where they get stuck, which are used only " +
-  "to improve First Profit and kept for up to twelve months). I " +
+  "(my child's first name, last name, age, age band, birth year - used only " +
+  "to show age-appropriate wording - their saved game progress, and short " +
+  "notes my child may choose to send about where they get stuck, which are " +
+  "used only to improve First Profit and kept for up to twelve months). I " +
+  "consent to First Profit collecting a photo of my child that I or my child " +
+  "upload, and to that photo being sent to a third-party artificial " +
+  "intelligence image service that draws a personalized comic book cover " +
+  "starring my child; this covers the photo uploaded during signup and any " +
+  "future photo my child chooses to upload from inside First Profit. I " +
+  "consent to First Profit storing my child's answers to the signup questions " +
+  "and the generated cover picture on my child's profile, including on the " +
+  "draft record that is created before the account exists. I " +
   "understand this is a game-like business simulator for learners, that I can " +
-  "review or delete my child's account by contacting First Profit, and that my " +
+  "review or delete my child's account by contacting First Profit, that I can " +
+  "withdraw this photo consent at any time by contacting First Profit, and " +
+  "that my " +
   "consent is recorded with the version of this notice shown above.";
 
 /**
@@ -72,7 +96,7 @@ export const CONSENT_POLICY_TEXT =
  * `sha256(CONSENT_POLICY_TEXT)` if the text ever changes (validation test guards).
  */
 export const CONSENT_POLICY_HASH =
-  "ce9366e98872183e570c02ea52d35fbbff6b3fcf1e044615cf34d58f98ac5ff1";
+  "447e9a31f1c2cc07715914879de56a90b8a778bc4093271e6b4685d477bc489a";
 
 /**
  * Extra copy shown for the under-13 band: COPPA verifiable-parental-consent

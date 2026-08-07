@@ -19,6 +19,7 @@
  * `logout` just reports which scope ran so the provider can route it.
  */
 import { getConfig, isPublicSiteEnabled } from "../config";
+import { asCoverStatus, asCoverUrl } from "./cover";
 import { getSupabase } from "./supabase";
 
 export interface ChildProfile {
@@ -26,28 +27,128 @@ export interface ChildProfile {
   firstName: string;
 }
 
-export type LoginResult =
-  | {
-      ok: true;
-      profile: ChildProfile;
-      userId: string | null;
-      /**
-       * The child's grade from the login response (Unit 3; R9): the roster's
-       * read-time derivation, or null when the roster doesn't know. Number-or-
-       * null coercion only — an older backend build without the field, or a
-       * malformed value, is null (the ask-once flow handles null).
-       */
-      grade: number | null;
-    }
-  | { ok: false };
+/**
+ * Everything the SPA adopts from a successful sign-in, whichever door it came
+ * through. Both doors — the password login and the one-time handoff exchange —
+ * return a BYTE-SHAPE-IDENTICAL 200 body (the120 `login-rules.ts` `FpSessionBody`
+ * is the single source for both), so they parse to the same value and feed the
+ * same `adoptSession` in GameContext.
+ */
+export interface ChildSession {
+  profile: ChildProfile;
+  userId: string | null;
+  /**
+   * The child's grade from the sign-in response (Unit 3; R9): the roster's
+   * read-time derivation, or null when the roster doesn't know. Number-or-
+   * null coercion only — an older backend build without the field, or a
+   * malformed value, is null (the ask-once flow handles null).
+   */
+  grade: number | null;
+  /**
+   * The child's comic cover (new-user-flow-v3, Unit 7; R12), or null.
+   *
+   * ── HOW THIS APP RECEIVES A COVER, AND WHY THAT FORM ──
+   * The120 sends the PICTURE, not an address for one: a self-contained
+   * `data:image/svg+xml;base64,…` URL read straight off the child's row. There
+   * is exactly ONE cover per child — rendered once during their parent's signup
+   * and stored — so both of The120's sign-in doors hand over the same bytes and
+   * this app never has to ask for them. No second network hop, no cover
+   * endpoint to CORS-allow, and no public per-child URL that would leak a kid's
+   * first name to anyone who guessed an id.
+   *
+   * ⚠ IT IS ONLY EVER AN `<img src>`. The bytes are an SVG DOCUMENT, and SVG is
+   * live markup: inlined into the DOM it would be a script-execution sink. In
+   * an `<img>` the browser parses it sandboxed — no script, no external fetch —
+   * which is exactly the context The120's compositor escapes its untrusted
+   * interpolations for. `asCoverUrl` (./cover) refuses anything that is not
+   * that form, so a compromised or confused response cannot change the
+   * rendering context out from under that reasoning.
+   *
+   * OPTIONAL ON THE WIRE: absent for every account predating v3, and absent
+   * from ANY response The120 served before its own Unit 7 deploy. Absent → null
+   * → the procedural sprite. Never an error, never a placeholder.
+   */
+  coverUrl: string | null;
+  /**
+   * The roster's raw cover status word, or null. Carried so the app can tell
+   * "no cover" from "a cover exists that this door cannot hand over" — NOT so
+   * it can render progress copy. Nothing in this build queues a redraw, so
+   * there is no pending state to narrate.
+   */
+  coverStatus: string | null;
+}
 
-export type LogoutScope = "idle" | "explicit";
+export type LoginResult = ({ ok: true } & ChildSession) | { ok: false };
+
+/**
+ * Why a scope: `idle` and `explicit` route DRAFT handling in the provider;
+ * `signin` is the session boundary a new sign-in attempt opens BEFORE its
+ * network call (v3 Unit 6 review, FIX 5) — same revoke + purge, no draft
+ * decision of its own. It exists so the warn below names what actually ran.
+ */
+export type LogoutScope = "idle" | "explicit" | "signin";
+
+/* ───────────────────────────── Bounded transport ─────────────────────────────
+ *
+ * A bare `fetch` has NO timeout. On the sign-in doors that is not a slow
+ * request, it is a STRANDED FAMILY (v3 Unit 6 review, FIX 2): the handoff
+ * landing shows "Signing you in…" with the boot deliberately parked, and a
+ * response that never finishes (captive portal, dead middlebox, a body that
+ * stalls mid-stream) leaves that spinner up forever with no way out but a
+ * reload nobody told them to do.
+ *
+ * So both doors go through `fetchWithTimeout`. An abort rejects the fetch,
+ * which the callers' existing `catch` already flattens to `{ ok: false }` —
+ * meaning a HANG and a REFUSAL are byte-identical to the UI, which is exactly
+ * the contract those screens are built for. No HTTP dependency; AbortController
+ * is available in every browser we support and in jsdom.
+ */
+
+/** Ceiling for a sign-in round trip. Generous enough for a bad phone network,
+ *  short enough that a stuck exchange still reaches the recovery screen while
+ *  the family is still looking at it. */
+export const SIGNIN_TIMEOUT_MS = 12_000;
+
+/** `fetch` with a hard deadline. Rejects (AbortError) on timeout — callers
+ *  treat that identically to any other transport fault. Always clears the
+ *  timer, success or failure, so no stray handle keeps the tab awake. */
+export async function fetchWithTimeout(
+  input: string,
+  init: RequestInit,
+  timeoutMs: number,
+): Promise<Response> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(input, { ...init, signal: controller.signal });
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/** Resolve a promise or give up after `ms`. Used for calls we cannot abort
+ *  (supabase-js exposes no signal) where hanging is worse than not knowing. */
+async function withDeadline<T>(promise: Promise<T>, ms: number): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(() => reject(new Error("deadline")), ms);
+      }),
+    ]);
+  } finally {
+    if (timer !== undefined) clearTimeout(timer);
+  }
+}
 
 interface LoginResponseBody {
   access_token?: unknown;
   refresh_token?: unknown;
   profile?: { handle?: unknown; firstName?: unknown };
   grade?: unknown;
+  coverUrl?: unknown;
+  coverStatus?: unknown;
 }
 
 function asString(value: unknown): string {
@@ -60,6 +161,49 @@ function asGrade(value: unknown): number | null {
   return typeof value === "number" && Number.isInteger(value) ? value : null;
 }
 
+
+/**
+ * Parse a sign-in door's response and ADOPT the session it carries. Shared by
+ * `loginChild` and `redeemSignInToken` because the two doors answer the same
+ * 200 body by construction (the120 `FpSessionBody`) — one parser means the
+ * handoff can never drift into accepting a shape the login path would refuse.
+ * Any non-200 / missing token / failed `setSession` is a flat `{ ok: false }`.
+ */
+async function adoptSessionResponse(res: {
+  ok: boolean;
+  json: () => Promise<unknown>;
+}): Promise<LoginResult> {
+  if (!res.ok) return { ok: false };
+
+  const body = (await res.json()) as LoginResponseBody;
+  const accessToken = asString(body.access_token);
+  const refreshToken = asString(body.refresh_token);
+  if (!accessToken || !refreshToken) return { ok: false };
+
+  const supabase = getSupabase();
+  const { data, error } = await supabase.auth.setSession({
+    access_token: accessToken,
+    refresh_token: refreshToken,
+  });
+  if (error) return { ok: false };
+
+  return {
+    ok: true,
+    userId: data.user?.id ?? null,
+    profile: {
+      handle: asString(body.profile?.handle),
+      firstName: asString(body.profile?.firstName),
+    },
+    grade: asGrade(body.grade),
+    // OPTIONAL ON THE WIRE (v3 Unit 7). A response from a The120 build that
+    // predates the cover — which is EVERY response until its deploy lands, and
+    // this repo's deploy may land first — simply has neither key, and both
+    // coercions answer null. No branch, no version check, no error.
+    coverUrl: asCoverUrl(body.coverUrl),
+    coverStatus: asCoverStatus(body.coverStatus),
+  };
+}
+
 /**
  * Authenticate a child through The120's login route and adopt the session.
  * Returns `{ ok: true, profile }` only when the route returns 200 with usable
@@ -68,38 +212,69 @@ function asGrade(value: unknown): number | null {
 export async function loginChild(identifier: string, password: string): Promise<LoginResult> {
   try {
     const { t120ApiUrl } = getConfig();
-    const res = await fetch(`${t120ApiUrl.replace(/\/$/, "")}/api/fp/login`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ identifier, password }),
-    });
-
-    if (!res.ok) return { ok: false };
-
-    const body = (await res.json()) as LoginResponseBody;
-    const accessToken = asString(body.access_token);
-    const refreshToken = asString(body.refresh_token);
-    if (!accessToken || !refreshToken) return { ok: false };
-
-    const supabase = getSupabase();
-    const { data, error } = await supabase.auth.setSession({
-      access_token: accessToken,
-      refresh_token: refreshToken,
-    });
-    if (error) return { ok: false };
-
-    return {
-      ok: true,
-      userId: data.user?.id ?? null,
-      profile: {
-        handle: asString(body.profile?.handle),
-        firstName: asString(body.profile?.firstName),
+    const res = await fetchWithTimeout(
+      `${t120ApiUrl.replace(/\/$/, "")}/api/fp/login`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ identifier, password }),
       },
-      grade: asGrade(body.grade),
-    };
+      SIGNIN_TIMEOUT_MS,
+    );
+    return await adoptSessionResponse(res);
   } catch {
     // Network failure, non-JSON body, etc. — the route already flattens every
     // reason to one generic failure; mirror that here. Never surface details.
+    return { ok: false };
+  }
+}
+
+/* ────────────────── Handoff sign-in (new-user-flow-v3, Unit 6) ───────────────
+ *
+ * The120's account-ready screen opens `firstprofit.school/auth/enter#code=<c>`
+ * in a new tab. This is the SECOND sign-in door: exchange that one-time code
+ * for the same token pair the login route returns.
+ *
+ * Contract (the120 `app/api/fp/handoff/exchange`, built + verified in Unit 5):
+ *  - `POST {"code":"…"}`, `Content-Type: application/json`, `mode: "cors"`,
+ *    NO credentials — the browser's Origin (firstprofit.school, or localhost in
+ *    dev) is what the route allowlists, so a cookie would only be a CSRF
+ *    surface with no upside.
+ *  - 200 is byte-shape-identical to `/api/fp/login`'s success body, so it goes
+ *    straight through the SAME `adoptSessionResponse`.
+ *  - EVERY non-200 is DELIBERATELY indistinguishable: 401 bodies are byte-
+ *    identical for unknown / already-consumed / expired, and 403 means the
+ *    Origin was refused. There is no reason to parse, so this never tries —
+ *    and NO retry can help (single-use, 120s TTL, server owns the burn).
+ */
+
+export type RedeemSignInTokenResult = LoginResult;
+
+/**
+ * Redeem a one-time handoff code for a child session. Flat `{ ok: false }` on
+ * every refusal (401/403 alike), transport fault, TIMEOUT, malformed body, or
+ * failed `setSession`; NEVER throws, and NEVER hangs (SIGNIN_TIMEOUT_MS). The
+ * caller must treat failure as TERMINAL — see `src/screens/auth/Enter.tsx` for
+ * the required recovery surface.
+ */
+export async function redeemSignInToken(code: string): Promise<RedeemSignInTokenResult> {
+  try {
+    const { t120ApiUrl } = getConfig();
+    const res = await fetchWithTimeout(
+      `${t120ApiUrl.replace(/\/$/, "")}/api/fp/handoff/exchange`,
+      {
+        method: "POST",
+        mode: "cors",
+        // Explicit, not incidental: the exchange authenticates by Origin + the
+        // one-time code only. Never send ambient credentials cross-origin.
+        credentials: "omit",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ code }),
+      },
+      SIGNIN_TIMEOUT_MS,
+    );
+    return await adoptSessionResponse(res);
+  } catch {
     return { ok: false };
   }
 }
@@ -814,9 +989,16 @@ function purgeSupabaseStorageKeys(): void {
   for (const key of stale) store.removeItem(key);
 }
 
+/** Ceiling on the server-side revoke. supabase-js takes no abort signal, so a
+ *  dead network would otherwise hang `logout` — and, since v3 Unit 6 routes the
+ *  sign-in session boundary through here, would hang SIGN-IN. Past the deadline
+ *  we still purge locally and move on; the warn below records the residual. */
+const SIGN_OUT_TIMEOUT_MS = 6_000;
+
 /**
  * Revoke the session server-side and purge `sb-*` keys. Returns the scope so the
- * provider can route draft handling (explicit → wipe drafts, idle → preserve).
+ * provider can route draft handling (explicit → wipe drafts, idle → preserve;
+ * `signin` makes no draft decision — see beginSessionBoundary in GameContext).
  */
 export async function logout(scope: LogoutScope): Promise<LogoutScope> {
   const supabase = getSupabase();
@@ -827,7 +1009,7 @@ export async function logout(scope: LogoutScope): Promise<LogoutScope> {
     // pre-signin boundary on any machine — force-expire every device signed
     // into the same kid, which surfaced as "kicked mid-session" (BUG-003,
     // Aug 2026). Mirrors the120 login route's never-global revoke rule.
-    await supabase.auth.signOut({ scope: "local" });
+    await withDeadline(supabase.auth.signOut({ scope: "local" }), SIGN_OUT_TIMEOUT_MS);
   } catch {
     // Server-side revocation failed (network hiccup, etc.). Surface it — a
     // refresh token that was NOT revoked is a real shared-device risk — but do

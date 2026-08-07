@@ -3,7 +3,7 @@
  * JSON (no comments), so this test IS its enforced documentation:
  *
  * - the handle rewrite's negative-lookahead exclusions must list EXACTLY the
- *   48 reserved handles in `api/_lib/reservedHandles.ts` (the one first-profit
+ *   49 reserved handles in `api/_lib/reservedHandles.ts` (the one first-profit
  *   copy, itself cross-referenced to the120's RESERVED_HANDLES source of
  *   truth and the `fp_reserved_handles` migration seed — see that module).
  * - rewrite ORDER is load-bearing: handle rule first, SPA catchall second
@@ -80,14 +80,14 @@ describe("vercel.json", () => {
     expect(segment.test("staff")).toBe(false);
   });
 
-  it("excludes exactly the 48-handle reserved seed (the120 fp-public-site-rules.ts)", () => {
-    expect(RESERVED_HANDLES).toHaveLength(48);
+  it("excludes exactly the 49-handle reserved seed (the120 fp-public-site-rules.ts)", () => {
+    expect(RESERVED_HANDLES).toHaveLength(49);
     const source = config.rewrites[0].source;
     const match = /\(\?!\(\?:([^)]+)\)\$\)/.exec(source);
     expect(match).not.toBeNull();
     const excluded = (match as RegExpExecArray)[1].split("|");
     expect(new Set(excluded)).toEqual(new Set(RESERVED_HANDLES));
-    expect(excluded).toHaveLength(48);
+    expect(excluded).toHaveLength(49);
   });
 
   it("routes handles (including mixed case) to the function and reserved/multi-segment paths past it", () => {
@@ -104,6 +104,11 @@ describe("vercel.json", () => {
     // A reserved word as a PREFIX of a longer handle is not excluded.
     expect(segment.test("signup2")).toBe(true);
     expect(segment.test("loginella")).toBe(true);
+    // The handoff sign-in entry point (v3 Unit 6): `auth` is reserved so no kid
+    // site can sit one segment above /auth/enter, and the multi-segment route
+    // itself never matches the single-segment handle rule (no rewrite needed).
+    expect(segment.test("auth")).toBe(false);
+    expect(segment.test("auth/enter")).toBe(false);
     // Non-charset segments never match the handle rule.
     expect(segment.test("signup/verify")).toBe(false);
     expect(segment.test("cedric.js")).toBe(false);

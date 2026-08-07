@@ -19,7 +19,11 @@ import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 const dispatch = vi.fn();
 const logout = vi.fn();
 let stage = "landing";
-let profile: { firstName: string; handle: string } = { firstName: "", handle: "" };
+let profile: { firstName: string; handle: string; coverUrl?: string | null } = {
+  firstName: "",
+  handle: "",
+  coverUrl: null,
+};
 
 /** Game-section fields the app stage consumes (harmless extras elsewhere). */
 function appGame(over: Record<string, unknown> = {}) {
@@ -58,7 +62,7 @@ afterEach(() => {
   dispatch.mockClear();
   logout.mockClear();
   stage = "landing";
-  profile = { firstName: "", handle: "" };
+  profile = { firstName: "", handle: "", coverUrl: null };
   game = appGame();
 });
 
@@ -422,5 +426,53 @@ describe("GlobalNav app stage — the one bar's game section", () => {
       expect(item.className).toMatch(/min-h-\[44px\]/);
     }
     expect(document.body.textContent ?? "").not.toMatch(/—/);
+  });
+});
+
+/**
+ * The identity thumbnail (new-user-flow-v3, Unit 7; R12) — the child's comic
+ * cover inside the founder chip. It must be additive: the bar's 44px tap
+ * target and its 390px two-row wrap behave the same whether or not a kid has a
+ * cover, and a failed image drops back to the text-only chip this bar has
+ * always shown.
+ */
+describe("GlobalNav identity thumbnail (v3 Unit 7)", () => {
+  const COVER = "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciLz4=";
+
+  it("renders the cover inside the founder chip, sized to fit the 44px target", () => {
+    stage = "app";
+    profile = { firstName: "Cedric", handle: "cedric", coverUrl: COVER };
+    render(<GlobalNav />);
+
+    const chip = screen.getByRole("button", { name: /cedric/i });
+    const img = chip.querySelector("img") as HTMLImageElement;
+    expect(img).not.toBeNull();
+    expect(img.getAttribute("src")).toBe(COVER);
+    // 22 x 28 (the 4:5 frame) — strictly inside the chip's own 44px height, so
+    // the bar cannot grow or re-wrap because a child has a picture.
+    expect(img.getAttribute("width")).toBe("22");
+    expect(img.getAttribute("height")).toBe("28");
+    expect(chip.className).toMatch(/min-h-\[44px\]/);
+    // The name is still the chip's accessible label and is still there.
+    expect(chip.textContent).toContain("Cedric");
+  });
+
+  it("renders the plain text chip when the child has no cover", () => {
+    stage = "app";
+    profile = { firstName: "Cedric", handle: "cedric", coverUrl: null };
+    render(<GlobalNav />);
+    const chip = screen.getByRole("button", { name: /cedric/i });
+    expect(chip.querySelector("img")).toBeNull();
+    expect(chip.textContent).toContain("Cedric");
+  });
+
+  it("falls back to the text chip when the thumbnail fails to load", () => {
+    stage = "app";
+    profile = { firstName: "Cedric", handle: "cedric", coverUrl: COVER };
+    render(<GlobalNav />);
+    const chip = screen.getByRole("button", { name: /cedric/i });
+    fireEvent.error(chip.querySelector("img") as HTMLImageElement);
+    expect(chip.querySelector("img")).toBeNull();
+    expect(chip.textContent).toContain("Cedric");
   });
 });

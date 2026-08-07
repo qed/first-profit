@@ -42,6 +42,8 @@ import {
 } from "./screens/signup/consentPolicy";
 import type { SignupSubmission } from "./screens/signup/validation";
 import { readVerifyToken, stripVerifyTokenFromUrl } from "./screens/signup/verifyLink";
+import { peekEnterLink } from "./screens/auth/enterLink";
+import { Enter } from "./screens/auth/Enter";
 import { isLegacyAdminPath, isStaffPath } from "./screens/staff/staffLink";
 import { StaffShell } from "./screens/staff/StaffShell";
 
@@ -75,6 +77,12 @@ function StageRouter() {
   // at the edge (vercel.json redirects), but vite dev never reads vercel.json —
   // this keeps a stale bookmark working in EVERY environment.
   const [staffRoute] = useState(() => isStaffPath() || isLegacyAdminPath());
+
+  // The handoff landing (v3 Unit 6), read ONCE from the boot URL exactly like
+  // the verify-return token below — except the read AND the strip already
+  // happened in src/index.tsx before render, so the one-time code never sat in
+  // the address bar while React booted. This only picks up the result.
+  const [enterLink] = useState(() => peekEnterLink());
 
   // Bring the address bar in line when the edge redirect did not run. replace,
   // not push: /admin must not sit in the back-stack waiting to redirect again.
@@ -205,6 +213,16 @@ function StageRouter() {
   // /staff renders as a pre-stage route (the verify precedent): no GlobalNav,
   // no stage content — the staff screen is not part of the game shell.
   if (staffRoute) return <StaffShell />;
+
+  // /auth/enter is a pre-stage route too, and it OVERRIDES the boot: while a
+  // handoff is pending, GameProvider deliberately skips its session restore, so
+  // the stage sits at `boot` until the redeem resolves. On success adoptSession
+  // routes to onboard/app — isLoggedInStage flips and this screen falls away,
+  // handing the kid straight to the game. On failure it stays put and shows the
+  // recovery surface (the code is spent; retrying cannot help).
+  if (enterLink.fromEnterRoute && !isLoggedInStage(stage)) {
+    return <Enter code={enterLink.code} />;
+  }
 
   // The global nav mounts ABOVE the stage render (never remounts across stage
   // swaps); only the boot spinner stays chrome-free. Spec:

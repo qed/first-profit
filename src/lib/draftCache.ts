@@ -11,8 +11,29 @@
  *  - IDLE logout PRESERVES the same user's `fp:<uid>:*` keys, so an unsent
  *    Step Runner draft restores on same-user re-login (origin R6).
  *
- * Drafts hold task text only (no PII). Corrupted JSON in a draft key is
- * discarded, never thrown, so one bad key can never break hydration.
+ * ⚠ WHAT IS ACTUALLY IN HERE (corrected 2026-08-05, v3 Unit 7 review).
+ * This header used to claim "drafts hold task text only (no PII)". That has not
+ * been true for a while and is less true now, and an inaccurate inventory in the
+ * one module that owns the storage is worse than none — it is what a future
+ * reader consults before deciding whether a key needs wiping.
+ *
+ * The keys under this namespace hold:
+ *  - Step Runner draft answers — a child's free text about their own business.
+ *  - `profileCache` — the child's FIRST NAME, their public HANDLE, their school
+ *    GRADE, and (Unit 7) their comic COVER: a `data:image/svg+xml;base64,…`
+ *    picture personalized with their name, age and story answers. That is
+ *    personal data about a minor, not task text.
+ *  - the sync outbox — pending writes, i.e. more of the above.
+ *
+ * NONE of it is a credential (no tokens, no passwords: the Supabase session is
+ * managed by the SDK under its own key), and all of it is account-namespaced, so
+ * the wipe rules above are what keep one child's data off another child's
+ * session. Anything ADDED here should be added to this list — and if it is ever
+ * a secret rather than personal data, the wipe rules are not sufficient and the
+ * value does not belong in localStorage at all.
+ *
+ * Corrupted JSON in a draft key is discarded, never thrown, so one bad key can
+ * never break hydration.
  *
  * Testable: every function takes an optional `Storage` instance; it defaults to
  * `window.localStorage`, resolved lazily so importing this module never touches

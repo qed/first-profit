@@ -1,12 +1,17 @@
 /**
- * The 48 reserved handles — the ONE first-profit copy (Unit 3 review, fix 6b).
+ * The 49 reserved handles — the ONE first-profit copy (Unit 3 review, fix 6b).
  *
  * Source of truth is the120: RESERVED_HANDLES in
- * `app/fp/lib/fp-public-site-rules.ts`, seeded as `fp_reserved_handles` by
- * migration `supabase/migrations/20260907120000_fp_public_sites.sql` (a
- * the120-side parity test pins seed ⟷ that TS list). This module is the
- * manual cross-repo sync point: change the seed and this list in the same
- * change. Inside first-profit it is enforced twice:
+ * `app/fp/lib/fp-public-site-rules.ts`, seeded into `fp_reserved_handles` by
+ * `supabase/migrations/20260907120000_fp_public_sites.sql` (the original 48)
+ * plus one migration per later addition — `20260916120000_fp_reserved_handle_auth.sql`
+ * added `auth` (v3 Unit 6). A the120-side parity test pins the UNION of every
+ * migration's seed ⟷ that TS list. This module is the manual cross-repo sync
+ * point: A NEW HANDLE NEEDS ALL THREE — the120's TS list, a the120 migration
+ * seeding it, and this list — in the same change. (Unit 6 review, FIX 1: `auth`
+ * shipped here and in vercel.json but NOT in the seed, so the DB, which is the
+ * real claim authority, would still have let a learner claim it.)
+ * Inside first-profit it is enforced twice:
  *   - `api/_lib/__tests__/vercelConfig.test.ts` pins vercel.json's
  *     negative-lookahead alternation against exactly this list;
  *   - `decideSiteRequest` refuses reserved handles before any RPC
@@ -20,6 +25,11 @@ export const RESERVED_HANDLES = [
   "login",
   "logout",
   "verify",
+  // The handoff sign-in entry point lives at /auth/enter (v3 Unit 6). The route
+  // is multi-segment so it needs no rewrite change — but `auth` is reserved
+  // anyway so no kid's public site can sit ONE SEGMENT ABOVE a sign-in surface
+  // on the same origin.
+  "auth",
   "app",
   "parent",
   "admin",

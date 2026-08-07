@@ -36,7 +36,13 @@ export function MobilePath({ walkTo, onArrived, onWalk, floorView, onBack }: Flo
   return (
     <div className="fp-grid h-full w-full overflow-y-auto rounded-[22px] border-2 border-[hsl(14_78%_54%/0.5)] bg-[hsl(38_40%_92%)]">
       <div className="flex justify-center pt-4">
-        <AvatarSprite name={profile.firstName || profile.handle || "Founder"} />
+        {/* Top-of-journey avatar: the child's comic cover when they have one
+            (v3 Unit 7), the procedural sprite otherwise. Same 44px-wide frame
+            at every width — nothing here reflows at 390px. */}
+        <AvatarSprite
+          name={profile.firstName || profile.handle || "Founder"}
+          coverUrl={profile.coverUrl}
+        />
       </div>
       {/* pb-80 keeps the bottom-docked Next Step coach clear of the last card
           (repo convention from CLAUDE.md — preserve this padding). */}
