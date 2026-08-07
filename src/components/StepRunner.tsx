@@ -44,6 +44,7 @@ import { criterionIdsForPhase, phaseOfCriterion } from "../state/gameCore";
 import { getDraft, setDraft, getLastUserId } from "../lib/draftCache";
 import { AvatarSprite } from "./Avatar";
 import { MoreToolsModal } from "./MoreToolsModal";
+import { DressRehearsalTool } from "./tools/DressRehearsalTool";
 import { IdeaBrainstormTool } from "./tools/IdeaBrainstormTool";
 import { ObjectionLogTool } from "./tools/ObjectionLogTool";
 import { PitchBuilderTool } from "./tools/PitchBuilderTool";
@@ -78,6 +79,10 @@ import {
   TEN_LIST_PERSISTED_FIELD_KEYS,
   TEN_LIST_TASK_ID,
 } from "../lib/tenList";
+import {
+  DRESS_REHEARSAL_PERSISTED_FIELD_KEYS,
+  DRESS_REHEARSAL_TASK_ID,
+} from "../lib/dressRehearsal";
 
 /**
  * Task id synthesis: the generated stable task id is `${stepId}.${index+1}` —
@@ -340,6 +345,9 @@ export function StepRunner() {
       : []),
     ...(currentTaskId === TEN_LIST_TASK_ID
       ? TEN_LIST_PERSISTED_FIELD_KEYS
+      : []),
+    ...(currentTaskId === DRESS_REHEARSAL_TASK_ID
+      ? DRESS_REHEARSAL_PERSISTED_FIELD_KEYS
       : []),
   ];
 
@@ -788,6 +796,15 @@ export function StepRunner() {
               ) : currentTaskId === TEN_LIST_TASK_ID ? (
                 <div onClick={(event) => event.stopPropagation()}>
                   <TenListBuilderTool
+                    band={band}
+                    fields={idea?.fields ?? {}}
+                    onFieldChange={onFieldChange}
+                    onTaskComplete={markCurrentTaskDone}
+                  />
+                </div>
+              ) : currentTaskId === DRESS_REHEARSAL_TASK_ID ? (
+                <div onClick={(event) => event.stopPropagation()}>
+                  <DressRehearsalTool
                     band={band}
                     fields={idea?.fields ?? {}}
                     onFieldChange={onFieldChange}

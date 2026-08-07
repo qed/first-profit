@@ -58,6 +58,7 @@ import { FEEDBACK_TASK_ID_RE, FEEDBACK_TASK_ID_MAX } from "../../lib/sync";
 import { OBJECTION_LOG_FIELD_KEYS } from "../../lib/objectionLog";
 import { SAY_BACK_FIELD_KEYS } from "../../lib/sayBack";
 import { PRICE_PICKER_FIELD_KEYS } from "../../lib/pricePicker";
+import { DRESS_REHEARSAL_FIELD_KEYS } from "../../lib/dressRehearsal";
 import {
   TEN_LIST_FIELD_KEYS,
   TEN_LIST_SIZE,
@@ -221,6 +222,28 @@ function seedAtTenListTask(fields: Record<string, string> = {}): GameState {
     runnerOpen: true,
     runnerStep: "1.2",
     runnerIndex: 1,
+  };
+}
+
+/** State at the 1.2.3 Dress Rehearsal, with the first two Sales Room tasks complete. */
+function seedAtDressRehearsalTask(
+  fields: Record<string, string> = {},
+): GameState {
+  const s = initialState();
+  return {
+    ...s,
+    stage: "app",
+    ideas: [{
+      fields,
+      done: {
+        [taskKey("1.2", 0)]: true,
+        [taskKey("1.2", 1)]: true,
+      },
+    }],
+    activeIdea: 0,
+    runnerOpen: true,
+    runnerStep: "1.2",
+    runnerIndex: 2,
   };
 }
 
@@ -522,6 +545,42 @@ describe("StepRunner", () => {
           ideaIndex: 0,
           stepId: "1.2",
           index: 1,
+        }),
+      ]),
+    );
+    expect(screen.getByText("Next task →")).toBeTruthy();
+  });
+
+  it("routes task 1.2.3 to Dress Rehearsal, restores its evidence, and completes the task", () => {
+    const actions: unknown[] = [];
+    render(
+      <Harness
+        seed={seedAtDressRehearsalTask({
+          [DRESS_REHEARSAL_FIELD_KEYS.paymentMethod]: "cash",
+          [DRESS_REHEARSAL_FIELD_KEYS.paymentDetails]: "The child counts the cash aloud.",
+          [DRESS_REHEARSAL_FIELD_KEYS.deliveryMethod]: "handoff",
+          [DRESS_REHEARSAL_FIELD_KEYS.deliveryDetails]: "Hand over the finished card set.",
+          [DRESS_REHEARSAL_FIELD_KEYS.parentMathWatchConfirmed]: "true",
+          [DRESS_REHEARSAL_FIELD_KEYS.runCompleted]: "true",
+          [DRESS_REHEARSAL_FIELD_KEYS.cleanRunConfirmed]: "true",
+          [DRESS_REHEARSAL_FIELD_KEYS.parentBuyerConfirmed]: "true",
+          [DRESS_REHEARSAL_FIELD_KEYS.runDate]: "2026-08-06",
+          [DRESS_REHEARSAL_FIELD_KEYS.confirmed]: "true",
+        })}
+        onAction={(action) => actions.push(action)}
+      />,
+    );
+
+    openSection("Tools");
+    expect(screen.getByText("Dress Rehearsal")).toBeTruthy();
+    expect(screen.queryByText("Tools to help you complete the unit task will go here.")).toBeNull();
+    expect(actions).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          type: "COMPLETE_TASK",
+          ideaIndex: 0,
+          stepId: "1.2",
+          index: 2,
         }),
       ]),
     );
