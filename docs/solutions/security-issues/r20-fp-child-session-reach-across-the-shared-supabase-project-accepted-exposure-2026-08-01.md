@@ -293,6 +293,90 @@ the project-level value only governs the blocked-in-Slice-A email-signup path.
     and is not a trusted source for having been ours once.
   - **Not a new finding.** A re-check confirming no new reach.
 
+- **2026-08-05 (Image Lab v1, Units 1–7 — 4 tables + 1 private bucket in the
+  shared project; the120 branch `feat/image-lab`):** the Unit 1 migration header
+  promised this note. **Child-session reach is unchanged — nothing the Lab adds
+  is reachable by the `authenticated` role at all** — but the Lab is the first
+  surface in this project whose STAFF reads span the child-data tables from a
+  service-role handle, and two of its surfaces are deliberately cross-staff, so
+  both are recorded rather than left implicit.
+  - **What was added to the shared project.** Four tables —
+    `fp_image_lab_references`, `fp_image_lab_runs`,
+    `fp_image_lab_run_references`, `fp_image_lab_images` — and ONE private
+    bucket, `fp-image-lab`. Every table is **RLS ON with ZERO policies, service
+    role only**, the same posture as `fp_handoff_codes`, `fp_signup_attempts`
+    and the `path_*`/`fw_*` tables already listed under "CANNOT reach"; no
+    anon or authenticated grant exists on any of them. The bucket carries **no
+    `storage.objects` policy of its own**, a deliberate divergence from
+    `path-evidence` (migration `20260722140000`) recorded in the Lab
+    migration's header: `path-evidence` needs a policy because FAMILY members
+    hold authenticated JWTs and must read their own evidence, whereas nobody
+    but the service role ever touches this one, and a policy with nothing to
+    authorize reads as coverage it is not. The migration's post-apply check 6
+    is the corresponding trap: it enumerates and READS every
+    `storage.objects` policy, because an un-scoped `to authenticated` policy
+    added by another lane would apply to every bucket including this one, and
+    counting policies that mention `fp-image-lab` would return 0 and prove
+    nothing. **So R20's "CAN reach" / "CANNOT reach" lists need no amendment:
+    a child session resolves to zero rows and zero objects here, by absence of
+    any grant rather than by a guard that could be misread.**
+  - **What later review surfaced, and what actually changed: the STAFF read
+    surface, not the child's.** The Lab's content picker (origin R15/R17) reads
+    a real child's authored business text to fill the `{{slot}}` panel, which
+    means Lab code — running under `requireStaff()` and `supabaseAdmin()` — now
+    reads `children`, `families`, `fp_player_profiles`, `fp_player_saves` and
+    `fp_ledger`. That is five child-data tables newly touched by a staff tool,
+    and a service-role handle has no RLS to bound it. The bound is therefore a
+    TEST, not a policy: `app/staff/image-lab/__tests__/service-role-only.test.ts`
+    scans every module under `app/staff/image-lab/` and fails on any
+    `.from(...)` naming a table outside a reviewed allowlist, on any table name
+    it cannot statically resolve (so a computed name cannot slip past the
+    scanner), and — for `fp_ledger` specifically — on any select list outside an
+    enumerated set, with a non-vacuity assertion so the check cannot silently
+    pass by finding nothing. **Named honestly: a static allowlist is weaker than
+    a policy. It bounds what the code MAY name; it does not bound what a
+    service-role key could do if the code were wrong in a way the scanner does
+    not model.** The compensating controls are the field-level selection (only
+    the four slots), buyer-name exclusion in the `sale` slot, the picker's own
+    go-live flag (`IMAGE_LAB_REAL_CONTENT_LIVE`, unset until the
+    provider-terms and consent-policy checks pass), and the staff eyes-on
+    resolved-prompt preview before every send.
+  - **History and Kit are CROSS-STAFF on purpose.** Any active staff member sees
+    every run, every image, every verdict note and every reference label, from
+    every other staff member. That is the point — the Lab exists to settle a
+    model decision from the whole body of evidence, and a per-author view would
+    make the keep rates unreadable. It is recorded here because it means the
+    child-authored text inside `template`/`slot_values`/`resolved_prompt` is
+    visible to the whole active staff set, not only to whoever composed the run.
+    The single-writer boundary that DOES hold is on spend: `generateCell` and
+    `retryCell` refuse a run whose `staff_id` is not the caller's (and, since
+    Unit 7, log the refusal), so nobody can drive priced work on a colleague's
+    run.
+  - **Treat these rows as child-PII-bearing.** The migration header states this
+    at length and it is not restated here, but the one-line version belongs on
+    this record: `template`, `slot_values` and `resolved_prompt` carry
+    child-AUTHORED free text, and a first-person pitch conventionally opens with
+    the child's own name. The picker scrubs the known first name and username
+    before compose; that is mitigation, not construction, and the header says so.
+  - **Erasure (R28): a new step, BEFORE the existing ordering.**
+    `fp_image_lab_runs.source_child_id` is `ON DELETE SET NULL` (a run is
+    evidence and must not block a routine delete), so once the child row is gone
+    the provenance is gone and these rows become **unfindable**. The Image Lab
+    purge must therefore run BEFORE the documented
+    `sites → ledger → saves → profile → child` ordering, and it must walk the
+    `iterated_from_run_id` lineage recursively, because a copy-forward
+    descendant carries the same child's text. Full runbook — including the
+    in-flight drain, the collect/delete-objects-via-the-Storage-API/verify/
+    delete-rows sequencing, and why references cannot be purged in v1 — lives in
+    the migration header (`supabase/migrations/20260917120000_fp_image_lab.sql`)
+    and is pointed at from `app/staff/image-lab/README.md`. **It is not
+    duplicated here and must not be forked.**
+  - **Not a new finding for this document's own question.** A child session
+    reaches nothing the Lab added. The two things worth having on the record are
+    the widened STAFF read surface bounded by a test rather than a policy, and
+    the deliberate cross-staff visibility of child-authored text on the evidence
+    surfaces.
+
 ## Prevention / how to reuse this
 
 - **When an app adds a session to a SHARED database, the threat surface is every
