@@ -407,6 +407,11 @@ describe("StepRunner", () => {
       value: "What if your neighborhood stories could fit in your pocket?",
     });
 
+    fireEvent.click(screen.getByRole("button", { name: "Continue to What it is" }));
+    fireEvent.click(screen.getByRole("button", { name: "Continue to Why it is good" }));
+    fireEvent.click(screen.getByRole("button", { name: "Continue to The ask" }));
+    fireEvent.click(screen.getByRole("button", { name: "Review the full pitch" }));
+
     // Tool controls respond immediately to mouse clicks and do not use the
     // room's move-first delay, which would park the avatar over the timer.
     fireEvent.click(screen.getByRole("button", { name: "Start run" }), { detail: 1 });

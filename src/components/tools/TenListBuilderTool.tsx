@@ -1,5 +1,7 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
+  ArrowLeft,
+  ArrowRight,
   Check,
   CircleAlert,
   ListChecks,
@@ -24,6 +26,9 @@ import {
   tenListRowFieldKey,
   type TenListFields,
 } from "../../lib/tenList";
+import { ToolFlowProgress } from "./ToolFlowProgress";
+
+const FLOW_STEPS = ["Prospects 1–2", "Prospects 3–4", "Prospects 5–6", "Prospects 7–8", "Prospects 9–10", "Parent review"] as const;
 
 const STATUS_CLASS = {
   "needs-prospects": "border-[hsl(25_34%_20%/0.14)] bg-white",
@@ -72,7 +77,6 @@ export function TenListBuilderTool({
   const assessment = assessTenList(band, fields);
   const requiredOutside = requiredOutsideCount(band);
   const outsideCount = evidence.prospects.filter((prospect) => prospect.outside).length;
-  const namedCount = evidence.prospects.filter((prospect) => prospect.name).length;
   const readyRows = evidence.prospects.filter(
     (prospect) =>
       prospect.name &&
@@ -105,13 +109,15 @@ export function TenListBuilderTool({
     }
   };
 
-  const prospectsDone = namedCount === TEN_LIST_SIZE && assessment.stage !== "needs-privacy";
-  const channelsDone = readyRows === TEN_LIST_SIZE && (
-    band === "g3_5" || outsideCount >= requiredOutside
+  const firstIncompleteIndex = evidence.prospects.findIndex((prospect) =>
+    !prospect.name ||
+    !prospect.channel ||
+    containsPrivateContactInfo(prospect.name) ||
+    (band === "g9_12" && (!prospect.reason || containsPrivateContactInfo(prospect.reason))),
   );
-  const parentDone = evidence.parentApproved && (
-    band !== "g3_5" || evidence.knownCircleConfirmed
-  );
+  const [page, setPage] = useState(() => assessment.complete || firstIncompleteIndex < 0 ? 5 : Math.floor(firstIncompleteIndex / 2));
+  const pageStart = page * 2;
+  const visibleProspects = page < 5 ? evidence.prospects.slice(pageStart, pageStart + 2) : [];
 
   return (
     <div aria-labelledby="fp-ten-list-title" className="pb-2">
@@ -122,19 +128,8 @@ export function TenListBuilderTool({
           <p className="mt-1.5 max-w-[620px] text-[13.5px] leading-[1.55] text-[hsl(25_20%_38%)]">Choose ten real, non-family prospects and decide how you can safely reach each one.</p>
         </div>
 
-        <div aria-label="Ten-List Builder progress" className="grid shrink-0 grid-cols-3 gap-1.5 rounded-[14px] border-2 border-build/20 bg-build/5 p-2.5 shadow-card">
-          {[
-            ["1", "Prospects", prospectsDone],
-            ["2", "Channels", channelsDone],
-            ["3", "Parent", parentDone],
-          ].map(([number, label, done]) => (
-            <div key={String(number)} className="min-w-[58px] text-center">
-              <span className={`mx-auto flex h-8 w-8 items-center justify-center rounded-full border-2 font-display text-xs font-black ${done ? "border-verified bg-verified text-white" : "border-[hsl(25_34%_20%/0.14)] bg-white text-[hsl(25_20%_38%)]"}`}>
-                {done ? <Check size={15} strokeWidth={3} aria-hidden /> : number}
-              </span>
-              <span className="mt-1 block font-mono text-[8px] font-semibold uppercase tracking-[0.03em] text-[hsl(25_20%_38%)]">{label}</span>
-            </div>
-          ))}
+        <div className="w-full rounded-[13px] border-2 border-[hsl(25_34%_20%/0.12)] bg-white p-3 shadow-card sm:max-w-[320px]">
+          <ToolFlowProgress current={page + 1} steps={FLOW_STEPS} />
         </div>
       </div>
 
@@ -161,17 +156,19 @@ export function TenListBuilderTool({
         ) : null}
       </div>
 
+      {page < 5 ? <>
       <section className="mt-4" aria-labelledby="fp-ten-list-prospects">
         <div className="flex items-end justify-between gap-3">
           <div>
-            <p className="font-mono text-[9px] font-semibold uppercase tracking-[0.08em] text-build">Steps 1 and 2 · Build the list</p>
-            <h4 id="fp-ten-list-prospects" className="mt-0.5 font-display text-[18px] font-black text-[hsl(25_34%_20%)]">Who could you safely ask?</h4>
+            <p className="font-mono text-[9px] font-semibold uppercase tracking-[0.08em] text-build">Two at a time · build the list</p>
+            <h4 id="fp-ten-list-prospects" className="mt-0.5 font-display text-[18px] font-black text-[hsl(25_34%_20%)]">Add prospects {pageStart + 1} and {pageStart + 2}</h4>
           </div>
           <p className="hidden text-right font-mono text-[9px] font-semibold uppercase text-[hsl(25_20%_38%)] sm:block">First name or household only</p>
         </div>
 
         <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
-          {evidence.prospects.map((prospect, index) => {
+          {visibleProspects.map((prospect, chunkIndex) => {
+            const index = pageStart + chunkIndex;
             const nameKey = tenListRowFieldKey(index, "name");
             const channelKey = tenListRowFieldKey(index, "channel");
             const outsideKey = tenListRowFieldKey(index, "outside");
@@ -245,6 +242,13 @@ export function TenListBuilderTool({
         </div>
       </section>
 
+      <div className="mt-4 flex flex-col-reverse gap-2 sm:flex-row sm:items-center sm:justify-between">
+        {page > 0 ? <button type="button" onClick={() => setPage(page - 1)} className="inline-flex min-h-[48px] items-center justify-center gap-2 rounded-xl px-4 font-display text-[13px] font-bold text-[hsl(25_20%_38%)]"><ArrowLeft size={16} aria-hidden /> Previous two</button> : <span />}
+        <button type="button" onClick={() => setPage(page + 1)} className="inline-flex min-h-[52px] items-center justify-center gap-2 rounded-[14px] bg-verified px-5 font-display text-[15px] font-bold text-white shadow-[0_4px_0_hsl(150_52%_26%)]">{page === 4 ? "Parent review" : "Next two"}<ArrowRight size={17} aria-hidden /></button>
+      </div>
+      </> : null}
+
+      {page === 5 ? <>
       <section className="mt-4 rounded-[14px] border-2 border-verified/25 bg-verified/5 p-4" aria-labelledby="fp-ten-list-parent-check">
         <div className="flex items-start gap-3">
           <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-verified/15 text-verified" aria-hidden><ShieldCheck size={21} /></span>
@@ -268,6 +272,8 @@ export function TenListBuilderTool({
           </label>
         </div>
       </section>
+      <button type="button" onClick={() => setPage(4)} className="mt-4 inline-flex min-h-[48px] items-center justify-center gap-2 rounded-xl px-4 font-display text-[13px] font-bold text-[hsl(25_20%_38%)]"><ArrowLeft size={16} aria-hidden /> Back to prospects 9–10</button>
+      </> : null}
 
       <section role="status" aria-label="Ten-List Builder status" className={`mt-4 rounded-[14px] border-2 p-3.5 ${STATUS_CLASS[assessment.stage]}`}>
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
@@ -281,7 +287,7 @@ export function TenListBuilderTool({
             </div>
           </div>
 
-          {assessment.complete ? (
+          {page !== 5 ? null : assessment.complete ? (
             <div className="inline-flex min-h-[44px] shrink-0 items-center justify-center gap-2 rounded-xl bg-verified px-4 font-display text-[13px] font-bold text-white shadow-[0_3px_0_hsl(150_52%_26%)]">
               <Check size={16} strokeWidth={3} aria-hidden /> List complete
             </div>

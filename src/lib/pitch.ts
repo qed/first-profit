@@ -118,7 +118,7 @@ export function pitchTextForFields(fields: PitchFields): string {
   return structured || fields.pitch?.trim() || "";
 }
 
-export type PitchAssessmentTone = "empty" | "incomplete" | "ready" | "not-yet";
+export type PitchAssessmentTone = "empty" | "incomplete" | "ready" | "roomy";
 
 export interface PitchAssessment {
   complete: boolean;
@@ -144,23 +144,11 @@ export function assessPitch(values: PitchFields): PitchAssessment {
   }
 
   if (totalWords > PITCH_WORD_MAX) {
-    const over = totalWords - PITCH_WORD_MAX;
     return {
       complete,
       estimatedSeconds,
-      message: `Not yet. Cut at least ${over} ${over === 1 ? "word" : "words"} to meet the 150-word task maximum.`,
-      tone: "not-yet",
-      totalWords,
-    };
-  }
-
-  if (estimatedSeconds > 60) {
-    const overTarget = Math.max(1, totalWords - PITCH_WORD_TARGET);
-    return {
-      complete,
-      estimatedSeconds,
-      message: `Not yet. This is about ${estimatedSeconds} seconds. Try cutting ${overTarget} ${overTarget === 1 ? "word" : "words"}.`,
-      tone: "not-yet",
+      message: `This is a generous draft at about ${estimatedSeconds} seconds. The task guide tops out at 150 words, so read it aloud and keep the strongest lines when you revise.`,
+      tone: "roomy",
       totalWords,
     };
   }
@@ -182,6 +170,26 @@ export function assessPitch(values: PitchFields): PitchAssessment {
       estimatedSeconds,
       message: `All four beats are here at about ${estimatedSeconds} seconds. You have room for ${room} more target ${room === 1 ? "word" : "words"} if they make the pitch stronger.`,
       tone: "incomplete",
+      totalWords,
+    };
+  }
+
+  if (totalWords > 135) {
+    return {
+      complete,
+      estimatedSeconds,
+      message: `This is a fuller draft at about ${estimatedSeconds} seconds. Nothing is wrong. If the read feels rushed, trade a few words from the least important beat.`,
+      tone: "roomy",
+      totalWords,
+    };
+  }
+
+  if (estimatedSeconds > 60) {
+    return {
+      complete,
+      estimatedSeconds,
+      message: `A little fuller than the 120-word guide at about ${estimatedSeconds} seconds. Read it aloud before deciding whether anything needs to go.`,
+      tone: "ready",
       totalWords,
     };
   }

@@ -36,14 +36,14 @@ describe("60-second pitch model", () => {
     expect(composePitch(split).replace(/\s+/g, " ")).toBe(legacy);
   });
 
-  it("marks a complete 120-word pitch as on pace and a 121-word pitch as not yet", () => {
+  it("marks a complete 120-word pitch as on pace and treats 121 words as flexible", () => {
     const ready = assessPitch(completePitch());
     expect(ready).toMatchObject({ complete: true, estimatedSeconds: 60, tone: "ready", totalWords: 120 });
     expect(ready.message).toMatch(/On pace for one minute/);
 
     const long = assessPitch(completePitch([21, 30, 40, 30]));
-    expect(long).toMatchObject({ complete: true, estimatedSeconds: 61, tone: "not-yet", totalWords: 121 });
-    expect(long.message).toMatch(/cutting 1 word/i);
+    expect(long).toMatchObject({ complete: true, estimatedSeconds: 61, tone: "ready", totalWords: 121 });
+    expect(long.message).toMatch(/read it aloud before deciding/i);
   });
 
   it("coaches a very short four-beat pitch to use the available time", () => {
@@ -54,8 +54,14 @@ describe("60-second pitch model", () => {
 
   it("keeps the curriculum's 150-word maximum distinct from the one-minute target", () => {
     const overMax = assessPitch(completePitch([51, 30, 40, 30]));
-    expect(overMax).toMatchObject({ tone: "not-yet", totalWords: 151 });
-    expect(overMax.message).toMatch(/150-word task maximum/);
+    expect(overMax).toMatchObject({ tone: "roomy", totalWords: 151 });
+    expect(overMax.message).toMatch(/task guide tops out at 150 words/);
+  });
+
+  it("coaches a fuller legal draft without calling it wrong", () => {
+    const full = assessPitch(completePitch([30, 35, 45, 30]));
+    expect(full).toMatchObject({ tone: "roomy", totalWords: 140 });
+    expect(full.message).toMatch(/Nothing is wrong/);
   });
 
   it("uses structured beats in the Idea Room while preserving legacy fallback", () => {
