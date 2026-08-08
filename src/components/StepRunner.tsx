@@ -238,7 +238,7 @@ function NumberBlock({ n, bg, dark }: { n: number; bg: string; dark?: boolean })
   );
 }
 
-/** The "Criterion" / "Task" words between the blocks. */
+/** The "Phase" / "Criterion" / "Task" words that label the blocks. */
 function BlockLabel({ children }: { children: React.ReactNode }) {
   return (
     <span className="shrink-0 font-mono text-[10.5px] uppercase tracking-[0.08em] text-[hsl(25_20%_38%)]">
@@ -549,6 +549,7 @@ export function StepRunner() {
         <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1.5">
           {/* Phase: the phase's own color. Phase 5 (scale) is amber, so it
               takes ink text where the other four take white. */}
+          <BlockLabel>Phase</BlockLabel>
           <NumberBlock n={phase?.index ?? 1} bg={accent} dark={phaseId === "scale"} />
           <BlockLabel>Criterion</BlockLabel>
           <NumberBlock n={critNum} bg={CRITERION_BLUE} />
