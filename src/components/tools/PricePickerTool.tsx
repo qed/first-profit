@@ -1,5 +1,7 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
+  ArrowLeft,
+  ArrowRight,
   BadgeDollarSign,
   Box,
   Calculator,
@@ -23,6 +25,9 @@ import {
   pricePickerEvidence,
   type PricePickerFields,
 } from "../../lib/pricePicker";
+import { ToolFlowProgress } from "./ToolFlowProgress";
+
+const FLOW_STEPS = ["Define the offer", "Choose the price", "Explain + save"] as const;
 
 const STATUS_CLASS = {
   "needs-offer": "border-[hsl(25_34%_20%/0.14)] bg-white",
@@ -121,6 +126,25 @@ function PriceSlider({
   );
 }
 
+function StageNavigation({
+  back,
+  next,
+  nextLabel,
+  nextDisabled = false,
+}: {
+  back?: () => void;
+  next?: () => void;
+  nextLabel?: string;
+  nextDisabled?: boolean;
+}) {
+  return (
+    <div className="mt-4 flex flex-col-reverse gap-2 sm:flex-row sm:items-center sm:justify-between">
+      {back ? <button type="button" onClick={back} className="inline-flex min-h-[48px] items-center justify-center gap-2 rounded-xl px-4 font-display text-[13px] font-bold text-[hsl(25_20%_38%)]"><ArrowLeft size={16} aria-hidden /> Back</button> : <span />}
+      {next && nextLabel ? <button type="button" disabled={nextDisabled} onClick={next} className="inline-flex min-h-[52px] items-center justify-center gap-2 rounded-[14px] bg-verified px-5 font-display text-[15px] font-bold text-white shadow-[0_4px_0_hsl(150_52%_26%)] enabled:active:translate-y-px disabled:cursor-not-allowed disabled:opacity-45">{nextLabel}<ArrowRight size={17} aria-hidden /></button> : null}
+    </div>
+  );
+}
+
 export function PricePickerTool({
   band,
   fields,
@@ -168,7 +192,7 @@ export function PricePickerTool({
     "needs-price",
     "needs-band-proof",
   ].includes(assessment.stage);
-  const explanationDone = assessment.readyToSave || assessment.complete;
+  const [stage, setStage] = useState(() => assessment.complete || evidence.reason ? 2 : offerDone ? 1 : 0);
 
   const optionFields = [
     [PRICE_PICKER_FIELD_KEYS.optionOne, "Price option 1"],
@@ -185,19 +209,8 @@ export function PricePickerTool({
           <p className="mt-1.5 max-w-[620px] text-[13.5px] leading-[1.55] text-[hsl(25_20%_38%)]">Turn your idea into one clear offer with one clear price a customer can understand.</p>
         </div>
 
-        <div aria-label="Price Picker progress" className="grid shrink-0 grid-cols-3 gap-1.5 rounded-[14px] border-2 border-build/20 bg-build/5 p-2.5 shadow-card">
-          {[
-            ["1", "Offer", offerDone],
-            ["2", "Price", priceDone],
-            ["3", "Explain", explanationDone],
-          ].map(([number, label, done]) => (
-            <div key={String(number)} className="min-w-[54px] text-center">
-              <span className={`mx-auto flex h-8 w-8 items-center justify-center rounded-full border-2 font-display text-xs font-black ${done ? "border-verified bg-verified text-white" : "border-[hsl(25_34%_20%/0.14)] bg-white text-[hsl(25_20%_38%)]"}`}>
-                {done ? <Check size={15} strokeWidth={3} aria-hidden /> : number}
-              </span>
-              <span className="mt-1 block font-mono text-[8px] font-semibold uppercase tracking-[0.04em] text-[hsl(25_20%_38%)]">{label}</span>
-            </div>
-          ))}
+        <div className="w-full rounded-[13px] border-2 border-[hsl(25_34%_20%/0.12)] bg-white p-3 shadow-card sm:max-w-[300px]">
+          <ToolFlowProgress current={stage + 1} steps={FLOW_STEPS} />
         </div>
       </div>
 
@@ -206,6 +219,7 @@ export function PricePickerTool({
         <p className="text-[12px] leading-[1.5] text-[hsl(25_20%_38%)]"><strong className="text-[hsl(25_34%_20%)]">Your pricing check:</strong> {bandGuidance(band)}</p>
       </div>
 
+      {stage === 0 ? <>
       <section className="mt-4 rounded-[14px] border-2 border-[hsl(25_34%_20%/0.14)] bg-white p-4 shadow-card" aria-labelledby="fp-price-offer">
         <p className="font-mono text-[9px] font-semibold uppercase tracking-[0.08em] text-build">Step 1 · Define the offer</p>
         <h4 id="fp-price-offer" className="mt-0.5 font-display text-[18px] font-black text-[hsl(25_34%_20%)]">What does the customer get?</h4>
@@ -228,7 +242,10 @@ export function PricePickerTool({
           </label>
         </div>
       </section>
+      <StageNavigation next={() => setStage(1)} nextLabel="Choose the price" nextDisabled={!offerDone} />
+      </> : null}
 
+      {stage === 1 ? <>
       <section className="mt-4 rounded-[14px] border-2 border-[hsl(25_34%_20%/0.14)] bg-white p-4 shadow-card" aria-labelledby="fp-price-choose">
         <div className="flex items-start gap-3">
           <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-sell/10 text-sell" aria-hidden><BadgeDollarSign size={21} /></span>
@@ -308,7 +325,11 @@ export function PricePickerTool({
           </div>
         )}
       </section>
+      {!priceDone ? <p role="status" aria-label="Price Picker progress note" className="mt-3 rounded-xl border-2 border-build/20 bg-build/5 px-3.5 py-3 text-[12px] font-semibold leading-[1.45] text-[hsl(25_20%_38%)]">{assessment.message}</p> : null}
+      <StageNavigation back={() => setStage(0)} next={() => setStage(2)} nextLabel="Explain the choice" nextDisabled={!priceDone} />
+      </> : null}
 
+      {stage === 2 ? <>
       <section className="mt-4 rounded-[14px] border-2 border-sell/25 bg-sell/5 p-4" aria-labelledby="fp-price-reason">
         <p className="font-mono text-[9px] font-semibold uppercase tracking-[0.08em] text-sell">Step 3 · Explain the choice</p>
         <h4 id="fp-price-reason" className="mt-0.5 font-display text-[17px] font-black text-[hsl(25_34%_20%)]">Why did you choose this price?</h4>
@@ -335,6 +356,8 @@ export function PricePickerTool({
           )}
         </div>
       </section>
+      <StageNavigation back={() => setStage(1)} />
+      </> : null}
     </div>
   );
 }

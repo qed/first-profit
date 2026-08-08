@@ -425,7 +425,7 @@ export function generateStartingIdeas(inputs: BrainstormInputs, round = 1): Star
     const idea = makeIdea(
       subject,
       buyer,
-      shortPhrase(twist, 34),
+      shortPhrase(twist, 46),
       `brainstorm-${safeRound}-${index + 1}`,
     );
     return { ...idea, oneLiner: fitOneLiner(idea.oneLiner) };

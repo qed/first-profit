@@ -40,6 +40,7 @@ function fillListenerAndSayBack() {
   fireEvent.change(screen.getByLabelText(/Date of the pitch/), {
     target: { value: "2026-08-06" },
   });
+  fireEvent.click(screen.getByRole("button", { name: "Hear the pitch back" }));
   fireEvent.change(screen.getByLabelText("What did they think you sell?"), {
     target: { value: "Custom cards about neighborhood history" },
   });
@@ -65,11 +66,14 @@ describe("SayBackCardTool", () => {
     render(<ControlledTool />);
     fillListenerAndSayBack();
 
-    const verify = screen.getByRole("button", { name: "Verify say-back" }) as HTMLButtonElement;
-    expect(verify.disabled).toBe(true);
+    const advance = screen.getByRole("button", { name: "Verify the say-back" }) as HTMLButtonElement;
+    expect(advance.disabled).toBe(true);
     const yesButtons = screen.getAllByRole("button", { name: "Yes, it matched" });
     fireEvent.click(yesButtons[0]);
     fireEvent.click(yesButtons[1]);
+    expect(advance.disabled).toBe(false);
+    fireEvent.click(advance);
+    const verify = screen.getByRole("button", { name: "Verify say-back" }) as HTMLButtonElement;
     expect(screen.getByRole("status", { name: "Say-Back Card status" }).textContent).toContain(
       "A parent must confirm",
     );
@@ -86,6 +90,7 @@ describe("SayBackCardTool", () => {
     const yesButtons = screen.getAllByRole("button", { name: "Yes, it matched" });
     fireEvent.click(yesButtons[0]);
     fireEvent.click(yesButtons[1]);
+    fireEvent.click(screen.getByRole("button", { name: "Verify the say-back" }));
     fireEvent.click(screen.getByLabelText(/A parent witnessed the live pitch/));
     fireEvent.click(screen.getByRole("button", { name: "Verify say-back" }));
 
@@ -105,6 +110,7 @@ describe("SayBackCardTool", () => {
     fillListenerAndSayBack();
     fireEvent.click(screen.getAllByRole("button", { name: "Not yet" })[0]);
     fireEvent.click(screen.getAllByRole("button", { name: "Yes, it matched" })[1]);
+    fireEvent.click(screen.getByRole("button", { name: "Verify the say-back" }));
     fireEvent.click(screen.getByLabelText(/A parent witnessed the live pitch/));
     fireEvent.click(screen.getByRole("button", { name: "Verify say-back" }));
 
@@ -114,6 +120,7 @@ describe("SayBackCardTool", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Try the pitch again" }));
     expect((screen.getByLabelText("What did they think you sell?") as HTMLTextAreaElement).value).toBe("");
+    fireEvent.click(screen.getByRole("button", { name: "Listener" }));
     expect((screen.getByLabelText(/Adult's first name or role/) as HTMLInputElement).value).toBe("Coach Lee");
     expect(screen.getByLabelText("Saved say-back outcome").textContent).toBe("");
   });

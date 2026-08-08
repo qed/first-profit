@@ -22,56 +22,93 @@ function ControlledTool({ initial = {} }: { initial?: PitchFields }) {
   );
 }
 
+function moveToNextScreen() {
+  const button = screen.getByRole("button", {
+    name: /Continue to|Review the full pitch/,
+  });
+  fireEvent.click(button);
+}
+
+function moveToReview() {
+  for (let index = 0; index < PITCH_BEATS.length; index += 1) {
+    moveToNextScreen();
+  }
+}
+
 afterEach(() => {
   cleanup();
   vi.useRealTimers();
 });
 
 describe("PitchBuilderTool", () => {
-  it("renders four accessible beat editors with the supplied targets", () => {
+  it("shows one focused beat at a time with visible progress", () => {
     render(<ControlledTool />);
 
-    for (const beat of PITCH_BEATS) {
-      expect(screen.getByLabelText(beat.label)).toBeTruthy();
-      expect(document.body.textContent).toContain(`0 / ${beat.targetWords} words · ${beat.targetSeconds}s`);
-    }
-    expect(document.body.textContent).not.toMatch(/—/);
+    expect(screen.getByLabelText("1. Hook")).toBeTruthy();
+    expect(screen.queryByLabelText("2. What it is")).toBeNull();
+    expect(screen.getByLabelText("Step 1 of 5: Hook")).toBeTruthy();
+    expect(document.body.textContent).toContain("Suggested share · 20 words · 10s");
+
+    moveToNextScreen();
+    expect(screen.getByLabelText("2. What it is")).toBeTruthy();
+    expect(screen.queryByLabelText("1. Hook")).toBeNull();
+    expect(screen.getByLabelText("Step 2 of 5: What it is")).toBeTruthy();
   });
 
-  it("persists the beat and combined pitch while assessing a complete 120-word draft", () => {
+  it("persists every beat and assesses the complete pitch on the review screen", () => {
     render(<ControlledTool />);
 
     PITCH_BEATS.forEach((beat, index) => {
       fireEvent.change(screen.getByLabelText(beat.label), {
         target: { value: words(beat.targetWords, `beat${index}`) },
       });
+      moveToNextScreen();
     });
 
-    expect(screen.getByText("120 words")).toBeTruthy();
+    expect(screen.getByText("Review the full pitch")).toBeTruthy();
+    expect(screen.getAllByText("120 words").length).toBeGreaterThan(0);
     expect(document.body.textContent).toMatch(/On pace for one minute at about 60 seconds/);
     expect(screen.getByLabelText("Saved combined pitch").textContent).toContain("beat0");
     expect(screen.getByLabelText("Saved combined pitch").textContent).toContain("beat3");
   });
 
-  it("shows a saved legacy pitch divided into beats and migrates every beat on request", () => {
+  it("does not treat one word over a beat guide as an error", () => {
+    render(<ControlledTool />);
+    fireEvent.change(screen.getByLabelText("1. Hook"), {
+      target: { value: words(21) },
+    });
+
+    expect(screen.getByLabelText("Beat space guide").textContent).toContain(
+      "A comfortable share of the minute",
+    );
+    expect(screen.getByLabelText("Beat space guide").textContent).not.toMatch(
+      /wrong|not yet|cut/i,
+    );
+  });
+
+  it("shows a saved legacy pitch and migrates every beat on request", () => {
     const onFieldChange = vi.fn();
     render(<PitchBuilderTool fields={{ pitch: words(100) }} onFieldChange={onFieldChange} />);
 
     expect(screen.getByText("Your saved pitch is here.")).toBeTruthy();
     expect((screen.getByLabelText("1. Hook") as HTMLTextAreaElement).value).toBe(words(20));
-    expect((screen.getByLabelText("4. The ask") as HTMLTextAreaElement).value).toBe(
-      words(100).split(" ").slice(90).join(" "),
-    );
-
     fireEvent.click(screen.getByRole("button", { name: "Save as four beats" }));
     expect(onFieldChange).toHaveBeenCalledTimes(5);
     expect(PITCH_BEATS.every((beat) => onFieldChange.mock.calls.some(([key]) => key === beat.key))).toBe(true);
     expect(onFieldChange.mock.calls[onFieldChange.mock.calls.length - 1]?.[0]).toBe("pitch");
   });
 
-  it("runs and resets the one-minute read-aloud timer", () => {
+  it("lets the founder jump from review back to any beat", () => {
+    render(<ControlledTool />);
+    moveToReview();
+    fireEvent.click(screen.getByRole("button", { name: "Edit 2. What it is" }));
+    expect(screen.getByLabelText("2. What it is")).toBeTruthy();
+  });
+
+  it("runs and resets the one-minute read-aloud timer on the review screen", () => {
     vi.useFakeTimers();
     render(<ControlledTool />);
+    moveToReview();
 
     fireEvent.click(screen.getByRole("button", { name: "Start run" }));
     act(() => vi.advanceTimersByTime(1000));
@@ -85,6 +122,7 @@ describe("PitchBuilderTool", () => {
   it("stops at zero with a clear time-up state and can start again", () => {
     vi.useFakeTimers();
     render(<ControlledTool />);
+    moveToReview();
 
     fireEvent.click(screen.getByRole("button", { name: "Start run" }));
     act(() => vi.advanceTimersByTime(60_000));

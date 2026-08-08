@@ -1,5 +1,7 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
+  ArrowLeft,
+  ArrowRight,
   CalendarDays,
   Check,
   CircleAlert,
@@ -21,6 +23,9 @@ import {
   type SayBackFields,
   type SayBackMatch,
 } from "../../lib/sayBack";
+import { ToolFlowProgress } from "./ToolFlowProgress";
+
+const FLOW_STEPS = ["Choose listener", "Hear it back", "Verify clarity"] as const;
 
 const STATUS_CLASS = {
   "needs-listener": "border-[hsl(25_34%_20%/0.14)] bg-white",
@@ -87,6 +92,14 @@ export function SayBackCardTool({
   const completionSentRef = useRef(false);
   const evidence = sayBackEvidence(fields);
   const assessment = assessSayBackEvidence(fields);
+  const listenerDone = Boolean(evidence.adultName && evidence.date);
+  const sayBackDone = Boolean(evidence.productWords && evidence.askWords);
+  const reviewReady = Boolean(
+    sayBackDone && evidence.productMatch && evidence.askMatch,
+  );
+  const [stage, setStage] = useState(() =>
+    fields[SAY_BACK_FIELD_KEYS.reviewed] || reviewReady ? 2 : listenerDone ? 1 : 0,
+  );
 
   useEffect(() => {
     if (!assessment.complete || completionSentRef.current) return;
@@ -124,11 +137,8 @@ export function SayBackCardTool({
       SAY_BACK_FIELD_KEYS.outcome,
       SAY_BACK_FIELD_KEYS.summary,
     ].forEach((key) => onFieldChange(key, ""));
+    setStage(1);
   };
-
-  const listenerDone = Boolean(evidence.adultName && evidence.date);
-  const sayBackDone = Boolean(evidence.productWords && evidence.askWords);
-  const verified = assessment.complete;
 
   return (
     <div aria-labelledby="fp-say-back-title" className="pb-2">
@@ -145,22 +155,13 @@ export function SayBackCardTool({
           </p>
         </div>
 
-        <div aria-label="Say-Back Card progress" className="grid shrink-0 grid-cols-3 gap-1.5 rounded-[14px] border-2 border-verified/20 bg-verified/5 p-2.5 shadow-card">
-          {[
-            ["1", "Listener", listenerDone],
-            ["2", "Say-back", sayBackDone],
-            ["3", "Verify", verified],
-          ].map(([number, label, done]) => (
-            <div key={String(number)} className="min-w-[56px] text-center">
-              <span className={`mx-auto flex h-8 w-8 items-center justify-center rounded-full border-2 font-display text-xs font-black ${done ? "border-verified bg-verified text-white" : "border-[hsl(25_34%_20%/0.14)] bg-white text-[hsl(25_20%_38%)]"}`}>
-                {done ? <Check size={15} strokeWidth={3} aria-hidden /> : number}
-              </span>
-              <span className="mt-1 block font-mono text-[8px] font-semibold uppercase tracking-[0.04em] text-[hsl(25_20%_38%)]">{label}</span>
-            </div>
-          ))}
+        <div className="w-full shrink-0 sm:w-[230px]">
+          <ToolFlowProgress current={stage + 1} steps={FLOW_STEPS} />
         </div>
       </div>
 
+      {stage === 0 ? (
+        <>
       <div className="mt-4 flex items-start gap-2.5 rounded-[12px] border-2 border-build/20 bg-build/5 px-3.5 py-3">
         <UserRound size={18} className="mt-0.5 shrink-0 text-build" aria-hidden />
         <p className="text-[12px] leading-[1.5] text-[hsl(25_20%_38%)]">
@@ -200,6 +201,21 @@ export function SayBackCardTool({
         </div>
       </section>
 
+          <div className="mt-4 flex justify-end">
+            <button
+              type="button"
+              onClick={() => setStage(1)}
+              disabled={!listenerDone}
+              className="inline-flex min-h-[44px] items-center justify-center gap-2 rounded-xl bg-sell px-4 font-display text-[13px] font-bold text-white shadow-[0_3px_0_hsl(14_78%_38%)] disabled:cursor-not-allowed disabled:opacity-45 disabled:shadow-none"
+            >
+              Hear the pitch back <ArrowRight size={16} aria-hidden />
+            </button>
+          </div>
+        </>
+      ) : null}
+
+      {stage === 1 ? (
+        <>
       <section className="mt-4 rounded-[14px] border-2 border-[hsl(25_34%_20%/0.14)] bg-white p-4 shadow-card" aria-labelledby="fp-say-back-words">
         <div className="flex items-start gap-3">
           <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-sell/10 text-sell" aria-hidden>
@@ -257,6 +273,19 @@ export function SayBackCardTool({
         </div>
       </section>
 
+          <div className="mt-4 flex flex-col-reverse gap-2 sm:flex-row sm:items-center sm:justify-between">
+            <button type="button" onClick={() => setStage(0)} className="inline-flex min-h-[44px] items-center justify-center gap-2 rounded-xl border-2 border-[hsl(25_34%_20%/0.14)] bg-white px-4 font-display text-[13px] font-bold text-[hsl(25_34%_20%)]">
+              <ArrowLeft size={16} aria-hidden /> Listener
+            </button>
+            <button type="button" onClick={() => setStage(2)} disabled={!reviewReady} className="inline-flex min-h-[44px] items-center justify-center gap-2 rounded-xl bg-sell px-4 font-display text-[13px] font-bold text-white shadow-[0_3px_0_hsl(14_78%_38%)] disabled:cursor-not-allowed disabled:opacity-45 disabled:shadow-none">
+              Verify the say-back <ArrowRight size={16} aria-hidden />
+            </button>
+          </div>
+        </>
+      ) : null}
+
+      {stage === 2 ? (
+        <>
       <section className="mt-4 rounded-[14px] border-2 border-verified/20 bg-verified/5 p-4" aria-labelledby="fp-say-back-witness">
         <p className="font-mono text-[9px] font-semibold uppercase tracking-[0.08em] text-verified">Step 3 · Parent verification</p>
         <h4 id="fp-say-back-witness" className="mt-0.5 font-display text-[17px] font-black text-[hsl(25_34%_20%)]">Confirm the real-world test</h4>
@@ -300,6 +329,13 @@ export function SayBackCardTool({
           )}
         </div>
       </section>
+          <div className="mt-4">
+            <button type="button" onClick={() => setStage(1)} className="inline-flex min-h-[44px] items-center justify-center gap-2 rounded-xl border-2 border-[hsl(25_34%_20%/0.14)] bg-white px-4 font-display text-[13px] font-bold text-[hsl(25_34%_20%)]">
+              <ArrowLeft size={16} aria-hidden /> Revise the say-back
+            </button>
+          </div>
+        </>
+      ) : null}
     </div>
   );
 }

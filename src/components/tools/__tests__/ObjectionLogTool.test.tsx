@@ -47,9 +47,10 @@ describe("ObjectionLogTool", () => {
     fireEvent.change(screen.getByLabelText("The objection, in their exact words"), {
       target: { value: "Why is this better than a normal card?" },
     });
-    expect(screen.getByRole("status", { name: "Objection Log status" }).textContent).toContain(
-      "Choose the part",
-    );
+    const next = screen.getByRole("button", { name: "Strengthen the pitch" }) as HTMLButtonElement;
+    expect(next.disabled).toBe(false);
+    fireEvent.click(next);
+    expect(screen.getByText("Which part should answer the objection?")).toBeTruthy();
   });
 
   it("revises one beat, updates the saved pitch, creates evidence, and completes", () => {
@@ -69,14 +70,17 @@ describe("ObjectionLogTool", () => {
     fireEvent.change(screen.getByLabelText("The objection, in their exact words"), {
       target: { value: "Why would I need these?" },
     });
+    fireEvent.click(screen.getByRole("button", { name: "Strengthen the pitch" }));
     fireEvent.click(screen.getByRole("button", { name: /3\. Why it is good/ }));
     const revision = screen.getByLabelText("Stronger version") as HTMLTextAreaElement;
     expect(revision.value).toBe("They are fun.");
-    expect((screen.getByRole("button", { name: "Apply revision" }) as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByRole("button", { name: "Review the stronger pitch" }) as HTMLButtonElement).disabled).toBe(true);
 
     fireEvent.change(revision, {
       target: { value: "They turn neighborhood history into a game you can collect." },
     });
+    fireEvent.click(screen.getByRole("button", { name: "Review the stronger pitch" }));
+    expect(screen.getByText("Does this answer the objection better?")).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Apply revision" }));
 
     expect(screen.getByLabelText("Saved pitch why").textContent).toBe(
@@ -93,7 +97,12 @@ describe("ObjectionLogTool", () => {
   });
 
   it("shows the older-student live-answer challenge without making it a gate", () => {
-    render(<ControlledTool band="g9_12" />);
+    render(<ControlledTool band="g9_12" initial={{
+      [OBJECTION_LOG_FIELD_KEYS.exact]: "Why is it worth it?",
+      [OBJECTION_LOG_FIELD_KEYS.beat]: "pitchWhy",
+      [OBJECTION_LOG_FIELD_KEYS.original]: "It is useful.",
+      [OBJECTION_LOG_FIELD_KEYS.revision]: "It saves a collector hours of research.",
+    }} />);
 
     expect(screen.getByText("Answer a second objection live")).toBeTruthy();
     expect(screen.getByLabelText("Second objection")).toBeTruthy();
@@ -122,6 +131,7 @@ describe("ObjectionLogTool", () => {
     );
 
     expect(screen.getByText("Revision locked in")).toBeTruthy();
+    expect(screen.getByText("Step 3 of 3 · Review + apply")).toBeTruthy();
     expect(onTaskComplete).toHaveBeenCalledTimes(1);
   });
 

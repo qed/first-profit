@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { ArrowRight, Check, MessageCircleQuestion, RefreshCcw, Sparkles } from "lucide-react";
+import { ArrowLeft, ArrowRight, Check, MessageCircleQuestion, RefreshCcw, Sparkles } from "lucide-react";
 import type { Band } from "../../data/path";
 import {
   PITCH_BEATS,
@@ -15,6 +15,9 @@ import {
   objectionEvidence,
   type ObjectionFields,
 } from "../../lib/objectionLog";
+import { ToolFlowProgress } from "./ToolFlowProgress";
+
+const FLOW_STEPS = ["Hear it", "Strengthen it", "Review + apply"] as const;
 
 const PARENT_PROMPTS = [
   "Why would I need that?",
@@ -88,6 +91,10 @@ export function ObjectionLogTool({
   const assessment = assessObjectionEvidence(fields);
   const pitchValues = pitchBeatValues(fields);
   const selectedBeat = PITCH_BEATS.find((beat) => beat.key === evidence.beat);
+  const revisionReady = Boolean(
+    evidence.beat && hasMeaningfulRevision(evidence.original, evidence.revision),
+  );
+  const [stage, setStage] = useState(() => assessment.complete || revisionReady ? 2 : evidence.exact ? 1 : 0);
 
   useEffect(() => {
     if (!assessment.complete || completionSentRef.current) return;
@@ -126,17 +133,12 @@ export function ObjectionLogTool({
     onFieldChange(OBJECTION_LOG_FIELD_KEYS.applied, "true");
     onFieldChange(OBJECTION_LOG_FIELD_KEYS.summary, buildObjectionSummary(fields));
     setJustApplied(true);
+    setStage(2);
     if (!completionSentRef.current) {
       completionSentRef.current = true;
       onTaskComplete?.();
     }
   };
-
-  const firstStepDone = Boolean(evidence.exact);
-  const secondStepDone = Boolean(
-    evidence.beat && hasMeaningfulRevision(evidence.original, evidence.revision),
-  );
-  const thirdStepDone = assessment.complete || justApplied;
 
   return (
     <div aria-labelledby="fp-objection-log-title" className="pb-2">
@@ -153,22 +155,12 @@ export function ObjectionLogTool({
           </p>
         </div>
 
-        <div aria-label="Objection Log progress" className="grid shrink-0 grid-cols-3 gap-1.5 rounded-[14px] border-2 border-build/20 bg-build/5 p-2.5 shadow-card">
-          {[
-            ["1", "Hear", firstStepDone],
-            ["2", "Rewrite", secondStepDone],
-            ["3", "Apply", thirdStepDone],
-          ].map(([number, label, done]) => (
-            <div key={String(number)} className="min-w-[54px] text-center">
-              <span className={`mx-auto flex h-8 w-8 items-center justify-center rounded-full border-2 font-display text-xs font-black ${done ? "border-verified bg-verified text-white" : "border-[hsl(25_34%_20%/0.14)] bg-white text-[hsl(25_20%_38%)]"}`}>
-                {done ? <Check size={15} strokeWidth={3} aria-hidden /> : number}
-              </span>
-              <span className="mt-1 block font-mono text-[8px] font-semibold uppercase tracking-[0.04em] text-[hsl(25_20%_38%)]">{label}</span>
-            </div>
-          ))}
+        <div className="w-full rounded-[13px] border-2 border-[hsl(25_34%_20%/0.12)] bg-white p-3 shadow-card sm:max-w-[300px]">
+          <ToolFlowProgress current={stage + 1} steps={FLOW_STEPS} />
         </div>
       </div>
 
+      {stage === 0 ? <>
       <section className="mt-4 rounded-[14px] border-2 border-[hsl(25_34%_20%/0.14)] bg-white p-4 shadow-card" aria-labelledby="fp-objection-heard">
         <div className="flex items-start gap-3">
           <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-build/10 text-build" aria-hidden>
@@ -206,6 +198,12 @@ export function ObjectionLogTool({
         </div>
       </section>
 
+      <div className="mt-4 flex justify-end">
+        <button type="button" disabled={!evidence.exact} onClick={() => setStage(1)} className="inline-flex min-h-[52px] items-center justify-center gap-2 rounded-[14px] bg-verified px-5 font-display text-[15px] font-bold text-white shadow-[0_4px_0_hsl(150_52%_26%)] disabled:cursor-not-allowed disabled:opacity-45">Strengthen the pitch <ArrowRight size={17} aria-hidden /></button>
+      </div>
+      </> : null}
+
+      {stage === 1 ? <>
       <section className="mt-4 rounded-[14px] border-2 border-[hsl(25_34%_20%/0.14)] bg-white p-4 shadow-card" aria-labelledby="fp-objection-revise">
         <p className="font-mono text-[9px] font-semibold uppercase tracking-[0.08em] text-sell">Step 2 · Rewrite it</p>
         <h4 id="fp-objection-revise" className="mt-0.5 font-display text-[18px] font-black text-[hsl(25_34%_20%)]">Which part should answer the objection?</h4>
@@ -243,6 +241,25 @@ export function ObjectionLogTool({
           </div>
         ) : null}
       </section>
+
+      <div className="mt-4 flex flex-col-reverse gap-2 sm:flex-row sm:items-center sm:justify-between">
+        <button type="button" onClick={() => setStage(0)} className="inline-flex min-h-[48px] items-center justify-center gap-2 rounded-xl px-4 font-display text-[13px] font-bold text-[hsl(25_20%_38%)]"><ArrowLeft size={16} aria-hidden /> Back to the objection</button>
+        <button type="button" disabled={!revisionReady} onClick={() => setStage(2)} className="inline-flex min-h-[52px] items-center justify-center gap-2 rounded-[14px] bg-verified px-5 font-display text-[15px] font-bold text-white shadow-[0_4px_0_hsl(150_52%_26%)] disabled:cursor-not-allowed disabled:opacity-45">Review the stronger pitch <ArrowRight size={17} aria-hidden /></button>
+      </div>
+      </> : null}
+
+      {stage === 2 ? <>
+      {selectedBeat ? (
+        <section className="mt-4 rounded-[14px] border-2 border-verified/25 bg-verified/5 p-4 shadow-card" aria-labelledby="fp-objection-review">
+          <p className="font-mono text-[9px] font-semibold uppercase tracking-[0.08em] text-verified">The change you made</p>
+          <h4 id="fp-objection-review" className="mt-0.5 font-display text-[19px] font-black text-[hsl(25_34%_20%)]">Does this answer the objection better?</h4>
+          <p className="mt-1.5 rounded-xl border-2 border-build/20 bg-white px-3.5 py-3 text-[12px] font-semibold leading-[1.45] text-[hsl(25_34%_20%)]">“{evidence.exact}”</p>
+          <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <div className="rounded-xl border-2 border-[hsl(25_34%_20%/0.12)] bg-white p-3.5"><p className="font-mono text-[9px] font-semibold uppercase text-[hsl(25_20%_38%)]">Before · {selectedBeat.label}</p><p className="mt-2 whitespace-pre-wrap text-[13px] leading-[1.5] text-[hsl(25_20%_38%)]">{evidence.original || "No saved text in this beat."}</p></div>
+            <div className="rounded-xl border-2 border-verified/30 bg-white p-3.5"><p className="font-mono text-[9px] font-semibold uppercase text-verified">Stronger version</p><p className="mt-2 whitespace-pre-wrap text-[13px] font-semibold leading-[1.5] text-[hsl(25_34%_20%)]">{evidence.revision}</p></div>
+          </div>
+        </section>
+      ) : null}
 
       {band === "g9_12" ? (
         <section className="mt-4 rounded-[14px] border-2 border-dashed border-scale/35 bg-scale/5 p-4" aria-labelledby="fp-objection-live">
@@ -290,6 +307,8 @@ export function ObjectionLogTool({
           )}
         </div>
       </section>
+      <button type="button" onClick={() => setStage(1)} className="mt-4 inline-flex min-h-[48px] items-center justify-center gap-2 rounded-xl px-4 font-display text-[13px] font-bold text-[hsl(25_20%_38%)]"><ArrowLeft size={16} aria-hidden /> Back to revise</button>
+      </> : null}
     </div>
   );
 }

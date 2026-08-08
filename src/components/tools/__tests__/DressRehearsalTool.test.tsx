@@ -84,7 +84,7 @@ describe("DressRehearsalTool", () => {
   it("keeps the full rehearsal locked until the setup is ready", () => {
     render(<ControlledTool />);
     expect(
-      (screen.getByRole("button", { name: "Start full run" }) as HTMLButtonElement)
+      (screen.getByRole("button", { name: "Run the sale" }) as HTMLButtonElement)
         .disabled,
     ).toBe(true);
 
@@ -93,9 +93,11 @@ describe("DressRehearsalTool", () => {
       screen.getByLabelText(/parent agrees to watch the payment math/),
     );
     expect(
-      (screen.getByRole("button", { name: "Start full run" }) as HTMLButtonElement)
+      (screen.getByRole("button", { name: "Run the sale" }) as HTMLButtonElement)
         .disabled,
     ).toBe(false);
+    fireEvent.click(screen.getByRole("button", { name: "Run the sale" }));
+    expect(screen.getByRole("button", { name: "Start full run" })).toBeTruthy();
   });
 
   it("guides all five moments and saves a parent-confirmed clean run", () => {
@@ -105,6 +107,7 @@ describe("DressRehearsalTool", () => {
     fireEvent.click(
       screen.getByLabelText(/parent agrees to watch the payment math/),
     );
+    fireEvent.click(screen.getByRole("button", { name: "Run the sale" }));
     fireEvent.click(screen.getByRole("button", { name: "Start full run" }));
 
     for (const moment of ["greeting", "ask", "payment", "delivery", "thank-you"]) {
@@ -127,6 +130,7 @@ describe("DressRehearsalTool", () => {
     fireEvent.click(save);
 
     expect(screen.getByText("Rehearsal saved")).toBeTruthy();
+    expect(screen.getByText("Step 3 of 3 · Confirm the run")).toBeTruthy();
     expect(screen.getByText("Task complete")).toBeTruthy();
     expect(screen.getByLabelText("Saved rehearsal confirmation").textContent).toBe(
       "true",
@@ -158,6 +162,7 @@ describe("DressRehearsalTool", () => {
     );
 
     expect(screen.getByText("Rehearsal saved")).toBeTruthy();
+    expect(screen.getByText("Step 3 of 3 · Confirm the run")).toBeTruthy();
     expect(onTaskComplete).toHaveBeenCalledTimes(1);
   });
 });

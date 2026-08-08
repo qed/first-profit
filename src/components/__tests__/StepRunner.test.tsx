@@ -60,6 +60,11 @@ import { SAY_BACK_FIELD_KEYS } from "../../lib/sayBack";
 import { PRICE_PICKER_FIELD_KEYS } from "../../lib/pricePicker";
 import { DRESS_REHEARSAL_FIELD_KEYS } from "../../lib/dressRehearsal";
 import {
+  ASK_TRACKER_FIELD_KEYS,
+  askTrackerRowFieldKey,
+} from "../../lib/askTracker";
+import { SALE_LOGGER_FIELD_KEYS } from "../../lib/saleLogger";
+import {
   TEN_LIST_FIELD_KEYS,
   TEN_LIST_SIZE,
   tenListRowFieldKey,
@@ -247,6 +252,49 @@ function seedAtDressRehearsalTask(
   };
 }
 
+/** State at the 1.2.4 Ask Tracker, with the first three Sales Room tasks complete. */
+function seedAtAskTrackerTask(fields: Record<string, string> = {}): GameState {
+  const s = initialState();
+  return {
+    ...s,
+    stage: "app",
+    ideas: [{
+      fields,
+      done: {
+        [taskKey("1.2", 0)]: true,
+        [taskKey("1.2", 1)]: true,
+        [taskKey("1.2", 2)]: true,
+      },
+    }],
+    activeIdea: 0,
+    runnerOpen: true,
+    runnerStep: "1.2",
+    runnerIndex: 3,
+  };
+}
+
+/** State at the 1.2.5 Sale Logger, with the first four Sales Room tasks complete. */
+function seedAtSaleLoggerTask(fields: Record<string, string> = {}): GameState {
+  const s = initialState();
+  return {
+    ...s,
+    stage: "app",
+    ideas: [{
+      fields,
+      done: {
+        [taskKey("1.2", 0)]: true,
+        [taskKey("1.2", 1)]: true,
+        [taskKey("1.2", 2)]: true,
+        [taskKey("1.2", 3)]: true,
+      },
+    }],
+    activeIdea: 0,
+    runnerOpen: true,
+    runnerStep: "1.2",
+    runnerIndex: 4,
+  };
+}
+
 afterEach(() => {
   cleanup();
   publicSiteFlag = false;
@@ -358,6 +406,11 @@ describe("StepRunner", () => {
       key: "pitch",
       value: "What if your neighborhood stories could fit in your pocket?",
     });
+
+    fireEvent.click(screen.getByRole("button", { name: "Continue to What it is" }));
+    fireEvent.click(screen.getByRole("button", { name: "Continue to Why it is good" }));
+    fireEvent.click(screen.getByRole("button", { name: "Continue to The ask" }));
+    fireEvent.click(screen.getByRole("button", { name: "Review the full pitch" }));
 
     // Tool controls respond immediately to mouse clicks and do not use the
     // room's move-first delay, which would park the avatar over the timer.
@@ -585,6 +638,96 @@ describe("StepRunner", () => {
       ]),
     );
     expect(screen.getByText("Next task →")).toBeTruthy();
+  });
+
+  it("routes task 1.2.4 to Ask Tracker, restores its evidence, and completes the task", () => {
+    const actions: unknown[] = [];
+    const fields: Record<string, string> = {
+      [askTrackerRowFieldKey(0, "outcome")]: "yes-paid",
+      [askTrackerRowFieldKey(0, "date")]: "2026-08-06",
+      [ASK_TRACKER_FIELD_KEYS.winnerIndex]: "0",
+      [ASK_TRACKER_FIELD_KEYS.saleItem]: "One illustrated card pack",
+      [ASK_TRACKER_FIELD_KEYS.saleAmount]: "18",
+      [ASK_TRACKER_FIELD_KEYS.saleDate]: "2026-08-06",
+      [ASK_TRACKER_FIELD_KEYS.nonFamilyConfirmed]: "true",
+      [ASK_TRACKER_FIELD_KEYS.paymentReceivedConfirmed]: "true",
+      [ASK_TRACKER_FIELD_KEYS.bandRoleConfirmed]: "true",
+      [ASK_TRACKER_FIELD_KEYS.confirmed]: "true",
+    };
+    for (let index = 0; index < TEN_LIST_SIZE; index += 1) {
+      fields[tenListRowFieldKey(index, "name")] = `Prospect ${index + 1}`;
+    }
+    render(
+      <Harness
+        seed={seedAtAskTrackerTask(fields)}
+        onAction={(action) => actions.push(action)}
+      />,
+    );
+
+    openSection("Tools");
+    expect(screen.getByText("Ask Tracker")).toBeTruthy();
+    expect(actions).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          type: "COMPLETE_TASK",
+          ideaIndex: 0,
+          stepId: "1.2",
+          index: 3,
+        }),
+      ]),
+    );
+    expect(screen.getByText("Next task →")).toBeTruthy();
+  });
+
+  it("routes task 1.2.5 to Sale Logger, restores its evidence, and completes the criterion", () => {
+    const actions: unknown[] = [];
+    const fields: Record<string, string> = {
+      [askTrackerRowFieldKey(0, "outcome")]: "yes-paid",
+      [askTrackerRowFieldKey(0, "date")]: "2026-08-06",
+      [ASK_TRACKER_FIELD_KEYS.winnerIndex]: "0",
+      [ASK_TRACKER_FIELD_KEYS.saleItem]: "One illustrated card pack",
+      [ASK_TRACKER_FIELD_KEYS.saleAmount]: "18",
+      [ASK_TRACKER_FIELD_KEYS.saleDate]: "2026-08-06",
+      [ASK_TRACKER_FIELD_KEYS.nonFamilyConfirmed]: "true",
+      [ASK_TRACKER_FIELD_KEYS.paymentReceivedConfirmed]: "true",
+      [ASK_TRACKER_FIELD_KEYS.bandRoleConfirmed]: "true",
+      [ASK_TRACKER_FIELD_KEYS.confirmed]: "true",
+      [SALE_LOGGER_FIELD_KEYS.deliveryMethod]: "product-handoff",
+      [SALE_LOGGER_FIELD_KEYS.deliveryDate]: "2026-08-07",
+      [SALE_LOGGER_FIELD_KEYS.deliveryDetails]: "Handed over the sealed card pack.",
+      [SALE_LOGGER_FIELD_KEYS.deliveredConfirmed]: "true",
+      [SALE_LOGGER_FIELD_KEYS.thankedConfirmed]: "true",
+      [SALE_LOGGER_FIELD_KEYS.customerSaid]: "The history facts were my favorite part.",
+      [SALE_LOGGER_FIELD_KEYS.photoSubject]: "product",
+      [SALE_LOGGER_FIELD_KEYS.photoFileName]: "first-sale.jpg",
+      [SALE_LOGGER_FIELD_KEYS.photoFileType]: "image/jpeg",
+      [SALE_LOGGER_FIELD_KEYS.photoFileSize]: "204800",
+      [SALE_LOGGER_FIELD_KEYS.photoAddedConfirmed]: "true",
+    };
+    for (let index = 0; index < TEN_LIST_SIZE; index += 1) {
+      fields[tenListRowFieldKey(index, "name")] = `Prospect ${index + 1}`;
+    }
+    render(
+      <Harness
+        seed={seedAtSaleLoggerTask(fields)}
+        onAction={(action) => actions.push(action)}
+      />,
+    );
+
+    openSection("Tools");
+    expect(screen.getByText("Sale Logger")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Save completed sale" }));
+    expect(actions).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          type: "COMPLETE_TASK",
+          ideaIndex: 0,
+          stepId: "1.2",
+          index: 4,
+        }),
+      ]),
+    );
+    expect(screen.getByText("Criterion passed")).toBeTruthy();
   });
 
   it("fills the FLOOR box, not the viewport, and is not a floating modal card", () => {

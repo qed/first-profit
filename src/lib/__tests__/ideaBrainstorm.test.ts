@@ -47,6 +47,7 @@ describe("idea brainstorm model", () => {
     expect(ideas.every((idea) => idea.firstTest.length > 20)).toBe(true);
     expect(ideas.some((idea) => /dogs/i.test(idea.oneLiner))).toBe(true);
     expect(ideas.some((idea) => /soccer/i.test(idea.oneLiner))).toBe(true);
+    expect(ideas[0].oneLiner).toContain("their neighborhood and local stories");
   });
 
   it("uses a learner-authored custom twist when one is supplied", () => {
