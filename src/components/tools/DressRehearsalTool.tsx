@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import {
+  ArrowLeft,
+  ArrowRight,
   Check,
   CircleAlert,
   DollarSign,
@@ -26,6 +28,9 @@ import {
   formatMoney,
   parseMoney,
 } from "../../lib/pricePicker";
+import { ToolFlowProgress } from "./ToolFlowProgress";
+
+const FLOW_STEPS = ["Set the stage", "Run the sale", "Confirm the run"] as const;
 
 const REHEARSAL_MOMENTS = [
   {
@@ -144,6 +149,7 @@ export function DressRehearsalTool({
   const savedOffer = fields[PRICE_PICKER_FIELD_KEYS.offer]?.trim() ?? "";
   const savedUnit = fields[PRICE_PICKER_FIELD_KEYS.unit]?.trim() ?? "";
   const savedPrice = parseMoney(fields[PRICE_PICKER_FIELD_KEYS.price]);
+  const [stage, setStage] = useState(() => assessment.complete || evidence.runCompleted ? 2 : setupReady ? 1 : 0);
 
   useEffect(() => {
     if (!assessment.complete || completionSentRef.current) return;
@@ -173,6 +179,7 @@ export function DressRehearsalTool({
 
   const startRun = () => {
     if (!setupReady) return;
+    setStage(1);
     onFieldChange(DRESS_REHEARSAL_FIELD_KEYS.runCompleted, "");
     onFieldChange(DRESS_REHEARSAL_FIELD_KEYS.cleanRunConfirmed, "");
     onFieldChange(DRESS_REHEARSAL_FIELD_KEYS.parentBuyerConfirmed, "");
@@ -190,6 +197,7 @@ export function DressRehearsalTool({
     onFieldChange(DRESS_REHEARSAL_FIELD_KEYS.runCompleted, "true");
     onFieldChange(DRESS_REHEARSAL_FIELD_KEYS.runDate, localDate());
     setActiveMoment(null);
+    setStage(2);
   };
 
   const saveRehearsal = () => {
@@ -205,10 +213,6 @@ export function DressRehearsalTool({
     }
   };
 
-  const setupDone = setupReady;
-  const runDone = evidence.runCompleted && evidence.cleanRunConfirmed;
-  const parentDone = evidence.parentBuyerConfirmed;
-
   return (
     <div aria-labelledby="fp-dress-rehearsal-title" className="pb-2">
       <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
@@ -218,29 +222,18 @@ export function DressRehearsalTool({
           <p className="mt-1.5 max-w-[620px] text-[13.5px] leading-[1.55] text-[hsl(25_20%_38%)]">Practice the whole sale with a parent playing the buyer—from hello to thank-you—before real money is involved.</p>
         </div>
 
-        <div aria-label="Dress Rehearsal progress" className="grid shrink-0 grid-cols-3 gap-1.5 rounded-[14px] border-2 border-build/20 bg-build/5 p-2.5 shadow-card">
-          {[
-            ["1", "Set up", setupDone],
-            ["2", "Rehearse", runDone],
-            ["3", "Confirm", parentDone],
-          ].map(([number, label, done]) => (
-            <div key={String(number)} className="min-w-[58px] text-center">
-              <span className={`mx-auto flex h-8 w-8 items-center justify-center rounded-full border-2 font-display text-xs font-black ${done ? "border-verified bg-verified text-white" : "border-[hsl(25_34%_20%/0.14)] bg-white text-[hsl(25_20%_38%)]"}`}>
-                {done ? <Check size={15} strokeWidth={3} aria-hidden /> : number}
-              </span>
-              <span className="mt-1 block font-mono text-[8px] font-semibold uppercase tracking-[0.04em] text-[hsl(25_20%_38%)]">{label}</span>
-            </div>
-          ))}
+        <div className="w-full rounded-[13px] border-2 border-[hsl(25_34%_20%/0.12)] bg-white p-3 shadow-card sm:max-w-[300px]">
+          <ToolFlowProgress current={stage + 1} steps={FLOW_STEPS} />
         </div>
       </div>
 
-      <div className="mt-4 flex items-start gap-2.5 rounded-[12px] border-2 border-build/20 bg-build/5 px-3.5 py-3">
+      {stage === 0 ? <div className="mt-4 flex items-start gap-2.5 rounded-[12px] border-2 border-build/20 bg-build/5 px-3.5 py-3">
         <UserCheck size={18} className="mt-0.5 shrink-0 text-build" aria-hidden />
         <div>
           <p className="text-[12px] font-bold text-[hsl(25_34%_20%)]">Your rehearsal roles</p>
           <p className="mt-0.5 text-[12px] leading-[1.5] text-[hsl(25_20%_38%)]">{role.body}</p>
         </div>
-      </div>
+      </div> : null}
 
       <div className="mt-4 rounded-[12px] border-2 border-sell/20 bg-sell/5 px-3.5 py-3">
         <p className="font-mono text-[9px] font-semibold uppercase tracking-[0.08em] text-sell">Sale you are rehearsing</p>
@@ -253,6 +246,7 @@ export function DressRehearsalTool({
         )}
       </div>
 
+      {stage === 0 ? <>
       <section className="mt-4 rounded-[14px] border-2 border-[hsl(25_34%_20%/0.14)] bg-white p-4 shadow-card" aria-labelledby="fp-dress-setup">
         <p className="font-mono text-[9px] font-semibold uppercase tracking-[0.08em] text-build">Step 1 · Set up the point of sale</p>
         <h4 id="fp-dress-setup" className="mt-0.5 font-display text-[18px] font-black text-[hsl(25_34%_20%)]">How will payment and delivery work?</h4>
@@ -299,6 +293,13 @@ export function DressRehearsalTool({
         </div>
       </section>
 
+      {!setupReady ? <p role="status" className="mt-3 rounded-xl border-2 border-build/20 bg-build/5 px-3.5 py-3 text-[12px] font-semibold leading-[1.45] text-[hsl(25_20%_38%)]">{assessment.message}</p> : null}
+      <div className="mt-4 flex justify-end">
+        <button type="button" disabled={!setupReady} onClick={() => setStage(1)} className="inline-flex min-h-[52px] items-center justify-center gap-2 rounded-[14px] bg-verified px-5 font-display text-[15px] font-bold text-white shadow-[0_4px_0_hsl(150_52%_26%)] disabled:cursor-not-allowed disabled:opacity-45">Run the sale <ArrowRight size={17} aria-hidden /></button>
+      </div>
+      </> : null}
+
+      {stage === 1 ? <>
       <section className="mt-4 rounded-[14px] border-2 border-build/25 bg-build/5 p-4" aria-labelledby="fp-dress-run">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
           <div>
@@ -345,6 +346,10 @@ export function DressRehearsalTool({
         ) : null}
       </section>
 
+      {activeMoment === null ? <button type="button" onClick={() => setStage(0)} className="mt-4 inline-flex min-h-[48px] items-center justify-center gap-2 rounded-xl px-4 font-display text-[13px] font-bold text-[hsl(25_20%_38%)]"><ArrowLeft size={16} aria-hidden /> Back to setup</button> : null}
+      </> : null}
+
+      {stage === 2 ? <>
       <section className="mt-4 rounded-[14px] border-2 border-sell/25 bg-sell/5 p-4" aria-labelledby="fp-dress-confirm">
         <p className="font-mono text-[9px] font-semibold uppercase tracking-[0.08em] text-sell">Step 3 · Confirm the clean run</p>
         <h4 id="fp-dress-confirm" className="mt-0.5 font-display text-[17px] font-black text-[hsl(25_34%_20%)]">Did it happen start to finish?</h4>
@@ -383,6 +388,8 @@ export function DressRehearsalTool({
           )}
         </div>
       </section>
+      <button type="button" onClick={() => setStage(1)} className="mt-4 inline-flex min-h-[48px] items-center justify-center gap-2 rounded-xl px-4 font-display text-[13px] font-bold text-[hsl(25_20%_38%)]"><ArrowLeft size={16} aria-hidden /> Back to the run</button>
+      </> : null}
     </div>
   );
 }

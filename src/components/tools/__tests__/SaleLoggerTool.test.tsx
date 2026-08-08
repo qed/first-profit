@@ -59,7 +59,7 @@ describe("SaleLoggerTool", () => {
   it("requires the paid Ask Tracker record", () => {
     render(<ControlledTool initial={{}} />);
     expect(screen.getByText(/Finish Ask Tracker first/)).toBeTruthy();
-    expect(screen.getByRole("status", { name: "Sale Logger status" }).textContent).toContain("Finish and save the paid customer");
+    expect((screen.getByRole("button", { name: "Thank the customer" }) as HTMLButtonElement).disabled).toBe(true);
   });
 
   it("shows the paid sale without re-entry", () => {
@@ -75,8 +75,10 @@ describe("SaleLoggerTool", () => {
     fireEvent.change(screen.getByLabelText("Delivery date"), { target: { value: "2026-08-07" } });
     fireEvent.change(screen.getByLabelText("What was delivered?"), { target: { value: "Handed over the sealed card pack." } });
     fireEvent.click(screen.getByLabelText(/customer has everything/));
+    fireEvent.click(screen.getByRole("button", { name: "Thank the customer" }));
     fireEvent.click(screen.getByLabelText("I thanked the customer for buying."));
     fireEvent.change(screen.getByLabelText("Customer’s words"), { target: { value: "The local history facts were my favorite part." } });
+    fireEvent.click(screen.getByRole("button", { name: "Save the sale memory" }));
     fireEvent.change(screen.getByLabelText("Choose or take sale photo"), { target: { files: [new File(["photo"], "first-sale.jpg", { type: "image/jpeg" })] } });
     expect(screen.getByText("Selected: first-sale.jpg")).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: /The product/ }));
