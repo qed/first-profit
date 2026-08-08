@@ -39,21 +39,21 @@ import panelShowcase from "../assets/fpv03/panel-showcase.jpg";
  * for it. The showcase example matches the S01 mock verbatim. */
 const EXAMPLES = [
   {
-    id: "111",
-    kicker: "Meet the founder",
-    title: "The Hero",
+    id: "01",
+    kicker: "Meet the hero",
+    title: "Who are you?",
     sections: [
       {
-        heading: null,
-        body: "I told the game who I am, what I love doing, and the kind of business I want to build.",
+        heading: "Name and basics",
+        body: "My name is Peter Parker. I am nine years old.",
       },
       {
-        heading: "How it came together",
-        body: "I answered six questions. That was the whole task.",
+        heading: "Likes and dislikes",
+        body: "I like playing soccer, hanging out with my friends, going on vacations, and learning about stocks and businesses.",
       },
       {
-        heading: "What got drawn",
-        body: "Page one of my own graphic novel, with me as the hero.",
+        heading: "Background and future",
+        body: "My first business was selling comic books door to door. I would also love to have a secret undercover job as a geologist.",
       },
     ],
     tag: "The Visionary CEO, age 9",
@@ -404,6 +404,8 @@ export function Landing({ startUrl }: { startUrl?: string } = {}) {
           <Carousel
             ariaLabel="Example tasks and story panels"
             className="mx-auto mt-10 max-w-[1000px] sm:px-14 lg:px-0"
+            // The five dots walk the five phase colors, Sell through Scale.
+            dotColors={["bg-sell", "bg-build", "bg-validate", "bg-grow", "bg-scale"]}
             slides={EXAMPLES.map((example) => (
               <ExampleSlide key={example.id} example={example} />
             ))}

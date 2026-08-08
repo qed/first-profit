@@ -55,18 +55,19 @@ describe("Landing CTAs (fpv03 U1)", () => {
 describe("Landing example carousel (fpv03 S01)", () => {
   it("shows one example at a time and advances with next, wrapping around", () => {
     render(<Landing startUrl={START} />);
-    // First slide: the Meet-the-founder example.
-    expect(screen.getByText(/Meet the founder/i)).toBeTruthy();
+    // First slide: the Meet-the-hero example (copy per user, 2026-08-08).
+    expect(screen.getByText(/Meet the hero/i)).toBeTruthy();
+    expect(screen.getByText(/Peter Parker/i)).toBeTruthy();
     expect(screen.queryByText(/The showcase pitch/i)).toBeNull();
 
     const next = screen.getAllByRole("button", { name: /^Next$/i })[0];
     fireEvent.click(next);
     expect(screen.getByText(/market research/i)).toBeTruthy();
-    expect(screen.queryByText(/Meet the founder/i)).toBeNull();
+    expect(screen.queryByText(/Meet the hero/i)).toBeNull();
 
     // Wrap: 4 more nexts land back on slide 1.
     for (let i = 0; i < 4; i++) fireEvent.click(next);
-    expect(screen.getByText(/Meet the founder/i)).toBeTruthy();
+    expect(screen.getByText(/Meet the hero/i)).toBeTruthy();
   });
 
   it("prev from the first slide wraps to the last (the showcase pitch)", () => {

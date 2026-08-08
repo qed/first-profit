@@ -85,6 +85,24 @@ describe("Carousel", () => {
     expect(seen).toEqual([1, 0, 1]);
   });
 
+  it("applies per-dot colors when dotColors is provided, active dot at full strength", () => {
+    render(
+      <Carousel
+        ariaLabel="Examples"
+        slides={slides}
+        dotColors={["bg-sell", "bg-build", "bg-validate"]}
+      />,
+    );
+    const pills = screen
+      .getAllByRole("tab")
+      .map((d) => d.querySelector("span") as HTMLSpanElement);
+    expect(pills[0].className).toContain("bg-sell");
+    expect(pills[0].className).not.toContain("opacity-35"); // active
+    expect(pills[1].className).toContain("bg-build");
+    expect(pills[1].className).toContain("opacity-35"); // inactive, muted
+    expect(pills[2].className).toContain("bg-validate");
+  });
+
   it("renders nothing with zero slides", () => {
     const { container } = render(<Carousel ariaLabel="Empty" slides={[]} />);
     expect(container.firstChild).toBeNull();

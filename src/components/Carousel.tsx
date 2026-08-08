@@ -5,11 +5,11 @@
  *
  * Interaction contract (plan: "shared interaction patterns decided once"):
  * - One slide visible at a time; prev/next wrap around.
- * - Desktop (sm+): circular arrow buttons vertically centered at the sides.
- * - Mobile (<sm): swipe gestures plus a bottom-docked control row (the side
- *   arrows collapse into it), because there is no room outside the content at
- *   ~390px and tap targets must stay >=44px, DOTS INCLUDED (each dot is a
- *   44px hit area around a small visual pill).
+ * - One control cluster at EVERY breakpoint (user decision, 2026-08-08):
+ *   prev arrow · dots · next arrow, centered under the content, so the
+ *   position indicator and its controls read as one unit. Tap targets stay
+ *   >=44px, DOTS INCLUDED (each dot is a 44px hit area around a small pill).
+ * - Mobile additionally supports swipe gestures.
  * - Swipe only fires when the gesture is clearly horizontal (|dx| must
  *   dominate |dy|), so a diagonal page-scroll drag never hijacks the slide.
  * - Dots follow the ARIA tabs keyboard pattern: roving tabindex plus
@@ -54,11 +54,16 @@ export function Carousel({
   ariaLabel,
   className = "",
   onIndexChange,
+  dotColors,
 }: {
   slides: ReactNode[];
   ariaLabel: string;
   className?: string;
   onIndexChange?: (index: number) => void;
+  /** Optional per-dot background classes (e.g. the five phase colors on S01:
+   * bg-sell/bg-build/bg-validate/bg-grow/bg-scale). Indexed by slide; falls
+   * back to the default single-accent treatment when absent or short. */
+  dotColors?: string[];
 }) {
   const [index, setIndex] = useState(0);
   const touchStart = useRef<{ x: number; y: number } | null>(null);
@@ -104,28 +109,16 @@ export function Carousel({
     // `relative` so the sr-only live region positions inside this section,
     // never at document coordinates (sr-only-escapes-scroll-container learning).
     <section aria-label={ariaLabel} className={`relative ${className}`}>
-      <div className="relative">
-        {/* Desktop side arrows: outside the content on sm+, hidden on mobile
-            where the bottom-docked row takes over. */}
-        <ArrowButton
-          direction="prev"
-          onClick={() => go(-1)}
-          className="absolute -left-14 top-1/2 z-10 hidden -translate-y-1/2 sm:inline-flex lg:-left-16"
-        />
-        <ArrowButton
-          direction="next"
-          onClick={() => go(1)}
-          className="absolute -right-14 top-1/2 z-10 hidden -translate-y-1/2 sm:inline-flex lg:-right-16"
-        />
-        <div onTouchStart={onTouchStart} onTouchEnd={onTouchEnd}>
-          {slides[index]}
-        </div>
+      <div onTouchStart={onTouchStart} onTouchEnd={onTouchEnd}>
+        {slides[index]}
       </div>
 
-      {/* Control row: dots always; arrows join the row below sm. Each dot is
-          a >=44px button (CLAUDE.md tap-target rule) around a small pill. */}
-      <div className="mt-4 flex items-center justify-center gap-1">
-        <ArrowButton direction="prev" onClick={() => go(-1)} className="mr-2 sm:hidden" />
+      {/* One control cluster at every breakpoint (per the S01 mock): prev
+          arrow · dots · next arrow, centered under the content, so the
+          position indicator and the controls read as one unit. Each dot is a
+          >=44px button (CLAUDE.md tap-target rule) around a small pill. */}
+      <div className="mt-5 flex items-center justify-center gap-1">
+        <ArrowButton direction="prev" onClick={() => go(-1)} className="mr-2" />
         <span
           className="flex items-center"
           role="tablist"
@@ -149,13 +142,19 @@ export function Carousel({
               <span
                 aria-hidden
                 className={`h-2.5 rounded-full transition-all ${
-                  i === index ? "w-7 bg-scale" : "w-2.5 bg-[hsl(40_10%_78%)]"
+                  i === index ? "w-7" : "w-2.5"
+                } ${
+                  dotColors?.[i]
+                    ? `${dotColors[i]} ${i === index ? "" : "opacity-35"}`
+                    : i === index
+                      ? "bg-scale"
+                      : "bg-[hsl(40_10%_78%)]"
                 }`}
               />
             </button>
           ))}
         </span>
-        <ArrowButton direction="next" onClick={() => go(1)} className="ml-2 sm:hidden" />
+        <ArrowButton direction="next" onClick={() => go(1)} className="ml-2" />
       </div>
       <p aria-live="polite" className="sr-only">
         Item {index + 1} of {count}
