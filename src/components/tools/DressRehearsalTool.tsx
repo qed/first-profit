@@ -252,23 +252,23 @@ export function DressRehearsalTool({
         <h4 id="fp-dress-setup" className="mt-0.5 font-display text-[18px] font-black text-[hsl(25_34%_20%)]">How will payment and delivery work?</h4>
 
         <div className="mt-4 grid grid-cols-1 gap-4 lg:grid-cols-2">
-          <div className="rounded-[12px] border-2 border-build/20 bg-build/5 p-3.5">
+          <div className="flex h-full flex-col rounded-[12px] border-2 border-build/20 bg-build/5 p-3.5">
             <div className="flex items-center gap-2"><DollarSign size={18} className="text-build" aria-hidden /><h5 className="font-display text-[15px] font-black text-[hsl(25_34%_20%)]">Payment</h5></div>
             <p className="mt-1 text-[10.5px] leading-[1.4] text-[hsl(25_20%_38%)]">Choose the real method you expect to use.</p>
             <div className="mt-3">
               <ChoiceButtons label="Payment method" options={DRESS_REHEARSAL_PAYMENT_METHODS} value={evidence.paymentMethod} onChange={(value) => changeSetup(DRESS_REHEARSAL_FIELD_KEYS.paymentMethod, value)} />
             </div>
-            <label htmlFor="fp-dress-payment-details" className="mt-3 block text-[12px] font-bold text-[hsl(25_34%_20%)]">Payment handoff plan</label>
+            <label htmlFor="fp-dress-payment-details" className="mt-auto block pt-3 text-[12px] font-bold text-[hsl(25_34%_20%)]">Payment handoff plan</label>
             <textarea id="fp-dress-payment-details" rows={3} maxLength={500} value={fields[DRESS_REHEARSAL_FIELD_KEYS.paymentDetails] ?? ""} onChange={(event) => changeSetup(DRESS_REHEARSAL_FIELD_KEYS.paymentDetails, event.target.value)} placeholder="Who takes the payment, where it goes, and what must be ready..." className="mt-1.5 min-h-[88px] w-full resize-y rounded-[10px] border-2 border-build/20 bg-white px-3 py-2.5 text-[12.5px] leading-[1.5] outline-none focus:border-build focus:ring-2 focus:ring-build/15" />
           </div>
 
-          <div className="rounded-[12px] border-2 border-sell/20 bg-sell/5 p-3.5">
+          <div className="flex h-full flex-col rounded-[12px] border-2 border-sell/20 bg-sell/5 p-3.5">
             <div className="flex items-center gap-2"><Package size={18} className="text-sell" aria-hidden /><h5 className="font-display text-[15px] font-black text-[hsl(25_34%_20%)]">Delivery</h5></div>
             <p className="mt-1 text-[10.5px] leading-[1.4] text-[hsl(25_20%_38%)]">Choose how the customer receives what they bought.</p>
             <div className="mt-3">
               <ChoiceButtons label="Delivery method" options={DRESS_REHEARSAL_DELIVERY_METHODS} value={evidence.deliveryMethod} onChange={(value) => changeSetup(DRESS_REHEARSAL_FIELD_KEYS.deliveryMethod, value)} />
             </div>
-            <label htmlFor="fp-dress-delivery-details" className="mt-3 block text-[12px] font-bold text-[hsl(25_34%_20%)]">Delivery handoff plan</label>
+            <label htmlFor="fp-dress-delivery-details" className="mt-auto block pt-3 text-[12px] font-bold text-[hsl(25_34%_20%)]">Delivery handoff plan</label>
             <textarea id="fp-dress-delivery-details" rows={3} maxLength={500} value={fields[DRESS_REHEARSAL_FIELD_KEYS.deliveryDetails] ?? ""} onChange={(event) => changeSetup(DRESS_REHEARSAL_FIELD_KEYS.deliveryDetails, event.target.value)} placeholder="What the buyer receives now and what happens next..." className="mt-1.5 min-h-[88px] w-full resize-y rounded-[10px] border-2 border-sell/20 bg-white px-3 py-2.5 text-[12.5px] leading-[1.5] outline-none focus:border-sell focus:ring-2 focus:ring-sell/15" />
           </div>
         </div>

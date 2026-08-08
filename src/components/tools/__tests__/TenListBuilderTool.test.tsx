@@ -24,32 +24,36 @@ function completeFields(band: Band): TenListFields {
   return fields;
 }
 
-function fillVisiblePair(startIndex: number) {
-  for (let index = startIndex; index < startIndex + 2; index += 1) {
+function fillVisibleGroup(startIndex: number, count: number) {
+  for (let index = startIndex; index < startIndex + count; index += 1) {
     fireEvent.change(screen.getByLabelText(`Prospect ${index + 1} name or household`), { target: { value: `Prospect ${index + 1}` } });
     fireEvent.change(screen.getByLabelText(`Safe way to reach prospect ${index + 1}`), { target: { value: index % 2 === 0 ? "in-person" : "parent-message" } });
   }
 }
 
 function fillTenRowsAcrossPages() {
-  for (let page = 0; page < 5; page += 1) {
-    fillVisiblePair(page * 2);
-    fireEvent.click(screen.getByRole("button", { name: page === 4 ? "Parent review" : "Next two" }));
-  }
+  fillVisibleGroup(0, 4);
+  fireEvent.click(screen.getByRole("button", { name: "Next four" }));
+  fillVisibleGroup(4, 4);
+  fireEvent.click(screen.getByRole("button", { name: "Final two" }));
+  fillVisibleGroup(8, 2);
+  fireEvent.click(screen.getByRole("button", { name: "Parent review" }));
 }
 
 afterEach(cleanup);
 
 describe("TenListBuilderTool", () => {
-  it("shows two prospects at a time and lets learners move without treating blanks as mistakes", () => {
+  it("shows four prospects at a time and lets learners move without treating blanks as mistakes", () => {
     render(<ControlledTool />);
     expect(screen.getByLabelText("Prospect 1 name or household")).toBeTruthy();
     expect(screen.getByLabelText("Prospect 2 name or household")).toBeTruthy();
-    expect(screen.queryByLabelText("Prospect 3 name or household")).toBeNull();
-
-    fireEvent.click(screen.getByRole("button", { name: "Next two" }));
-    expect(screen.getByText("Step 2 of 6 · Prospects 3–4")).toBeTruthy();
     expect(screen.getByLabelText("Prospect 3 name or household")).toBeTruthy();
+    expect(screen.getByLabelText("Prospect 4 name or household")).toBeTruthy();
+    expect(screen.queryByLabelText("Prospect 5 name or household")).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "Next four" }));
+    expect(screen.getByText("Step 2 of 4 · Prospects 5–8")).toBeTruthy();
+    expect(screen.getByLabelText("Prospect 5 name or household")).toBeTruthy();
   });
 
   it("adapts the prospect challenge to each grade band", () => {
@@ -60,7 +64,7 @@ describe("TenListBuilderTool", () => {
 
     const middle = render(<ControlledTool band="g6_8" />);
     expect(screen.getByText("Outside circle 0 / 3")).toBeTruthy();
-    expect(screen.getAllByLabelText("Outside my family's immediate circle")).toHaveLength(2);
+    expect(screen.getAllByLabelText("Outside my family's immediate circle")).toHaveLength(4);
     middle.unmount();
 
     render(<ControlledTool band="g9_12" />);
@@ -75,7 +79,7 @@ describe("TenListBuilderTool", () => {
 
     expect(screen.getByRole("status", { name: "Ten-List Builder status" }).textContent).toContain("Remove contact details");
     expect(screen.getByText("Remove contact info")).toBeTruthy();
-    expect(screen.getByText("Step 1 of 6 · Prospects 1–2")).toBeTruthy();
+    expect(screen.getByText("Step 1 of 4 · Prospects 1–4")).toBeTruthy();
   });
 
   it("requires the middle-grade outside-circle mix and parent approval", () => {
@@ -85,7 +89,7 @@ describe("TenListBuilderTool", () => {
     render(<ControlledTool initial={fields} />);
 
     expect(screen.getByText("Outside circle 2 / 3")).toBeTruthy();
-    expect(screen.getByText("Step 6 of 6 · Parent review")).toBeTruthy();
+    expect(screen.getByText("Step 4 of 4 · Parent review")).toBeTruthy();
     expect(screen.getByRole("status", { name: "Ten-List Builder status" }).textContent).toContain("Mark 1 more prospect");
   });
 
@@ -94,7 +98,7 @@ describe("TenListBuilderTool", () => {
     fields[tenListRowFieldKey(9, "reason")] = "";
     render(<ControlledTool band="g9_12" initial={fields} />);
 
-    expect(screen.getByText("Step 5 of 6 · Prospects 9–10")).toBeTruthy();
+    expect(screen.getByText("Step 3 of 4 · Prospects 9–10")).toBeTruthy();
     expect(screen.getByRole("status", { name: "Ten-List Builder status" }).textContent).toContain("Add 1 more reason");
   });
 
@@ -120,7 +124,7 @@ describe("TenListBuilderTool", () => {
     const onTaskComplete = vi.fn();
     render(<ControlledTool initial={{ ...completeFields("g6_8"), [TEN_LIST_FIELD_KEYS.confirmed]: "true" }} onTaskComplete={onTaskComplete} />);
     expect(screen.getByText("Prospect list saved")).toBeTruthy();
-    expect(screen.getByText("Step 6 of 6 · Parent review")).toBeTruthy();
+    expect(screen.getByText("Step 4 of 4 · Parent review")).toBeTruthy();
     expect(onTaskComplete).toHaveBeenCalledTimes(1);
   });
 });
