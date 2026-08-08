@@ -55,6 +55,10 @@ vi.mock("../../state/GameContext", () => ({
   isLoggedInStage: (s: string) => s === "onboard" || s === "app",
 }));
 
+vi.mock("../../config", () => ({
+  getStartFunnelUrl: () => "https://t120.test/start",
+}));
+
 import { GlobalNav } from "../GlobalNav";
 
 afterEach(() => {
@@ -76,17 +80,27 @@ describe("GlobalNav logged out", () => {
     expect(dispatch).toHaveBeenCalledWith({ type: "SET_STAGE", stage: "login" });
   });
 
-  it("shows Start Building only on the landing stage, routed via the signup flag", () => {
+  it("shows Start Building only on the landing stage, as a link to the live funnel (fpv03 U1)", () => {
     stage = "landing";
     render(<GlobalNav />);
-    fireEvent.click(screen.getByRole("button", { name: /start building/i }));
-    // Flag defaults OFF in tests, so the CTA routes to login (Slice A behavior).
-    expect(dispatch).toHaveBeenCalledWith({ type: "SET_STAGE", stage: "login" });
+    const cta = screen.getByRole("link", { name: /start building/i });
+    expect(cta.getAttribute("href")).toBe("https://t120.test/start");
+    // Regression: the CTA is no longer a stage-dispatch button.
+    expect(screen.queryByRole("button", { name: /start building/i })).toBeNull();
+  });
+
+  it("suppresses Start Building while a verify deep link is completing (fpv03 U1)", () => {
+    stage = "landing";
+    render(<GlobalNav suppressStartCta />);
+    // An external-origin link here would navigate away and abandon the
+    // in-flight verify; the nav must not offer it.
+    expect(screen.queryByRole("link", { name: /start building/i })).toBeNull();
   });
 
   it("hides Start Building off the landing stage", () => {
     stage = "signup";
     render(<GlobalNav />);
+    expect(screen.queryByRole("link", { name: /start building/i })).toBeNull();
     expect(screen.queryByRole("button", { name: /start building/i })).toBeNull();
   });
 

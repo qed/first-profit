@@ -1,50 +1,81 @@
 // @vitest-environment jsdom
 /**
- * Landing "Start Building" CTA cutover (Slice B Unit 10, Plan Revision 11 — "no
- * half-live window"). Proves the flag-gated routing: with signup OFF the CTA
- * routes to `login` (Slice A behavior, the safe default that keeps a merged/
- * deployed branch from cutting over on its own); with signup ON it routes to the
- * in-app `signup` stage (the deliberate go-live flip). The routing is driven off
- * the injectable `signupEnabled` prop so the flag decision is unit-testable
- * without stubbing `import.meta.env`.
+ * Landing (fpv03 S01, U1). The CTA model changed at fpv03 U1 (flow M1):
+ * production parent signup is the120's /start funnel, so every Start-class CTA
+ * is a plain LINK to the funnel URL, not a stage dispatch. The old
+ * VITE_ENABLE_SIGNUP routing no longer drives these CTAs. `startUrl` is a prop
+ * so the routing is unit-testable without env stubs.
+ *
+ * Also proves the S01 example carousel is wired: five examples, one visible at
+ * a time, next/prev advance and wrap.
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 
-const dispatch = vi.fn();
-vi.mock("../../state/GameContext", () => ({ useGame: () => ({ dispatch }) }));
+vi.mock("../../state/GameContext", () => ({ useGame: () => ({ dispatch: vi.fn() }) }));
+
+// The default (prop-less) path is how App.tsx actually renders Landing in
+// production: it must wire getStartFunnelUrl() into every CTA href.
+vi.mock("../../config", () => ({
+  getStartFunnelUrl: () => "https://config-derived.test/start",
+}));
 
 import { Landing } from "../Landing";
 
+const START = "https://t120.test/start";
+
 afterEach(() => {
   cleanup();
-  dispatch.mockClear();
 });
 
-describe("Landing Start Building CTA cutover", () => {
-  it("routes to login when the signup flag is OFF (default, no half-live window)", () => {
-    render(<Landing signupEnabled={false} />);
-    // Every CTA on the page honors the flag, not just the first — a regression
-    // gating only CTA #1 while #2/#3 leak to signup must fail this test.
-    const ctas = screen.getAllByRole("button", { name: /Start Building/i });
-    expect(ctas.length).toBeGreaterThan(1);
-    for (const cta of ctas) {
-      dispatch.mockClear();
-      fireEvent.click(cta);
-      expect(dispatch).toHaveBeenCalledWith({ type: "SET_STAGE", stage: "login" });
-      expect(dispatch).not.toHaveBeenCalledWith({ type: "SET_STAGE", stage: "signup" });
+describe("Landing CTAs (fpv03 U1)", () => {
+  it("every Start CTA links to the live enrollment funnel", () => {
+    render(<Landing startUrl={START} />);
+    const links = [
+      ...screen.getAllByRole("link", { name: /Start Building/i }),
+      ...screen.getAllByRole("link", { name: /Start your story/i }),
+    ];
+    // Hero CTA + carousel-section CTA at minimum; every one points at /start.
+    expect(links.length).toBeGreaterThanOrEqual(2);
+    for (const link of links) {
+      expect(link.getAttribute("href")).toBe(START);
     }
+    // Regression: no Start-class CTA remains a stage-dispatch button.
+    expect(screen.queryByRole("button", { name: /Start Building/i })).toBeNull();
   });
 
-  it("routes to signup when the flag is ON (post go-live cutover)", () => {
-    render(<Landing signupEnabled={true} />);
-    // Every CTA on the page honors the flag, not just the first.
-    const ctas = screen.getAllByRole("button", { name: /Start Building/i });
-    expect(ctas.length).toBeGreaterThan(1);
-    for (const cta of ctas) {
-      dispatch.mockClear();
-      fireEvent.click(cta);
-      expect(dispatch).toHaveBeenCalledWith({ type: "SET_STAGE", stage: "signup" });
+  it("without the prop (the production path), CTAs use getStartFunnelUrl()", () => {
+    render(<Landing />);
+    for (const link of screen.getAllByRole("link", { name: /Start (Building|your story)/i })) {
+      expect(link.getAttribute("href")).toBe("https://config-derived.test/start");
     }
+  });
+});
+
+describe("Landing example carousel (fpv03 S01)", () => {
+  it("shows one example at a time and advances with next, wrapping around", () => {
+    render(<Landing startUrl={START} />);
+    // First slide: the Meet-the-founder example.
+    expect(screen.getByText(/Meet the founder/i)).toBeTruthy();
+    expect(screen.queryByText(/The showcase pitch/i)).toBeNull();
+
+    const next = screen.getAllByRole("button", { name: /^Next$/i })[0];
+    fireEvent.click(next);
+    expect(screen.getByText(/market research/i)).toBeTruthy();
+    expect(screen.queryByText(/Meet the founder/i)).toBeNull();
+
+    // Wrap: 4 more nexts land back on slide 1.
+    for (let i = 0; i < 4; i++) fireEvent.click(next);
+    expect(screen.getByText(/Meet the founder/i)).toBeTruthy();
+  });
+
+  it("prev from the first slide wraps to the last (the showcase pitch)", () => {
+    render(<Landing startUrl={START} />);
+    const prev = screen.getAllByRole("button", { name: /^Previous$/i })[0];
+    fireEvent.click(prev);
+    expect(screen.getByText(/The showcase pitch/i)).toBeTruthy();
+    expect(
+      screen.getByText(/organized an event to showcase my progress/i),
+    ).toBeTruthy();
   });
 });

@@ -25,6 +25,11 @@ export interface AppConfig {
  * required-var validation so a missing flag is simply "off", never a boot error).
  */
 export const SIGNUP_FLAG_VAR = "VITE_ENABLE_SIGNUP";
+// RETAINED DEAD CODE (fpv03 U1): both landing CTAs now link to the120's
+// /start funnel (getStartFunnelUrl), so no production code reads this flag or
+// isSignupEnabled anymore. Kept only until the in-repo signup stage is
+// retired wholesale (tracked follow-up alongside fpv03 U2-U4); do not wire
+// new CTAs to it.
 
 /**
  * Whether the Start Building CTA should route to the `signup` stage. Reads
@@ -62,6 +67,29 @@ export function isPublicSiteEnabled(env?: EnvLike): boolean {
   const source: EnvLike = env ?? (import.meta.env as unknown as EnvLike);
   const raw = source[PUBLIC_SITE_FLAG_VAR];
   return raw === "true" || raw === "1";
+}
+
+/**
+ * The live enrollment funnel (fpv03 U1): production parent signup is the120's
+ * `/start` flow, on the same origin as the T120 API. Deriving the URL from
+ * `VITE_T120_API_URL` (rather than hard-coding a domain) keeps local dev and
+ * preview environments pointing at their own the120 instance.
+ *
+ * NEVER THROWS: this is called at render scope on the public landing page and
+ * in GlobalNav (module-load-throw learning: a config error must degrade to a
+ * still-working CTA, never a blank page). On any config problem, missing var
+ * or malformed URL, it falls back to the canonical production funnel. Note
+ * `new URL("/start", base)` resolves at the ORIGIN root by design: an API URL
+ * with a path (https://host/api) still yields https://host/start.
+ */
+export const FALLBACK_START_FUNNEL_URL = "https://the120.school/start";
+
+export function getStartFunnelUrl(env?: EnvLike): string {
+  try {
+    return new URL("/start", getConfig(env).t120ApiUrl).toString();
+  } catch {
+    return FALLBACK_START_FUNNEL_URL;
+  }
 }
 
 type EnvLike = Record<string, string | undefined>;

@@ -30,7 +30,7 @@ import { ChevronDown } from "lucide-react";
 import { isLoggedInStage, useGame } from "../state/GameContext";
 import { activeBusiness } from "../state/gameCore";
 import { ideaProgressLabel, ideaSummaryName } from "../state/floorSelectors";
-import { isSignupEnabled } from "../config";
+import { getStartFunnelUrl } from "../config";
 import { useCoverImage } from "../lib/cover";
 import { CoverPortrait } from "./Avatar";
 import { LogoMark } from "./LogoMark";
@@ -323,7 +323,10 @@ function AccountMenu({
   );
 }
 
-export function GlobalNav({ onSwitched }: { onSwitched?: () => void } = {}) {
+export function GlobalNav({
+  onSwitched,
+  suppressStartCta = false,
+}: { onSwitched?: () => void; suppressStartCta?: boolean } = {}) {
   const { stage, dispatch, logout, profile } = useGame();
   const loggedIn = isLoggedInStage(stage);
   const founder = profile.firstName || profile.handle || "Founder";
@@ -400,19 +403,15 @@ export function GlobalNav({ onSwitched }: { onSwitched?: () => void } = {}) {
             >
               Log in
             </button>
-            {stage === "landing" && (
-              <button
-                type="button"
-                onClick={() =>
-                  dispatch({
-                    type: "SET_STAGE",
-                    stage: isSignupEnabled() ? "signup" : "login",
-                  })
-                }
+            {stage === "landing" && !suppressStartCta && (
+              // fpv03 U1 (flow M1): production signup is the120's /start
+              // funnel, so this is a plain link, not a stage dispatch.
+              <a
+                href={getStartFunnelUrl()}
                 className="inline-flex min-h-[44px] items-center whitespace-nowrap rounded-full bg-verified px-3 font-display text-[13px] font-bold text-white shadow-[0_3px_0_hsl(150_52%_26%)] transition-transform hover:-translate-y-0.5 active:translate-y-px active:shadow-[0_1px_0_hsl(150_52%_26%)] sm:px-4 sm:text-sm"
               >
                 Start Building
-              </button>
+              </a>
             )}
           </span>
         ) : null}

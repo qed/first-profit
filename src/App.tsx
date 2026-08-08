@@ -229,7 +229,16 @@ function StageRouter() {
   // docs/superpowers/specs/2026-08-02-global-nav-design.md
   return (
     <>
-      {stage !== "boot" ? <GlobalNav onSwitched={() => setSwitchSignal((n) => n + 1)} /> : null}
+      {stage !== "boot" ? (
+        <GlobalNav
+          onSwitched={() => setSwitchSignal((n) => n + 1)}
+          // While the emailed verify deep link is completing account creation
+          // over the landing stage, the nav must not offer an external-origin
+          // Start Building link: clicking it would navigate away and abandon
+          // the in-flight verify (fpv03 U1 review finding).
+          suppressStartCta={Boolean(verifyToken) && !isLoggedInStage(stage)}
+        />
+      ) : null}
       {content}
     </>
   );

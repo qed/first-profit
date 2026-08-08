@@ -1,6 +1,8 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import {
+  FALLBACK_START_FUNNEL_URL,
   getConfig,
+  getStartFunnelUrl,
   isPublicSiteEnabled,
   isSignupEnabled,
   resetConfigForTesting,
@@ -112,5 +114,43 @@ describe("isPublicSiteEnabled (public-site cutover flag, real-public-site Unit 4
     expect(isPublicSiteEnabled({ VITE_ENABLE_PUBLIC_SITE: "" })).toBe(false);
     // The two flags are independent gates.
     expect(isPublicSiteEnabled({ VITE_ENABLE_SIGNUP: "true" })).toBe(false);
+  });
+});
+
+describe("getStartFunnelUrl (fpv03 U1)", () => {
+  beforeEach(() => {
+    resetConfigForTesting();
+  });
+
+  it("derives /start at the origin root from a bare-origin API URL", () => {
+    expect(getStartFunnelUrl(FULL_ENV)).toBe("https://the120.example/start");
+  });
+
+  it("resolves at the origin root even when the API URL has a trailing slash or a path", () => {
+    expect(
+      getStartFunnelUrl({ ...FULL_ENV, VITE_T120_API_URL: "https://the120.example/" }),
+    ).toBe("https://the120.example/start");
+    // new URL("/start", base) intentionally drops any path segment: the
+    // funnel lives at the ORIGIN, not under an API prefix.
+    expect(
+      getStartFunnelUrl({ ...FULL_ENV, VITE_T120_API_URL: "https://the120.example/api" }),
+    ).toBe("https://the120.example/start");
+  });
+
+  it("keeps a non-standard port", () => {
+    expect(
+      getStartFunnelUrl({ ...FULL_ENV, VITE_T120_API_URL: "http://localhost:3000" }),
+    ).toBe("http://localhost:3000/start");
+  });
+
+  it("NEVER throws: falls back to the canonical funnel on missing or malformed config", () => {
+    // Missing required var: getConfig would throw; the CTA must not.
+    expect(getStartFunnelUrl(withoutVar("VITE_T120_API_URL"))).toBe(
+      FALLBACK_START_FUNNEL_URL,
+    );
+    // Schemeless value: new URL() would throw; the CTA must not.
+    expect(
+      getStartFunnelUrl({ ...FULL_ENV, VITE_T120_API_URL: "the120.example" }),
+    ).toBe(FALLBACK_START_FUNNEL_URL);
   });
 });

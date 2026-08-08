@@ -3,6 +3,9 @@
 First Profit is a game-like business simulator (Vite + React + Tailwind), live at
 https://firstprofit.school. Learners frequently use it on phones.
 
+Run `npm run ship` (tests + build preflight, refuses on red) before considering any
+change deploy-ready; push to main deploys to production and no CI runs tests.
+
 ## Mobile quality is a non-negotiable acceptance criterion
 
 Every UI change MUST look good and work well on mobile before it is considered done.

@@ -1,80 +1,180 @@
 /**
- * A · Landing page (parents, `/`) — recreated from the design handoff §A and the
- * `First Profit Flow.dc.html` prototype, pixel-faithfully.
+ * A · Landing page (parents, `/`) — fpv03 S01 (U1), rebuilt from
+ * artifacts/fpv03/export-package/screenshots/S01-fp-home-top.png and
+ * S01-fp-home-bottom.png.
  *
- * HQ skin: warm paper hsl(40 30% 99%), ink text. Sections: nav, 2-col hero with
- * the rotated AZEAP browser-frame mockup + floating "Payment received" card, the
- * dark Path section (5 phase cards), the "Day one takes ten minutes" 3-step row
- * with the coach/verifier banner, and the parchment CTA band.
+ * HQ skin: warm paper hsl(40 30% 99%), ink text. Sections: 2-col hero with the
+ * rotated AZEAP browser-frame mockup + floating "Payment received" card, then
+ * the "How the game is played" two-column section (YOU DO THIS · build a real
+ * business / THE GAME DOES THIS · your story gets drawn) with the shared
+ * example Carousel (task card ↔ graphic-novel panel), a "Start your story"
+ * CTA, and the footer.
  *
- * CTA cutover (Slice B Unit 10, Plan Revision 11 — "no half-live window"): every
- * "Start Building" CTA routes to `login` by DEFAULT (Slice A behavior). When the
- * `VITE_ENABLE_SIGNUP` flag is on (`isSignupEnabled`, flipped only after the
- * [T120] signup backend is verified live) the same CTAs route to `signup`. The
- * flag defaults OFF so merging/deploying this branch never cuts over on its own;
- * flipping it is the deliberate, reversible go-live step. `signupEnabled` is a
- * prop (defaulting to the resolved flag) purely so the routing is unit-testable.
+ * CTA model (fpv03 U1, flow M1): production parent signup is the120's /start
+ * funnel, so every Start-Building-class CTA is a plain LINK to
+ * `getStartFunnelUrl()` (derived from VITE_T120_API_URL). The old
+ * VITE_ENABLE_SIGNUP stage routing no longer drives the landing CTAs; the
+ * in-repo signup stage remains reachable only via its own flows. `startUrl`
+ * stays a prop so routing is unit-testable without env stubs.
  *
- * Copy rule (global product rule): NO em dashes anywhere. The handoff uses "·"
- * middots and commas/periods; this file matches that exactly.
+ * Copy rule (global product rule): NO em dashes anywhere.
  *
- * Mobile-first (CLAUDE.md, ~390px): base classes are the mobile layout (single
- * column, mockup scales down), desktop is layered on with `sm:`/`lg:`. The root
- * carries `overflow-x-hidden` so the rotated mockup/cards never introduce a
- * horizontal scrollbar. Only the two governing breakpoints (sm 640, lg 1024).
+ * Mobile-first (CLAUDE.md, ~390px): base classes are the mobile layout,
+ * desktop layered on with `sm:`/`lg:`. Root carries `overflow-x-hidden` so the
+ * rotated mockup/cards never introduce a horizontal scrollbar. Only the two
+ * governing breakpoints (sm 640, lg 1024).
  */
 import { useGame } from "../state/GameContext";
-import { isSignupEnabled } from "../config";
+import { getStartFunnelUrl } from "../config";
+import { Carousel } from "../components/Carousel";
+import panelIntro from "../assets/fpv03/panel-intro.jpg";
+import panelCosts from "../assets/fpv03/panel-costs.jpg";
+import panelMarketResearch from "../assets/fpv03/panel-market-research.jpg";
+import panelAiProcess from "../assets/fpv03/panel-ai-process.jpg";
+import panelShowcase from "../assets/fpv03/panel-showcase.jpg";
 
-const PHASES = [
-  { index: 1, name: "Sell", promise: "Learn to confidently sell anything.", color: "hsl(14 78% 54%)" },
-  { index: 2, name: "Build", promise: "Ship a real thing people can buy.", color: "hsl(217 74% 56%)" },
-  { index: 3, name: "Validate", promise: "Prove it works before you scale it.", color: "hsl(265 52% 58%)" },
-  { index: 4, name: "Grow", promise: "Get to your first $1,000 in sales.", color: "hsl(150 52% 42%)" },
-  { index: 5, name: "Scale", promise: "Build the plan to $10,000 in profit.", color: "hsl(41 88% 52%)" },
+/** The five example task-to-panel pairs in the "How the game is played"
+ * carousel. Static marketing content: each pairs a (fictional but true-to-
+ * curriculum) unit-task recap card with the graphic-novel panel the game drew
+ * for it. The showcase example matches the S01 mock verbatim. */
+const EXAMPLES = [
+  {
+    id: "111",
+    kicker: "Meet the founder",
+    title: "The Hero",
+    sections: [
+      {
+        heading: null,
+        body: "I told the game who I am, what I love doing, and the kind of business I want to build.",
+      },
+      {
+        heading: "How it came together",
+        body: "I answered six questions. That was the whole task.",
+      },
+      {
+        heading: "What got drawn",
+        body: "Page one of my own graphic novel, with me as the hero.",
+      },
+    ],
+    tag: "The Visionary CEO, age 9",
+    caption: "Every story starts with a hero. This one is me.",
+    image: panelIntro,
+    alt: "Graphic-novel panel introducing the kid founder as the hero of the story",
+  },
+  {
+    id: "118",
+    kicker: "The market research",
+    title: "Twelve Real Answers",
+    sections: [
+      {
+        heading: null,
+        body: "I asked twelve real people what they actually struggle with, and wrote down their words, not mine.",
+      },
+      {
+        heading: "How it came together",
+        body: "A script, a notebook, and the courage to ask. Three said the same thing, and that became my product.",
+      },
+      {
+        heading: "Questions & Answers",
+        body: "The surprise was how much people want to help a kid with a real question.",
+      },
+    ],
+    tag: "The Investigator, age 11",
+    caption: "Twelve conversations later, I knew what people would pay for.",
+    image: panelMarketResearch,
+    alt: "Graphic-novel panel of the kid interviewing neighbors for market research",
+  },
+  {
+    id: "121",
+    kicker: "The cost sheet",
+    title: "What It Really Costs",
+    sections: [
+      {
+        heading: null,
+        body: "I listed every cost of making one unit, and found my real profit for the first time.",
+      },
+      {
+        heading: "How it came together",
+        body: "Materials, packaging, the card fee. The number at the bottom was smaller than I hoped, so I fixed the price.",
+      },
+      {
+        heading: "Questions & Answers",
+        body: "Profit is what is left AFTER everything. That one line changed my price.",
+      },
+    ],
+    tag: "The Numbers Kid, age 10",
+    caption: "My first cost sheet. Profit is what is left after everything.",
+    image: panelCosts,
+    alt: "Graphic-novel panel of the kid working out product costs at a desk",
+  },
+  {
+    id: "132",
+    kicker: "The AI process",
+    title: "My Robot Assistant",
+    sections: [
+      {
+        heading: null,
+        body: "I taught an AI to do the boring part of my process, and checked its work like a boss would.",
+      },
+      {
+        heading: "How it came together",
+        body: "I wrote the steps down first. If you cannot explain the job, you cannot delegate it.",
+      },
+      {
+        heading: "Questions & Answers",
+        body: "The AI is fast and wrong sometimes. The checking is my job.",
+      },
+    ],
+    tag: "The Systems Builder, age 12",
+    caption: "I delegated the boring part. Checking the work is still mine.",
+    image: panelAiProcess,
+    alt: "Graphic-novel panel of the kid supervising an AI helper on a computer",
+  },
+  {
+    id: "124",
+    kicker: "The showcase pitch",
+    title: "The Event",
+    sections: [
+      {
+        heading: null,
+        body: "In a graduation ceremony with friends, family and future investors, I told the story of my first $10K in profits and future plans to a room full of people.",
+      },
+      {
+        heading: "How it came together",
+        body: "I picked a date. I sent invitations. I arranged the venue (my backyard). I set up AV to have everything recorded.",
+      },
+      {
+        heading: "Questions & Answers",
+        body: "The best part was when people asked questions and I knew my business inside-out.",
+      },
+    ],
+    tag: "The Visionary CEO, age 9",
+    caption: "After my first $10,000 in profit, I organized an event to showcase my progress.",
+    image: panelShowcase,
+    alt: "Graphic-novel panel of the kid presenting to a backyard audience at a podium",
+  },
 ] as const;
 
-const STEPS = [
-  {
-    n: "1",
-    color: "hsl(14 78% 54%)",
-    title: "They claim their page",
-    body: "A live website at firstprofit.school/their-name, saying exactly one true thing. It fills in as the business becomes real.",
-  },
-  {
-    n: "2",
-    color: "hsl(217 74% 56%)",
-    title: "The money booth switches on",
-    body: "Stripe checkout through the First Profit account, so you never wire up a merchant account. Payouts land in your parent-controlled account.",
-  },
-  {
-    n: "3",
-    color: "hsl(150 52% 42%)",
-    title: "One task at a time",
-    body: 'A big green Next Step button walks them through 125 unit tasks. Each ends with a "done when" line you can answer yes or no.',
-  },
-] as const;
-
-/** The green Fraunces CTA with the design system's hard shadow. */
-function StartBuildingButton({
-  onClick,
+/** The green Fraunces CTA with the design system's hard shadow, as a link to
+ * the live enrollment funnel. */
+function StartLink({
+  href,
+  children,
   size = "md",
 }: {
-  onClick: () => void;
+  href: string;
+  children: string;
   size?: "md" | "lg";
 }) {
   const sizing =
-    size === "lg"
-      ? "min-h-[56px] px-8 text-[19px]"
-      : "min-h-[52px] px-6 text-lg";
+    size === "lg" ? "min-h-[56px] px-8 text-[19px]" : "min-h-[52px] px-6 text-lg";
   return (
-    <button
-      type="button"
-      onClick={onClick}
+    <a
+      href={href}
       className={`inline-flex items-center justify-center rounded-2xl bg-verified font-display font-bold text-white shadow-[0_6px_0_hsl(150_52%_26%)] transition-transform hover:-translate-y-0.5 active:translate-y-px active:shadow-[0_3px_0_hsl(150_52%_26%)] ${sizing}`}
     >
-      Start Building →
-    </button>
+      {children}
+    </a>
   );
 }
 
@@ -163,18 +263,58 @@ function AzeapMockup() {
   );
 }
 
-export function Landing({ signupEnabled = isSignupEnabled() }: { signupEnabled?: boolean } = {}) {
-  const { dispatch } = useGame();
-  // The Start Building cutover (Rev 11): flag OFF -> login (Slice A, no half-live
-  // window); flag ON -> signup, flipped only once the [T120] backend is live.
-  const onStartBuilding = () =>
-    dispatch({ type: "SET_STAGE", stage: signupEnabled ? "signup" : "login" });
+/** One example pair: the unit-task recap card beside the panel the game drew.
+ * Stacks vertically on mobile, two columns from lg. */
+function ExampleSlide({ example }: { example: (typeof EXAMPLES)[number] }) {
+  return (
+    <div className="grid grid-cols-1 items-stretch gap-6 lg:grid-cols-[1fr_auto_1.05fr] lg:gap-4">
+      <div className="rounded-2xl border border-[hsl(40_14%_89%)] bg-white p-6 shadow-[0_1px_3px_rgba(30,24,16,0.06)] sm:p-7">
+        <p className="font-mono text-xs uppercase tracking-[0.14em] text-grow">
+          {example.id} · {example.kicker}
+        </p>
+        <h3 className="mt-2 font-display text-xl font-bold">{example.title}</h3>
+        <div className="mt-3 rounded-xl border border-[hsl(40_14%_89%)] bg-[hsl(40_24%_97%)] px-4 py-3.5">
+          {example.sections.map((s, i) => (
+            <div key={i} className={i > 0 ? "mt-3" : undefined}>
+              {s.heading && (
+                <p className="text-[13.5px] font-bold text-ink">{s.heading}</p>
+              )}
+              <p className="mt-0.5 text-sm leading-[1.6] text-[hsl(30_8%_34%)]">{s.body}</p>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <span aria-hidden className="hidden items-center font-mono text-lg text-[hsl(30_6%_52%)] lg:flex">
+        →
+      </span>
+
+      <div className="relative rounded-xl border border-[hsl(40_14%_89%)] bg-[hsl(40_24%_97%)] p-4 pb-3 shadow-[0_1px_3px_rgba(30,24,16,0.06)]">
+        <span className="absolute -top-3 left-4 z-10 -rotate-3 rounded-sm bg-scale px-2.5 py-1 font-hand text-[15px] font-bold text-ink shadow-[0_2px_4px_rgba(30,24,16,0.18)]">
+          {example.tag}
+        </span>
+        <img
+          src={example.image}
+          alt={example.alt}
+          loading="lazy"
+          className="w-full rounded-md border border-[hsl(40_14%_86%)] object-cover"
+        />
+        <p className="mt-2.5 px-1 font-hand text-[17px] leading-[1.35] text-[hsl(30_8%_28%)]">
+          {example.caption}
+        </p>
+      </div>
+    </div>
+  );
+}
+
+export function Landing({ startUrl }: { startUrl?: string } = {}) {
+  // useGame keeps the component inside the provider contract (GlobalNav owns
+  // the Log In routing); the landing itself no longer dispatches stages.
+  useGame();
+  const href = startUrl ?? getStartFunnelUrl();
 
   return (
     <main className="min-h-screen w-full overflow-x-hidden bg-[hsl(40_30%_99%)] text-ink">
-      {/* Nav is global now (GlobalNav in App.tsx); Start Building lives in the
-          hero and the bottom CTA band. */}
-
       {/* Hero */}
       <header className="mx-auto grid max-w-[1120px] grid-cols-1 items-center gap-14 px-5 pb-16 pt-12 sm:px-8 lg:grid-cols-[1.1fr_0.9fr] lg:gap-14 lg:pb-[72px] lg:pt-16">
         <div>
@@ -185,12 +325,12 @@ export function Landing({ signupEnabled = isSignupEnabled() }: { signupEnabled?:
             Your kid's first $1,000, earned for real.
           </h1>
           <p className="mt-5 max-w-[52ch] text-[17px] leading-[1.65] text-[hsl(30_8%_34%)] [text-wrap:pretty]">
-            First Profit turns starting a real, tiny business into a guided game.
-            Real customers, real money changing hands, one fifteen-minute task at
-            a time. You are the coach and the verifier, never the doer.
+            First Profit turns starting a real business into a guided game. Real
+            customers, real money changing hands, one fifteen-minute task at a
+            time. Every completed task builds a panel in a custom graphic novel.
           </p>
           <div className="mt-7 flex gap-3">
-            <StartBuildingButton onClick={onStartBuilding} />
+            <StartLink href={href}>Start Building →</StartLink>
           </div>
           <p className="mt-3.5 font-mono text-[11px] text-[hsl(30_6%_52%)]">
             Free while we test
@@ -199,20 +339,16 @@ export function Landing({ signupEnabled = isSignupEnabled() }: { signupEnabled?:
 
         {/* Hero right: rotated browser-frame mockup + floating payment card. The
             container reserves bottom room (mb) for the -bottom floating card so
-            it never overlaps the dark section below. */}
+            it never overlaps the section below. */}
         <div className="relative mb-16 lg:mb-14">
           <div className="-rotate-[1.5deg] overflow-hidden rounded-2xl border border-[hsl(40_14%_89%)] bg-white shadow-[0_4px_12px_rgba(30,24,16,0.06),0_12px_32px_rgba(30,24,16,0.08)]">
             <div className="flex items-center gap-1.5 border-b border-[hsl(40_14%_89%)] bg-[hsl(40_24%_96%)] px-3 py-2.5">
               <span className="h-[9px] w-[9px] rounded-full bg-sell" />
               <span className="h-[9px] w-[9px] rounded-full bg-scale" />
               <span className="h-[9px] w-[9px] rounded-full bg-grow" />
-              {/* Illustrative mockup URL (Unit 6 truth-alignment): with real
-                  public pages live, a REAL-looking handle here would point
-                  visitors at an actual child's page (or a 404) that cannot
-                  match this fictional mockup — "cedric" in particular is the
-                  live test family's likely handle. "your-name" reads as the
-                  placeholder it is; add it to the120's reserved list so it can
-                  never become someone's real page (Unit 7 checklist item). */}
+              {/* Illustrative mockup URL (Unit 6 truth-alignment): "your-name"
+                  reads as the placeholder it is; it is on the120's reserved
+                  list so it can never become someone's real page. */}
               <span className="ml-2 rounded-md bg-white px-2.5 py-0.5 font-mono text-[11px] text-[hsl(30_6%_52%)]">
                 firstprofit.school/your-name
               </span>
@@ -235,80 +371,49 @@ export function Landing({ signupEnabled = isSignupEnabled() }: { signupEnabled?:
         </div>
       </header>
 
-      {/* Dark Path section */}
-      <section className="bg-ink px-5 py-16 sm:px-8">
+      {/* How the game is played (fpv03 S01 bottom) */}
+      <section className="border-t border-[hsl(40_14%_89%)] bg-[hsl(40_24%_97%)] px-5 py-16 sm:px-8 lg:py-[72px]">
         <div className="mx-auto max-w-[1120px]">
-          <p className="font-mono text-xs uppercase tracking-[0.14em] text-[hsl(41_74%_60%)]">
-            The Path · five phases, 25 criteria, 125 unit tasks
-          </p>
-          <h2 className="mt-2.5 font-display text-[28px] font-bold text-white sm:text-[32px]">
-            Every criterion is a real thing that happened, verified yes or no.
+          <h2 className="text-center font-display text-[32px] font-extrabold tracking-[-0.01em] sm:text-[40px]">
+            How the game is played
           </h2>
-          <div className="mt-9 grid grid-cols-2 gap-3.5 sm:grid-cols-3 lg:grid-cols-5">
-            {PHASES.map((ph) => (
-              <div
-                key={ph.name}
-                className="rounded-[14px] bg-[hsl(30_12%_16%)] px-[18px] py-5"
-                style={{ borderTop: `4px solid ${ph.color}` }}
-              >
-                <p className="font-mono text-xs font-semibold" style={{ color: ph.color }}>
-                  0{ph.index}
-                </p>
-                <p className="mt-1.5 font-display text-xl font-bold text-white">{ph.name}</p>
-                <p className="mt-1.5 text-[13px] leading-[1.5] text-[hsl(30_6%_70%)]">
-                  {ph.promise}
-                </p>
-              </div>
-            ))}
-          </div>
-        </div>
-      </section>
 
-      {/* Day one takes ten minutes */}
-      <section className="mx-auto max-w-[1120px] px-5 py-16 sm:px-8 lg:py-[72px]">
-        <h2 className="font-display text-[28px] font-bold sm:text-[32px]">
-          Day one takes ten minutes.
-        </h2>
-        <div className="mt-8 grid grid-cols-1 gap-5 sm:grid-cols-3">
-          {STEPS.map((s) => (
-            <div
-              key={s.n}
-              className="rounded-2xl border border-[hsl(40_14%_89%)] bg-white p-[26px] shadow-[0_1px_3px_rgba(30,24,16,0.06)]"
-            >
-              <p className="font-mono text-[13px] font-semibold" style={{ color: s.color }}>
-                {s.n}
+          <div className="mx-auto mt-8 grid max-w-[880px] grid-cols-1 gap-6 text-center sm:grid-cols-2 sm:gap-10">
+            <div>
+              <p className="font-mono text-xs uppercase tracking-[0.14em] text-sell">
+                You do this
               </p>
-              <h3 className="mt-2 font-display text-xl font-bold">{s.title}</h3>
-              <p className="mt-2 text-sm leading-[1.6] text-[hsl(30_8%_34%)]">{s.body}</p>
+              <h3 className="mt-1.5 font-display text-xl font-bold">Build a real business</h3>
+              <p className="mx-auto mt-1.5 max-w-[38ch] text-sm leading-[1.6] text-[hsl(30_8%_34%)]">
+                Take steps and complete unit tasks to pitch, sell, build, and
+                grow, one small win at a time.
+              </p>
             </div>
-          ))}
-        </div>
-        <div className="mt-5 flex flex-col gap-4 rounded-2xl border border-[hsl(40_14%_89%)] bg-[hsl(40_24%_96%)] px-6 py-5 sm:flex-row sm:items-center sm:gap-6">
-          <span className="font-display text-lg font-extrabold sm:whitespace-nowrap">
-            Your role: coach and verifier.
-          </span>
-          <p className="text-sm leading-[1.55] text-[hsl(30_8%_34%)]">
-            You keep it safe, hold the evidence standard, and resist fixing things.
-            A parent is present for all in-person selling, controls every account
-            and payment, and signs off anything published. There is no partial credit.
-          </p>
-        </div>
-      </section>
-
-      {/* Parchment CTA band */}
-      <section className="border-t border-[hsl(40_14%_89%)] bg-[hsl(38_46%_95%)]">
-        <div className="mx-auto flex max-w-[1120px] flex-col items-start gap-8 px-5 py-16 sm:px-8 lg:flex-row lg:items-center lg:justify-between">
-          <div>
-            <h2 className="font-display text-[30px] font-extrabold leading-tight text-[hsl(25_34%_20%)] sm:text-4xl">
-              The game is the real business.
-              <br />
-              The app keeps score.
-            </h2>
-            <p className="mt-2.5 text-[15px] text-[hsl(25_20%_38%)]">
-              Set up takes one parent, one kid, and about four minutes.
-            </p>
+            <div>
+              <p className="font-mono text-xs uppercase tracking-[0.14em] text-build">
+                The game does this
+              </p>
+              <h3 className="mt-1.5 font-display text-xl font-bold">Your story gets drawn</h3>
+              <p className="mx-auto mt-1.5 max-w-[38ch] text-sm leading-[1.6] text-[hsl(30_8%_34%)]">
+                You are the hero of your own graphic novel, created panel by
+                panel as your business gets built.
+              </p>
+            </div>
           </div>
-          <StartBuildingButton onClick={onStartBuilding} size="lg" />
+
+          <Carousel
+            ariaLabel="Example tasks and story panels"
+            className="mx-auto mt-10 max-w-[1000px] sm:px-14 lg:px-0"
+            slides={EXAMPLES.map((example) => (
+              <ExampleSlide key={example.id} example={example} />
+            ))}
+          />
+
+          <div className="mt-10 text-center">
+            <StartLink href={href} size="lg">
+              Start your story
+            </StartLink>
+          </div>
         </div>
       </section>
 
