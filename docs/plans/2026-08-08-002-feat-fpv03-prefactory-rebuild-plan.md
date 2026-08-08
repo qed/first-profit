@@ -229,7 +229,8 @@ Serial ladder; each unit = implement → full `ce:review` + `ce:compound` → co
 - Test: gameCore SaveDoc round-trip tests extended
 
 **Approach:**
-- S06 renders inside the existing onboard stage as its new first screen — no stage-machine change yet. `storyIntroSeen` (monotonic) prevents re-showing. Panel art from `src/assets/fpv03/`. Carousel = the U1 shared component.
+- **Reuse U1's landing code (user instruction, 2026-08-08):** S06 is the same "How the game is played" content that already ships on the firstprofit.school home page — reuse the U1 section (the `EXAMPLES` content, `ExampleSlide`, and shared `Carousel` from `src/screens/Landing.tsx`) by extracting it into a shared component both surfaces mount, rather than rebuilding it. S06 differs only in chrome: logged-in header and the "Start your story" CTA continuing the first-run flow instead of linking to the funnel.
+- S06 renders inside the existing onboard stage as its new first screen — no stage-machine change yet. `storyIntroSeen` (monotonic) prevents re-showing. Panel art from `src/assets/fpv03/`.
 - Interim copy softened (user decision): the closing CTA reads "your story starts soon"-style copy while the exit is v2 Onboarding; the mock's "Start your story" copy is restored at U7a when S08 exists.
 - **Stale-tab reload groundwork ships here** (Key Technical Decisions): sync compares a served build id and forces a stale tab to reload before it can rebase — this must land before ANY story field exists in prod saves. Files: `src/lib/sync.ts` + a build-id source (e.g. injected at build time), with tests.
 

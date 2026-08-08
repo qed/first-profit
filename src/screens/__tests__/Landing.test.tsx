@@ -62,7 +62,9 @@ describe("Landing example carousel (fpv03 S01)", () => {
 
     const next = screen.getAllByRole("button", { name: /^Next$/i })[0];
     fireEvent.click(next);
-    expect(screen.getByText(/market research/i)).toBeTruthy();
+    // Story order fixed per founder feedback: slide 2 is the costs example.
+    expect(screen.getByText(/Count every cost/i)).toBeTruthy();
+    expect(screen.getByText(/Accountant, age 9/i)).toBeTruthy();
     expect(screen.queryByText(/Meet the hero/i)).toBeNull();
 
     // Wrap: 4 more nexts land back on slide 1.

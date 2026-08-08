@@ -34,14 +34,16 @@ import panelAiProcess from "../assets/fpv03/panel-ai-process.jpg";
 import panelShowcase from "../assets/fpv03/panel-showcase.jpg";
 
 /** The five example task-to-panel pairs in the "How the game is played"
- * carousel. Static marketing content: each pairs a (fictional but true-to-
- * curriculum) unit-task recap card with the graphic-novel panel the game drew
- * for it. The showcase example matches the S01 mock verbatim. */
+ * carousel. Copy authored by the founder (2026-08-08 live-test feedback):
+ * story order 1..5 (hero, costs, pricing, AI process, showcase), yellow tag
+ * bands alternating left/right corners, captions below each panel. */
 const EXAMPLES = [
   {
-    id: "01",
+    id: "1",
     kicker: "Meet the hero",
     title: "Who are you?",
+    tag: "Founder, age 9",
+    tagSide: "left",
     sections: [
       {
         heading: "Name and basics",
@@ -56,77 +58,87 @@ const EXAMPLES = [
         body: "My first business was selling comic books door to door. I would also love to have a secret undercover job as a geologist.",
       },
     ],
-    tag: "The Visionary CEO, age 9",
-    caption: "Every story starts with a hero. This one is me.",
+    caption: "Version 1 of AZEAP. It was a big piece of paper.",
     image: panelIntro,
     alt: "Graphic-novel panel introducing the kid founder as the hero of the story",
   },
   {
-    id: "118",
-    kicker: "The market research",
-    title: "Twelve Real Answers",
+    id: "16",
+    kicker: "Count every cost",
+    title: "What's the real cost?",
+    tag: "Accountant, age 9",
+    tagSide: "right",
     sections: [
       {
         heading: null,
-        body: "I asked twelve real people what they actually struggle with, and wrote down their words, not mine.",
+        body: "Selling custom collectible cards has these 4 costs per pack, assuming 100 packs of 10 card each sold:",
       },
       {
-        heading: "How it came together",
-        body: "A script, a notebook, and the courage to ask. Three said the same thing, and that became my product.",
+        heading: "Materials:",
+        body: "AI Tokens for card generation: $100\nCost of purchasing & printing 1,000 cards: $500",
       },
       {
-        heading: "Questions & Answers",
-        body: "The surprise was how much people want to help a kid with a real question.",
+        heading: "Packaging:",
+        body: "Cost of purchasing 100 foil packets: $400",
+      },
+      {
+        heading: "Credit Card Fees:",
+        body: "2.9% + $0.30 per transaction = 5% of total revenue at $15 / pack",
       },
     ],
-    tag: "The Investigator, age 11",
-    caption: "Twelve conversations later, I knew what people would pay for.",
-    image: panelMarketResearch,
-    alt: "Graphic-novel panel of the kid interviewing neighbors for market research",
-  },
-  {
-    id: "121",
-    kicker: "The cost sheet",
-    title: "What It Really Costs",
-    sections: [
-      {
-        heading: null,
-        body: "I listed every cost of making one unit, and found my real profit for the first time.",
-      },
-      {
-        heading: "How it came together",
-        body: "Materials, packaging, the card fee. The number at the bottom was smaller than I hoped, so I fixed the price.",
-      },
-      {
-        heading: "Questions & Answers",
-        body: "Profit is what is left AFTER everything. That one line changed my price.",
-      },
-    ],
-    tag: "The Numbers Kid, age 10",
-    caption: "My first cost sheet. Profit is what is left after everything.",
+    caption: "I quickly pivoted to customized collectible cards. With a product in hand, I had to figure out fully loaded costs.",
     image: panelCosts,
     alt: "Graphic-novel panel of the kid working out product costs at a desk",
   },
   {
-    id: "132",
-    kicker: "The AI process",
-    title: "My Robot Assistant",
+    id: "57",
+    kicker: "Figuring out price and customers",
+    title: "Pricing and Customers",
+    tag: "Market Researcher, Age 9",
+    tagSide: "left",
+    sections: [
+      {
+        heading: "Research Questions",
+        body: "I asked 10 potential customers: What price would feel too low? Feel too high? Be a stretch?",
+      },
+      {
+        heading: "Customer Groups",
+        body: "I chose two groups to see which type of customer would be most interested: parents of athletes or team coaches.",
+      },
+      {
+        heading: "Data Analysis",
+        body: "I used AI to sort all the data and then used common sense to pick a price and an ideal customer profile.",
+      },
+    ],
+    caption: "It was really important to figure out what I should charge and who my customers should be.",
+    image: panelMarketResearch,
+    alt: "Graphic-novel panel of the kid interviewing neighbors for market research",
+  },
+  {
+    id: "90",
+    kicker: "Write the AI Process Card",
+    title: "My first AI process",
+    tag: "AI Engineer, age 9",
+    tagSide: "right",
     sections: [
       {
         heading: null,
-        body: "I taught an AI to do the boring part of my process, and checked its work like a boss would.",
+        body: "Collecting and sorting the images and information for each member of the local youth team",
       },
       {
-        heading: "How it came together",
-        body: "I wrote the steps down first. If you cannot explain the job, you cannot delegate it.",
+        heading: "Input:",
+        body: "Text and emails to all parents / members of a group or team",
       },
       {
-        heading: "Questions & Answers",
-        body: "The AI is fast and wrong sometimes. The checking is my job.",
+        heading: "Collection:",
+        body: "AI Algorithm to take unsorted photos and unsorted data to organized, collate and populate a table / database",
+      },
+      {
+        heading: "End results:",
+        body: "Details so anyone can run it. Saves me 2 hours / week.",
       },
     ],
-    tag: "The Systems Builder, age 12",
-    caption: "I delegated the boring part. Checking the work is still mine.",
+    caption: "Collecting visuals and data for the cards needed to be automated for efficiency.",
     image: panelAiProcess,
     alt: "Graphic-novel panel of the kid supervising an AI helper on a computer",
   },
@@ -134,6 +146,8 @@ const EXAMPLES = [
     id: "124",
     kicker: "The showcase pitch",
     title: "The Event",
+    tag: "The Visionary CEO, age 9",
+    tagSide: "left",
     sections: [
       {
         heading: null,
@@ -148,7 +162,6 @@ const EXAMPLES = [
         body: "The best part was when people asked questions and I knew my business inside-out.",
       },
     ],
-    tag: "The Visionary CEO, age 9",
     caption: "After my first $10,000 in profit, I organized an event to showcase my progress.",
     image: panelShowcase,
     alt: "Graphic-novel panel of the kid presenting to a backyard audience at a podium",
@@ -270,7 +283,7 @@ function ExampleSlide({ example }: { example: (typeof EXAMPLES)[number] }) {
     <div className="grid grid-cols-1 items-stretch gap-6 lg:grid-cols-[1fr_auto_1.05fr] lg:gap-4">
       <div className="rounded-2xl border border-[hsl(40_14%_89%)] bg-white p-6 shadow-[0_1px_3px_rgba(30,24,16,0.06)] sm:p-7">
         <p className="font-mono text-xs uppercase tracking-[0.14em] text-grow">
-          {example.id} · {example.kicker}
+          Task {example.id} · {example.kicker}
         </p>
         <h3 className="mt-2 font-display text-xl font-bold">{example.title}</h3>
         <div className="mt-3 rounded-xl border border-[hsl(40_14%_89%)] bg-[hsl(40_24%_97%)] px-4 py-3.5">
@@ -279,7 +292,7 @@ function ExampleSlide({ example }: { example: (typeof EXAMPLES)[number] }) {
               {s.heading && (
                 <p className="text-[13.5px] font-bold text-ink">{s.heading}</p>
               )}
-              <p className="mt-0.5 text-sm leading-[1.6] text-[hsl(30_8%_34%)]">{s.body}</p>
+              <p className="mt-0.5 whitespace-pre-line text-sm leading-[1.6] text-[hsl(30_8%_34%)]">{s.body}</p>
             </div>
           ))}
         </div>
@@ -290,7 +303,13 @@ function ExampleSlide({ example }: { example: (typeof EXAMPLES)[number] }) {
       </span>
 
       <div className="relative rounded-xl border border-[hsl(40_14%_89%)] bg-[hsl(40_24%_97%)] p-4 pb-3 shadow-[0_1px_3px_rgba(30,24,16,0.06)]">
-        <span className="absolute -top-3 left-4 z-10 -rotate-3 rounded-sm bg-scale px-2.5 py-1 font-hand text-[15px] font-bold text-ink shadow-[0_2px_4px_rgba(30,24,16,0.18)]">
+        {/* Yellow band: alternates corners across the five examples
+            (left, right, left, right, left), always bold. */}
+        <span
+          className={`absolute -top-3 z-10 rounded-sm bg-scale px-2.5 py-1 font-hand text-[15px] font-bold text-ink shadow-[0_2px_4px_rgba(30,24,16,0.18)] ${
+            example.tagSide === "right" ? "right-4 rotate-3" : "left-4 -rotate-3"
+          }`}
+        >
           {example.tag}
         </span>
         <img
